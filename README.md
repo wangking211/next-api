@@ -1,0 +1,182 @@
+# AI Gateway（AI API 中转站）
+
+多模型、多服务商 AI API 网关，支持用户注册、自助管理 API Key、BYOK 与平台托管混合渠道、调用用量统计。
+
+## 技术栈
+
+| 层 | 选型 |
+| --- | --- |
+| 后端 | NestJS 10 + Prisma 6 + TypeScript |
+| 前端 | React 18 + Vite + Ant Design + TanStack Query |
+| 数据库 | PostgreSQL 16 |
+| 缓存/限流 | Redis 7 |
+| 包管理 | pnpm workspace (monorepo) |
+
+## 目录结构
+
+```
+AiProject/
+├─ apps/
+│  ├─ api/          NestJS 后端（auth / keys / channels / models / gateway*）
+│  └─ web/          React 控制台
+├─ docker-compose.yml   PG + Redis
+└─ pnpm-workspace.yaml
+```
+
+## 快速开始
+
+```bash
+# 1. 安装依赖
+pnpm install
+
+# 2. 启动数据库（Docker Desktop 需先运行）
+pnpm db:up
+
+# 3. 初始化数据库
+pnpm prisma:migrate
+
+# 3.5 （可选）灌入演示数据：模型/平台渠道/演示用户+余额+Key（幂等，可重复执行）
+pnpm seed
+
+# 4. 启动 API (http://localhost:3000/api) 与 Web (http://localhost:5173)
+pnpm dev
+```
+
+首次启动会自动创建管理员（见 `apps/api/.env`）：
+
+```
+admin / admin123456   (BOOTSTRAP_ADMIN_*)
+```
+
+`pnpm seed` 会额外灌入 **56 个主流模型**（OpenAI `gpt-5.x`/`gpt-6`、Anthropic `claude-opus-5.x`/`sonnet-5`、Gemini `3.x`、DeepSeek / Moonshot / Qwen / 智谱 / xAI / Mistral / Doubao / MiniMax，含占位默认定价，请按上游价目调整）、创建演示账号 `demo / demo123456`、3 个平台渠道（指向 `DEMO_UPSTREAM_URL`，默认 `http://localhost:4001`），并在首次运行时打印一个平台 Key。配合 `node tests/mock-upstream.mjs` 启动 mock 上游即可零依赖验证网关全链路。
+
+清理 e2e 测试残留、保留演示数据：
+
+```bash
+pnpm cleanup --dry-run   # 预览将删除的内容
+pnpm cleanup             # 执行清理
+```
+
+## 当前进度
+
+- [x] **P0** 脚手架：monorepo、docker-compose、NestJS + Prisma + Redis、Vite Web 骨架
+- [x] **P1** 数据模型 + 认证：User / ApiKey / Channel / ModelCatalog / RequestLog / UsageDaily；注册、登录、JWT、角色守卫、管理员自举
+- [x] **P2** Key 与渠道：平台 key 签发（SHA-256 存储，仅展示一次）、BYOK/平台渠道 CRUD（上游 key AES-256-GCM 加密）、模型目录
+- [x] **P3** 网关转发：`/v1/chat/completions` OpenAI 兼容（流式/非流式）、Anthropic 双向协议转换、渠道选择 + 自动故障转移
+- [x] **P4** 计量与限流：token 计费、请求日志、Redis 限流、额度控制、日聚合
+- [x] **P5** 前端控制台：登录注册、总览（用量/图表）、Key/渠道/模型/日志页面
+- [x] **P6** 打磨：Dockerfile（api/web + nginx）、单元测试 + e2e、安全加固、文档
+- [x] **P7** 计费与充值：用户余额、管理员充值/调整、平台渠道按成本扣费、余额不足拦截、账单明细
+- [x] **P8** 兑换码：管理员批量生成/作废、用户自助兑换充值、并发安全防重复兑换
+- [x] **P9** Gemini 适配器：Google AI 原生协议双向转换（含流式与图片），同时支持 `\r\n` SSE 分隔
+- [x] **P10** 渠道异常与操作审计：连续失败阈值自动禁用 + 告警 webhook、全局审计拦截器、管理员审计查询
+
+## API 一览（当前）
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/api/health` | 健康检查（DB/Redis） | 公开 |
+| POST | `/api/auth/register` | 注册 | 公开 |
+| POST | `/api/auth/login` | 登录 | 公开 |
+| GET | `/api/auth/me` | 当前用户 | 登录 |
+| GET/POST | `/api/keys` | 列出/创建平台 key | 登录 |
+| PATCH/DELETE | `/api/keys/:id` | 更新/删除 key | 登录 |
+| GET | `/api/channels` | 渠道列表（分页+过滤：`name/provider/status/ownerType/model`） | 登录（管理员可见全部/按归属过滤） |
+| GET | `/api/channels/available-models` | 当前用户可用模型（按渠道分组） | 登录 |
+| POST | `/api/channels` | 创建渠道 | 登录（PLATFORM 仅管理员） |
+| POST | `/api/channels/:id/test` | 渠道连通性测试（传 `models` 批量，缺省测试该渠道全部模型） | 属主或管理员 |
+| POST | `/api/channels/test-connection` | 测试未保存的渠道配置（新增/编辑弹窗用，支持 `models` 批量） | 登录 |
+| PATCH/DELETE | `/api/channels/:id` | 更新/删除渠道 | 属主或管理员 |
+| GET | `/api/models` | 模型目录 | 登录 |
+| POST/PATCH/DELETE | `/api/models[/:id]` | 模型维护 | 管理员 |
+| GET | `/api/usage/summary` | 用量汇总（`?days=&scope=all`） | 登录 |
+| GET | `/api/usage/daily` | 按天用量 | 登录 |
+| GET | `/api/usage/analytics` | 使用分析（按模型/渠道/用户聚合） | 登录 |
+| GET | `/api/usage/logs` | 调用明细（分页+过滤：`model/status/stream/userId/channelId/q/from/to`） | 登录 |
+| GET | `/api/usage/logs/:id` | 调用详情（含输入/输出内容） | 登录 |
+| GET | `/api/billing/me` | 账户余额 | 登录 |
+| GET | `/api/billing/transactions` | 账单明细（分页） | 登录 |
+| POST | `/api/billing/redeem` | 兑换码充值 | 登录 |
+| GET | `/api/admin/users` | 用户列表（`?q=` 搜索） | 管理员 |
+| POST | `/api/admin/users/:id/recharge` | 充值 | 管理员 |
+| POST | `/api/admin/users/:id/adjust` | 余额调整（可负） | 管理员 |
+| POST | `/api/admin/redeem-codes` | 批量生成兑换码 | 管理员 |
+| GET | `/api/admin/redeem-codes` | 兑换码列表（`?status=&batchId=`） | 管理员 |
+| PATCH | `/api/admin/redeem-codes/:id/disable` | 作废兑换码 | 管理员 |
+| GET | `/api/admin/audit-logs` | 操作审计（`?action=&actorId=`） | 管理员 |
+
+### OpenAI 兼容网关（用平台 key 调用，base_url = `http://host/v1`）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/v1/models` | 列出当前 key 可用模型 |
+| POST | `/v1/chat/completions` | 对话补全（支持 `stream: true`） |
+
+鉴权：`Authorization: Bearer sk-...` 或 `x-api-key: sk-...`。
+
+```bash
+curl http://localhost:3000/v1/chat/completions \
+  -H "Authorization: Bearer sk-你的key" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
+```
+
+**路由规则**：按 `model` 匹配渠道 → 用户自有 BYOK 渠道优先于平台渠道 → 同级按 `priority` 降序、`weight` 加权随机 → 遇 5xx/429 自动故障转移到下一渠道。上游协议适配：**OpenAI 兼容透传**、**Anthropic 双向转换**、**Gemini 原生协议转换**。
+
+## 控制台（Web）
+
+访问 `http://localhost:5173`，功能页面：
+
+- **总览**：近 30 天请求/成功率/Token/费用，每日用量柱状图，**模型/渠道/用户用量排行**，最近调用（管理员可切「查看全部用户」）
+- **API Key**：创建（明文仅展示一次）、额度/RPM 配置、启停、删除
+- **渠道**：BYOK 与平台渠道（管理员）的新增/**编辑**/启停/删除，支持按名称/服务商/模型/状态/归属过滤与分页；连通性测试支持**多模型批量**（并发 3，逐个展示成功/失败、HTTP 状态、延迟、上游错误与原始响应）——列表「测试」测该渠道全部模型，新增/编辑弹窗内「测试连通性」测当前所选模型。创建时默认按所选服务商**预选全部主流模型**，并提供「选本服务商全部 / 选全部推荐 / 清空」快捷操作。模型候选内置 56 个主流模型（含 `gpt-5.5/5.6/6`、`claude-opus-5.5`、`gemini-3` 等新一代，可搜索、也可手动输入任意模型名）
+- **可用模型**：按渠道分组展示当前用户可调用的模型，点击复制模型名（调用时只填模型名，网关自动路由）
+- **模型**：目录与定价（管理员可维护）
+- **调用日志**：分页明细（时间/模型/服务商/Key/渠道/流式、tokens、费用、延迟、状态），支持按模型/状态/类型/用户/关键词/时间范围**筛选**；点「详情」可查看**完整输入（messages）与输出（模型回复）**、错误信息与 token 明细
+- **余额与账单**：账户余额、兑换码充值、充值/消费/调整流水
+- **用户管理**（管理员）：用户列表、充值、余额调整
+- **兑换码**（管理员）：批量生成、复制导出、按状态筛选、作废
+- **操作审计**（管理员）：写操作留痕（操作者、动作、状态、IP），支持过滤
+
+**计费规则**：平台托管渠道按调用成本从用户余额扣费，余额不足时拦截；BYOK（用户自带上游 Key）渠道不扣费，仅记录用量。用户可用兑换码自助充值。
+
+**渠道健康**：连续失败达到 `CHANNEL_FAILURE_THRESHOLD`（默认 5）次的渠道自动禁用（表中标记「自动禁用」），重新启用会清零失败计数；配置 `ALERT_WEBHOOK_URL` 可推送告警。
+
+## 测试
+
+```bash
+# 单元测试（crypto / token 估算 / SSE 用量收集 / Anthropic+Gemini 转换 / 渠道排序 / 计费 / 兑换码）
+pnpm test
+
+# 端到端测试：自动拉起 mock 上游 + API，依次跑全部用例（P1-P4、P7-P10）
+# 需先启动数据库并迁移，且已构建 API
+pnpm --filter @ai-gateway/api build
+pnpm test:e2e
+```
+
+## Docker 部署
+
+```bash
+# 一键构建并启动 postgres + redis + api + web
+pnpm docker:up
+# web 控制台: http://localhost:8080
+# 网关直连:   http://localhost:3000/v1
+```
+
+生产部署时通过环境变量注入安全密钥并开启生产校验：
+
+```bash
+JWT_SECRET=$(openssl rand -base64 48) \
+ENCRYPTION_KEY=$(openssl rand -hex 32) \
+BOOTSTRAP_ADMIN_PASSWORD='强密码' \
+NODE_ENV=production \
+docker compose --profile full up -d --build
+```
+
+## 安全说明
+
+- 平台 key：仅存 SHA-256 哈希，明文只在创建时返回一次。
+- 上游渠道 key：AES-256-GCM 加密存储，`ENCRYPTION_KEY`（32 字节 hex）务必在生产更换并妥善保管。
+- 生产环境请替换 `JWT_SECRET` 与 `BOOTSTRAP_ADMIN_PASSWORD`；当 `NODE_ENV=production` 时启动会强制校验 `JWT_SECRET` / `ENCRYPTION_KEY`，不安全则拒绝启动。
+- 已启用 `helmet` 安全响应头、请求体大小限制（25MB）、按 key 的 RPM 限流。
+- 调用内容（输入/输出）默认记录到 `RequestLog`（`LOG_CONTENT=true`，单条上限 `LOG_CONTENT_MAX=20000` 字符）；如需隐私合规可设 `LOG_CONTENT=false` 仅保留元数据与 token。

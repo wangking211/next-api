@@ -1,0 +1,56 @@
+import { SseUsageCollector } from './sse-usage.collector';
+
+const chunk = (obj: unknown) => `data: ${JSON.stringify(obj)}\n\n`;
+
+describe('SseUsageCollector', () => {
+  it('prefers upstream usage when present', () => {
+    const c = new SseUsageCollector();
+    c.push(chunk({ choices: [{ delta: { content: 'Hello world' } }] }));
+    c.push(
+      chunk({
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+      }),
+    );
+    c.push('data: [DONE]\n\n');
+    expect(c.result(999)).toEqual({
+      promptTokens: 5,
+      completionTokens: 2,
+      totalTokens: 7,
+    });
+  });
+
+  it('falls back to estimation when usage missing', () => {
+    const c = new SseUsageCollector();
+    c.push(chunk({ choices: [{ delta: { content: '12345678' } }] }));
+    c.push(chunk({ choices: [{ delta: { content: '1234' } }] }));
+    c.push('data: [DONE]\n\n');
+    const usage = c.result(3);
+    expect(usage.promptTokens).toBe(3);
+    expect(usage.completionTokens).toBe(3);
+    expect(usage.totalTokens).toBe(6);
+  });
+
+  it('handles chunks split across SSE boundaries', () => {
+    const c = new SseUsageCollector();
+    const full = chunk({ choices: [{ delta: { content: 'Hello' } }] });
+    c.push(full.slice(0, 10));
+    c.push(full.slice(10));
+    expect(c.result(0).completionTokens).toBe(2);
+  });
+
+  it('accumulates output text across chunks', () => {
+    const c = new SseUsageCollector();
+    c.push(chunk({ choices: [{ delta: { content: 'Hello' } }] }));
+    c.push(chunk({ choices: [{ delta: { content: ' world' } }] }));
+    c.push('data: [DONE]\n\n');
+    expect(c.text).toBe('Hello world');
+  });
+
+  it('ignores malformed lines', () => {
+    const c = new SseUsageCollector();
+    c.push('data: {not json}\n\n');
+    c.push('data: [DONE]\n\n');
+    expect(c.result(1)).toEqual({ promptTokens: 1, completionTokens: 0, totalTokens: 1 });
+  });
+});

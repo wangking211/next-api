@@ -1,0 +1,23 @@
+{
+  "name": "ai-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.24.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "dev:api": "pnpm --filter @ai-gateway/api dev",
+    "dev:web": "pnpm --filter @ai-gateway/web dev",
+    "build": "pnpm -r build",
+    "test": "pnpm --filter @ai-gateway/api test",
+    "test:e2e": "node tests/run-e2e.mjs",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "docker:up": "docker compose --profile full up -d --build",
+    "docker:down": "docker compose --profile full down",
+    "prisma:generate": "pnpm --filter @ai-gateway/api prisma:generate",
+    "prisma:migrate": "pnpm --filter @ai-gateway/api prisma:migrate",
+    "prisma:studio": "pnpm --filter @ai-gateway/api prisma:studio",
+    "seed": "pnpm --filter @ai-gateway/api prisma:seed",
+    "cleanup": "pnpm --filter @ai-gateway/api prisma:cleanup"
+  }
+}
