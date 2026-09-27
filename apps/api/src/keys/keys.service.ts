@@ -95,7 +95,32 @@ export class KeysService {
 
   async remove(userId: string, id: string) {
     await this.findOwned(userId, id);
-    await this.prisma.apiKey.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      // 删除 Key 会因其 UsageDaily.apiKeyId 为 SetNull 而置空；
+      // 若同一 (user,date) 已存在 NULL 桶，会触发分部唯一索引冲突。这里先并入 NULL 桶再删除。
+      const rows = await tx.usageDaily.findMany({ where: { apiKeyId: id } });
+      for (const r of rows) {
+        const existing = await tx.usageDaily.findFirst({
+          where: { userId: r.userId, apiKeyId: null, date: r.date },
+        });
+        if (existing && existing.id !== r.id) {
+          await tx.usageDaily.update({
+            where: { id: existing.id },
+            data: {
+              requests: { increment: r.requests },
+              promptTokens: { increment: r.promptTokens },
+              completionTokens: { increment: r.completionTokens },
+              totalTokens: { increment: r.totalTokens },
+              cost: { increment: r.cost },
+            },
+          });
+          await tx.usageDaily.delete({ where: { id: r.id } });
+        } else {
+          await tx.usageDaily.update({ where: { id: r.id }, data: { apiKeyId: null } });
+        }
+      }
+      await tx.apiKey.delete({ where: { id } });
+    });
     return { success: true };
   }
 }
