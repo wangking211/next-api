@@ -24,6 +24,14 @@ import { useAuth } from '../auth/AuthContext';
 import { usePageClamp } from '../hooks/usePageClamp';
 import type { ChannelInfo, ChannelTestResult } from '../api/types';
 
+type PriceRow = {
+  costInput?: number;
+  costOutput?: number;
+  priceInput?: number;
+  priceOutput?: number;
+  discount?: number;
+};
+
 const PROVIDERS = [
   { value: 'openai', label: 'OpenAI', placeholder: 'https://api.openai.com/v1' },
   { value: 'anthropic', label: 'Anthropic', placeholder: 'https://api.anthropic.com/v1' },
@@ -112,6 +120,26 @@ export default function ChannelsPage() {
   } | null>(null);
   const [modalTesting, setModalTesting] = useState(false);
   const [modalTest, setModalTest] = useState<ChannelTestResult | null>(null);
+  const [pricing, setPricing] = useState<Record<string, PriceRow>>({});
+  const selectedModels: string[] = Form.useWatch('models', form) ?? [];
+
+  const setP = (model: string, key: keyof PriceRow, value: number | null) =>
+    setPricing((p) => ({ ...p, [model]: { ...p[model], [key]: value ?? undefined } }));
+
+  const buildModelPrices = (models: string[]) =>
+    models
+      .filter((m) => {
+        const r = pricing[m];
+        return (
+          r &&
+          (r.costInput != null ||
+            r.costOutput != null ||
+            r.priceInput != null ||
+            r.priceOutput != null ||
+            r.discount != null)
+        );
+      })
+      .map((m) => ({ model: m, ...pricing[m] }));
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['channels', filters, page, pageSize],
@@ -171,6 +199,7 @@ export default function ChannelsPage() {
   const openCreate = () => {
     setEditing(null);
     setModalTest(null);
+    setPricing({});
     form.resetFields();
     form.setFieldValue('models', providerModelNames('openai'));
     setModalOpen(true);
@@ -188,6 +217,17 @@ export default function ChannelsPage() {
       weight: r.weight,
       priority: r.priority,
     });
+    const p: Record<string, PriceRow> = {};
+    for (const mp of r.modelPrices ?? []) {
+      p[mp.model] = {
+        costInput: mp.costInput ?? undefined,
+        costOutput: mp.costOutput ?? undefined,
+        priceInput: mp.priceInput ?? undefined,
+        priceOutput: mp.priceOutput ?? undefined,
+        discount: mp.discount ?? undefined,
+      };
+    }
+    setPricing(p);
     setModalOpen(true);
   };
 
@@ -382,6 +422,19 @@ export default function ChannelsPage() {
               ),
           },
           {
+            title: '自定价',
+            render: (_: unknown, r: ChannelInfo) => {
+              const n = (r.modelPrices ?? []).filter(
+                (m) => m.priceInput != null || m.priceOutput != null || m.discount != null,
+              ).length;
+              return n ? (
+                <Tag color="blue">{n} 个模型</Tag>
+              ) : (
+                <Typography.Text type="secondary">默认价</Typography.Text>
+              );
+            },
+          },
+          {
             title: '操作',
             fixed: 'right',
             width: 300,
@@ -445,7 +498,7 @@ export default function ChannelsPage() {
         <Form
           form={form}
           layout="vertical"
-          onFinish={(v) => saveMut.mutate(v)}
+          onFinish={(v) => saveMut.mutate({ ...v, modelPrices: buildModelPrices(v.models ?? []) })}
           requiredMark={false}
           initialValues={{ provider: 'openai', weight: 1, priority: 0, ownerType: 'USER' }}
         >
@@ -520,6 +573,70 @@ export default function ChannelsPage() {
               </Button>
             </Space>
           </div>
+
+          {selectedModels.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                逐模型定价（可选，USD/1M tokens；留空则用模型目录默认价 × 折扣）
+              </Typography.Text>
+              <Table
+                size="small"
+                rowKey="model"
+                pagination={false}
+                scroll={{ y: 220, x: 560 }}
+                style={{ marginTop: 6 }}
+                dataSource={selectedModels.map((m) => ({ model: m }))}
+                columns={[
+                  { title: '模型', dataIndex: 'model', width: 150, ellipsis: true },
+                  {
+                    title: '成本入',
+                    width: 90,
+                    render: (_: unknown, r: { model: string }) => (
+                      <InputNumber size="small" min={0} style={{ width: 84 }}
+                        value={pricing[r.model]?.costInput}
+                        onChange={(v) => setP(r.model, 'costInput', v as number)} />
+                    ),
+                  },
+                  {
+                    title: '成本出',
+                    width: 90,
+                    render: (_: unknown, r: { model: string }) => (
+                      <InputNumber size="small" min={0} style={{ width: 84 }}
+                        value={pricing[r.model]?.costOutput}
+                        onChange={(v) => setP(r.model, 'costOutput', v as number)} />
+                    ),
+                  },
+                  {
+                    title: '售价入',
+                    width: 90,
+                    render: (_: unknown, r: { model: string }) => (
+                      <InputNumber size="small" min={0} style={{ width: 84 }}
+                        value={pricing[r.model]?.priceInput}
+                        onChange={(v) => setP(r.model, 'priceInput', v as number)} />
+                    ),
+                  },
+                  {
+                    title: '售价出',
+                    width: 90,
+                    render: (_: unknown, r: { model: string }) => (
+                      <InputNumber size="small" min={0} style={{ width: 84 }}
+                        value={pricing[r.model]?.priceOutput}
+                        onChange={(v) => setP(r.model, 'priceOutput', v as number)} />
+                    ),
+                  },
+                  {
+                    title: '折扣',
+                    width: 90,
+                    render: (_: unknown, r: { model: string }) => (
+                      <InputNumber size="small" min={0} max={1} step={0.05} style={{ width: 84 }}
+                        value={pricing[r.model]?.discount}
+                        onChange={(v) => setP(r.model, 'discount', v as number)} />
+                    ),
+                  },
+                ]}
+              />
+            </div>
+          )}
           <Space size={16}>
             <Form.Item name="priority" label="优先级（越大越优先）">
               <InputNumber min={0} />

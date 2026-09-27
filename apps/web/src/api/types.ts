@@ -28,6 +28,18 @@ export interface ApiKeyCreated extends ApiKeyInfo {
   warning: string;
 }
 
+export interface ChannelModelPrice {
+  model: string;
+  costInput: number | null;
+  costOutput: number | null;
+  priceInput: number | null;
+  priceOutput: number | null;
+  discount: number | null;
+  enabled: boolean;
+  priority: number | null;
+  weight: number | null;
+}
+
 export interface ChannelInfo {
   id: string;
   ownerType: 'PLATFORM' | 'USER';
@@ -46,6 +58,7 @@ export interface ChannelInfo {
   lastErrorAt: string | null;
   lastErrorMsg: string | null;
   createdAt: string;
+  modelPrices?: ChannelModelPrice[];
 }
 
 export interface ModelInfo {
