@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { queryClient } from './queryClient';
 
 export const TOKEN_KEY = 'aigw_token';
 
@@ -17,6 +18,8 @@ api.interceptors.response.use(
   (error) => {
     if (error?.response?.status === 401) {
       localStorage.removeItem(TOKEN_KEY);
+      // 清空缓存，避免上一个用户的缓存数据泄露到下一次登录
+      queryClient.clear();
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }

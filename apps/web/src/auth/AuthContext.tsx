@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { TOKEN_KEY } from '../api/client';
+import { queryClient } from '../api/queryClient';
 import { authApi } from '../api/endpoints';
 import type { UserInfo } from '../api/types';
 
@@ -36,6 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(setUser)
       .catch(() => {
         localStorage.removeItem(TOKEN_KEY);
+        queryClient.clear();
         setUser(null);
       })
       .finally(() => setLoading(false));
@@ -43,6 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (identifier: string, password: string) => {
     const data = await authApi.login(identifier, password);
+    queryClient.clear();
     localStorage.setItem(TOKEN_KEY, data.accessToken);
     setUser(data.user);
   }, []);
@@ -50,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const register = useCallback(
     async (email: string, username: string, password: string) => {
       const data = await authApi.register(email, username, password);
+      queryClient.clear();
       localStorage.setItem(TOKEN_KEY, data.accessToken);
       setUser(data.user);
     },
@@ -58,6 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
+    queryClient.clear();
     setUser(null);
   }, []);
 

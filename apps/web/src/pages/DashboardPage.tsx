@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Card, Col, Empty, Row, Statistic, Switch, Table, Tag, Typography, Space } from 'antd';
+import { Alert, Button, Card, Col, Empty, Row, Statistic, Switch, Table, Tag, Typography, Space } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { usageApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
@@ -95,7 +95,7 @@ export default function DashboardPage() {
   const [all, setAll] = useState(false);
   const scope = isAdmin && all ? 'all' : undefined;
 
-  const { data: summary } = useQuery({
+  const { data: summary, isError, refetch } = useQuery({
     queryKey: ['usage', 'summary', scope],
     queryFn: () => usageApi.summary(30, scope),
   });
@@ -115,10 +115,23 @@ export default function DashboardPage() {
   const successRate =
     summary && summary.requests > 0
       ? ((summary.successRequests / summary.requests) * 100).toFixed(1)
-      : '0.0';
+      : '—';
 
   return (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
+      {isError && (
+        <Alert
+          type="error"
+          showIcon
+          message="数据加载失败"
+          description="部分统计可能无法显示，请重试。"
+          action={
+            <Button size="small" onClick={() => refetch()}>
+              重试
+            </Button>
+          }
+        />
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography.Title level={4} style={{ margin: 0 }}>
           总览（近 30 天）
