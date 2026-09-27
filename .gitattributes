@@ -1,0 +1,6 @@
+# 在 Windows 上检出时也保持 shell 脚本为 LF，避免部署到 Linux 后
+# 出现 `bad interpreter: /usr/bin/env bash^M`。
+*.sh text eol=lf
+
+# env 文件保持 LF，避免变量值末尾混入 \r
+.env* text eol=lf

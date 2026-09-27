@@ -179,6 +179,27 @@ NODE_ENV=production \
 docker compose --profile full up -d --build
 ```
 
+### 生产服务器部署
+
+生产环境必须**同时加载** `docker-compose.yml` 与 `docker-compose.prod.yml`。只加载前者会使用开发默认值（Postgres/Redis 端口对外暴露、api 使用开发库密码），切勿在生产这样操作。
+
+```bash
+# 1) 准备环境变量（首次）
+cp .env.production.example .env      # 再填入真实密钥
+# 或直接在 .env 中固定 compose 文件组合，之后即可用简写命令：
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml
+
+# 2) 一键部署（拉取代码 → 串行构建 → 重建 → 健康检查）
+./deploy.sh
+
+# 等价的手动命令
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile full up -d --build
+```
+
+`deploy.sh` 会串行构建镜像（`COMPOSE_PARALLEL_LIMIT=1`）以降低小内存服务器 OOM 风险，并在结束时检查容器健康与 `/api/health`。
+
+典型服务器拓扑：容器仅监听回环地址（api `127.0.0.1:3000`、web `127.0.0.1:8081`），由宿主机 nginx 反向代理并终结 TLS（如 `xiaopuyun.com` → `127.0.0.1:8081`，Certbot 管理证书）。
+
 ## 安全说明
 
 - 平台 key：仅存 SHA-256 哈希，明文只在创建时返回一次。
