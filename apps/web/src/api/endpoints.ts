@@ -15,6 +15,8 @@ import {
   LogFilters,
   ModelInfo,
   Paginated,
+  PublicModelsResponse,
+  PublicStats,
   RedeemCode,
   RedeemCodeStatus,
   RequestLogDetail,
@@ -43,6 +45,18 @@ export const authApi = {
   },
   async me() {
     const { data } = await api.get<UserInfo>('/auth/me');
+    return data;
+  },
+};
+
+/** 无需登录的公开数据（落地页） */
+export const publicApi = {
+  async models(signal?: AbortSignal) {
+    const { data } = await api.get<PublicModelsResponse>('/public/models', { signal });
+    return data;
+  },
+  async stats(signal?: AbortSignal) {
+    const { data } = await api.get<PublicStats>('/public/stats', { signal });
     return data;
   },
 };

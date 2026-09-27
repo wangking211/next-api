@@ -3,6 +3,16 @@ import { queryClient } from './queryClient';
 
 export const TOKEN_KEY = 'aigw_token';
 
+/** 无需登录即可访问的公开路由：这些页面遇到 401 只清理本地状态，不跳登录页 */
+const PUBLIC_PATHS = new Set(['/', '/login']);
+
+export function loginPathWithRedirect(pathname: string, search = ''): string {
+  const target = `${pathname}${search}`;
+  // 只接受站内绝对路径，防止开放重定向
+  const safe = target.startsWith('/') && !target.startsWith('//') ? target : '';
+  return safe ? `/login?redirect=${encodeURIComponent(safe)}` : '/login';
+}
+
 export const api = axios.create({ baseURL: '/api' });
 
 api.interceptors.request.use((config) => {
@@ -20,8 +30,9 @@ api.interceptors.response.use(
       localStorage.removeItem(TOKEN_KEY);
       // 清空缓存，避免上一个用户的缓存数据泄露到下一次登录
       queryClient.clear();
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+      const { pathname, search } = window.location;
+      if (!PUBLIC_PATHS.has(pathname)) {
+        window.location.href = loginPathWithRedirect(pathname, search);
       }
     }
     return Promise.reject(error);

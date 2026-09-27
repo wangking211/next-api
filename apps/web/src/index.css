@@ -1,9 +1,938 @@
+/* ============================================================
+   AI Gateway — 全局设计令牌与公开页（Landing / Auth）样式
+   约定：控制台内部页面沿用 antd；带 .lp- / .auth- 前缀的类
+   仅用于未登录的公开页面，不与 antd 产生样式冲突。
+   注意：生产环境 CSP (nginx.conf) 禁止外链图片与外链字体，
+   所有装饰图形必须使用内联 SVG / CSS 渐变。
+   ============================================================ */
+
 * {
   box-sizing: border-box;
 }
 
+:root {
+  /* 颜色 */
+  --bg: #f6f7f9;
+  --bg-elevated: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f4f6f8;
+  --border: #e6e8ec;
+  --border-strong: #d5d9e0;
+  --text: #0d1220;
+  --text-2: #4a5568;
+  --text-3: #8b94a7;
+  --brand: #1677ff;
+  --brand-600: #0958d9;
+  --brand-700: #003eb3;
+  --brand-soft: #e8f1ff;
+  --brand-softer: #f3f8ff;
+  --ok: #16a34a;
+  --warn: #d97706;
+
+  /* 深色面（代码块 / 品牌侧栏 / 页脚） */
+  --ink: #0a0f1c;
+  --ink-2: #111827;
+  --ink-3: #1b2438;
+  --ink-border: rgba(255, 255, 255, 0.1);
+  --ink-text: #e8ecf5;
+  --ink-text-2: #9aa6bd;
+
+  /* 形状与阴影 */
+  --radius-lg: 16px;
+  --radius-md: 10px;
+  --radius-sm: 6px;
+  --shadow-1: 0 1px 2px rgba(13, 18, 32, 0.05);
+  --shadow-2: 0 10px 30px -12px rgba(13, 18, 32, 0.18);
+  --shadow-brand: 0 10px 30px -12px rgba(22, 119, 255, 0.55);
+
+  /* 布局 */
+  --maxw: 1120px;
+  --nav-h: 64px;
+
+  /* 字体 */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+    'Liberation Mono', monospace;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: calc(var(--nav-h) + 16px);
+}
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgba(22, 119, 255, 0.18);
+}
+
+/* ============================================================
+   Landing page
+   ============================================================ */
+
+.lp {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.lp a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.lp-container {
+  width: 100%;
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding-inline: 24px;
+}
+
+/* --- 顶部导航 --- */
+.lp-nav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: var(--nav-h);
+  backdrop-filter: saturate(180%) blur(12px);
+  background: rgba(246, 247, 249, 0.82);
+  border-bottom: 1px solid var(--border);
+}
+
+.lp-nav-inner {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.lp-logo {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 650;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.lp-logo svg {
+  display: block;
+}
+
+.lp-nav-links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.lp-nav-links a {
+  padding: 7px 11px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  color: var(--text-2);
+  transition: background 0.15s, color 0.15s;
+}
+
+.lp-nav-links a:hover {
+  background: rgba(13, 18, 32, 0.05);
+  color: var(--text);
+}
+
+.lp-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* --- Hero --- */
+.lp-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 88px 0 72px;
+  border-bottom: 1px solid var(--border);
+  background:
+    radial-gradient(720px 320px at 12% -10%, rgba(22, 119, 255, 0.16), transparent 62%),
+    radial-gradient(640px 300px at 88% 0%, rgba(99, 102, 241, 0.14), transparent 60%),
+    radial-gradient(900px 420px at 50% 120%, rgba(22, 119, 255, 0.08), transparent 70%),
+    var(--bg);
+}
+
+.lp-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, rgba(13, 18, 32, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(13, 18, 32, 0.045) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 35%, #000 30%, transparent 78%);
+  pointer-events: none;
+}
+
+.lp-hero-inner {
+  position: relative;
+  z-index: 1;
+  max-width: 780px;
+}
+
+.lp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-1);
+  font-size: 13px;
+  color: var(--text-2);
+  margin-bottom: 22px;
+}
+
+.lp-badge b {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.lp-hero h1 {
+  margin: 0 0 18px;
+  font-size: clamp(34px, 5.4vw, 58px);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  font-weight: 680;
+}
+
+.lp-hero h1 em {
+  font-style: normal;
+  background: linear-gradient(96deg, var(--brand) 0%, #6d5cff 55%, #00b8d9 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.lp-hero-sub {
+  margin: 0 0 30px;
+  max-width: 640px;
+  font-size: 17px;
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+.lp-hero-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.lp-hero-note {
+  margin-top: 18px;
+  font-size: 13px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+
+/* --- 数据条 --- */
+.lp-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-top: -36px;
+  position: relative;
+  z-index: 2;
+  box-shadow: var(--shadow-2);
+}
+
+.lp-stat {
+  background: var(--surface);
+  padding: 22px 24px;
+}
+
+.lp-stat-label {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+
+.lp-stat-value {
+  font-size: 26px;
+  font-weight: 660;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.lp-stat-sub {
+  margin-top: 5px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+/* --- 区块通用 --- */
+.lp-section {
+  padding: 76px 0;
+}
+
+.lp-section + .lp-section {
+  border-top: 1px solid var(--border);
+}
+
+.lp-section-head {
+  max-width: 640px;
+  margin-bottom: 40px;
+}
+
+.lp-eyebrow {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--brand);
+  margin-bottom: 12px;
+}
+
+.lp-section-head h2 {
+  margin: 0 0 12px;
+  font-size: clamp(26px, 3.4vw, 36px);
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  font-weight: 650;
+}
+
+.lp-section-head p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+/* --- 特性卡片 --- */
+.lp-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+
+.lp-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s;
+}
+
+.lp-card:hover {
+  border-color: rgba(22, 119, 255, 0.4);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-2px);
+}
+
+.lp-card-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  display: grid;
+  place-items: center;
+  background: var(--brand-soft);
+  color: var(--brand-600);
+  font-size: 18px;
+  margin-bottom: 16px;
+}
+
+.lp-card h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+}
+
+.lp-card p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+/* --- 四步上手 --- */
+.lp-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px;
+  margin-bottom: 28px;
+}
+
+.lp-step {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+}
+
+.lp-step-num {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--text);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 650;
+  margin-bottom: 14px;
+}
+
+.lp-step h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 640;
+}
+
+.lp-step p {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text-2);
+}
+
+.lp-step-meta {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-3);
+  word-break: break-all;
+}
+
+/* --- 代码块 --- */
+.lp-code {
+  background: var(--ink);
+  border: 1px solid var(--ink-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-2);
+}
+
+.lp-code-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--ink-border);
+}
+
+.lp-code-tab {
+  border: 0;
+  background: transparent;
+  color: var(--ink-text-2);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.lp-code-tab:hover {
+  color: var(--ink-text);
+}
+
+.lp-code-tab[data-active='true'] {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.lp-code-copy {
+  margin-left: auto;
+  border: 1px solid var(--ink-border);
+  background: transparent;
+  color: var(--ink-text-2);
+  font-size: 12.5px;
+  padding: 5px 11px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.lp-code-copy:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.lp-code pre {
+  margin: 0;
+  padding: 20px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.7;
+  color: #dbe4f5;
+  tab-size: 2;
+}
+
+.lp-code pre .c {
+  color: #6b7a99;
+}
+.lp-code pre .k {
+  color: #7aa2f7;
+}
+.lp-code pre .s {
+  color: #9ece6a;
+}
+
+/* --- 模型定价 --- */
+.lp-pricing-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.lp-pricing-tools .lp-search {
+  max-width: 300px;
+  width: 100%;
+}
+
+.lp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lp-chip {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-2);
+  border-radius: 999px;
+  padding: 5px 13px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.lp-chip:hover {
+  border-color: var(--brand);
+  color: var(--brand-600);
+}
+
+.lp-chip[data-active='true'] {
+  background: var(--text);
+  border-color: var(--text);
+  color: #fff;
+}
+
+.lp-table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.lp-table-scroll {
+  overflow-x: auto;
+}
+
+.lp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  min-width: 640px;
+}
+
+.lp-table thead th {
+  text-align: left;
+  padding: 12px 18px;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.lp-table thead th.r,
+.lp-table td.r {
+  text-align: right;
+}
+
+.lp-table tbody td {
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+.lp-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.lp-table tbody tr:hover td {
+  background: var(--brand-softer);
+}
+
+.lp-model-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 550;
+}
+
+.lp-model-display {
+  font-size: 12.5px;
+  color: var(--text-3);
+  margin-top: 3px;
+}
+
+.lp-num {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+}
+
+.lp-table-foot {
+  padding: 12px 18px;
+  font-size: 12.5px;
+  color: var(--text-3);
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+}
+
+.lp-empty {
+  padding: 56px 24px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 14px;
+}
+
+/* --- 底部 CTA / 页脚 --- */
+.lp-cta {
+  background:
+    radial-gradient(600px 240px at 20% 0%, rgba(22, 119, 255, 0.35), transparent 65%),
+    radial-gradient(600px 240px at 85% 100%, rgba(109, 92, 255, 0.3), transparent 65%),
+    var(--ink);
+  color: var(--ink-text);
+  border-radius: var(--radius-lg);
+  padding: 56px 40px;
+  text-align: center;
+}
+
+.lp-cta h2 {
+  margin: 0 0 12px;
+  font-size: clamp(24px, 3vw, 34px);
+  letter-spacing: -0.025em;
+}
+
+.lp-cta p {
+  margin: 0 auto 26px;
+  max-width: 520px;
+  color: var(--ink-text-2);
+  font-size: 15.5px;
+  line-height: 1.7;
+}
+
+.lp-footer {
+  border-top: 1px solid var(--border);
+  padding: 34px 0 44px;
+  color: var(--text-3);
+  font-size: 13.5px;
+}
+
+.lp-footer-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lp-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+
+.lp-footer-links a:hover {
+  color: var(--brand-600);
+}
+
+/* ============================================================
+   Auth（登录 / 注册）
+   ============================================================ */
+
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  background: var(--surface);
+}
+
+.auth-brand {
+  position: relative;
+  overflow: hidden;
+  padding: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background:
+    radial-gradient(700px 380px at 10% 8%, rgba(22, 119, 255, 0.4), transparent 62%),
+    radial-gradient(620px 400px at 95% 92%, rgba(109, 92, 255, 0.36), transparent 60%),
+    var(--ink);
+  color: var(--ink-text);
+}
+
+.auth-brand::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 90% 75% at 30% 40%, #000 20%, transparent 75%);
+  pointer-events: none;
+}
+
+.auth-brand > * {
+  position: relative;
+  z-index: 1;
+}
+
+.auth-brand h1 {
+  margin: 0 0 16px;
+  font-size: clamp(28px, 3.2vw, 40px);
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  font-weight: 660;
+  max-width: 15ch;
+}
+
+.auth-brand h1 em {
+  font-style: normal;
+  background: linear-gradient(96deg, #69b1ff, #a78bfa);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.auth-brand > div > p {
+  margin: 0 0 30px;
+  max-width: 46ch;
+  font-size: 15.5px;
+  line-height: 1.75;
+  color: var(--ink-text-2);
+}
+
+.auth-points {
+  display: grid;
+  gap: 14px;
+}
+
+.auth-point {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  font-size: 14.5px;
+  color: var(--ink-text);
+}
+
+.auth-point span {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(105, 177, 255, 0.18);
+  color: #69b1ff;
+}
+
+.auth-point b {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.auth-point small {
+  color: var(--ink-text-2);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.auth-brand-foot {
+  font-size: 13px;
+  color: var(--ink-text-2);
+}
+
+.auth-brand-foot a {
+  color: #69b1ff;
+}
+
+.auth-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 32px;
+  background: var(--surface);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+}
+
+.auth-mobile-brand {
+  display: none;
+}
+
+.auth-head {
+  margin-bottom: 26px;
+}
+
+.auth-head h2 {
+  margin: 0 0 8px;
+  font-size: 26px;
+  letter-spacing: -0.025em;
+  font-weight: 660;
+}
+
+.auth-head p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 14.5px;
+  line-height: 1.65;
+}
+
+.auth-alt {
+  margin-top: 18px;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--text-3);
+}
+
+.auth-alt a {
+  color: var(--brand-600);
+  font-weight: 550;
+}
+
+.auth-foot {
+  margin-top: 34px;
+  font-size: 12.5px;
+  color: var(--text-3);
+  text-align: center;
+  line-height: 1.7;
+}
+
+/* ============================================================
+   工具类
+   ============================================================ */
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ============================================================
+   响应式
+   ============================================================ */
+
+@media (max-width: 1024px) {
+  .lp-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .lp-steps {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 860px) {
+  .lp-nav-links {
+    display: none;
+  }
+  .lp-hero {
+    padding: 60px 0 52px;
+  }
+  .lp-stats {
+    grid-template-columns: repeat(2, 1fr);
+    margin-top: -24px;
+  }
+  .lp-section {
+    padding: 56px 0;
+  }
+  .lp-grid {
+    grid-template-columns: 1fr;
+  }
+  .lp-cta {
+    padding: 40px 24px;
+  }
+
+  .auth-page {
+    grid-template-columns: 1fr;
+  }
+  .auth-brand {
+    display: none;
+  }
+  .auth-mobile-brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-weight: 650;
+    font-size: 16px;
+    margin-bottom: 28px;
+    color: var(--text);
+  }
+  .auth-panel {
+    padding: 36px 20px;
+    align-items: stretch;
+  }
+  .auth-card {
+    max-width: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .lp-stats {
+    grid-template-columns: 1fr;
+  }
+  .lp-steps {
+    grid-template-columns: 1fr;
+  }
+  .lp-stat-value {
+    font-size: 22px;
+  }
 }

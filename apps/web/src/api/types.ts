@@ -76,6 +76,32 @@ export interface ModelInfo {
   createdAt: string;
 }
 
+/** GET /api/public/models —— 落地页定价表（价格单位 $/1M tokens） */
+export interface PublicModel {
+  name: string;
+  displayName: string;
+  provider: string;
+  inputPrice: number;
+  outputPrice: number;
+  cacheReadPrice: number;
+  cacheWritePrice: number;
+}
+
+export interface PublicModelsResponse {
+  items: PublicModel[];
+  providers: string[];
+  count: number;
+}
+
+/** GET /api/public/stats —— 落地页数据条 */
+export interface PublicStats {
+  modelCount: number;
+  providerCount: number;
+  channelCount: number;
+  protocolCount: number;
+  protocols: string[];
+}
+
 export interface UsageSummary {
   rangeDays: number;
   requests: number;

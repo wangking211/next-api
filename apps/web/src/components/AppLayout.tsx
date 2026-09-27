@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Layout, Menu, Tag, Dropdown, Avatar, Typography } from 'antd';
 import {
   DashboardOutlined,
@@ -16,11 +16,29 @@ import {
   BarChartOutlined,
   ApartmentOutlined,
 } from '@ant-design/icons';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import Logo from './Logo';
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
+
+/** 控制台各页的 document.title（SPA 无路由级标题管理，在外壳统一维护） */
+const PAGE_TITLES: Record<string, string> = {
+  '/dashboard': '总览',
+  '/keys': 'API Key',
+  '/channels': '渠道',
+  '/available-models': '可用模型',
+  '/models': '模型定价',
+  '/logs': '调用日志',
+  '/usage-stats': '使用统计',
+  '/billing': '余额与账单',
+  '/agent': '代理中心',
+  '/users': '用户管理',
+  '/redeem-codes': '兑换码',
+  '/audit-logs': '操作审计',
+  '/withdrawals': '提现管理',
+};
 
 export default function AppLayout() {
   const navigate = useNavigate();
@@ -33,6 +51,11 @@ export default function AppLayout() {
     );
     return match ?? '/dashboard';
   }, [location.pathname]);
+
+  useEffect(() => {
+    const title = PAGE_TITLES[selectedKey] ?? '控制台';
+    document.title = `${title} · AI Gateway`;
+  }, [selectedKey]);
 
   const items = [
     { key: '/dashboard', icon: <DashboardOutlined />, label: '总览' },
@@ -65,12 +88,16 @@ export default function AppLayout() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            gap: 8,
             color: '#fff',
             fontWeight: 600,
             fontSize: 16,
           }}
         >
-          AI Gateway
+          <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#fff' }}>
+            <Logo size={22} onDark />
+            <span>AI Gateway</span>
+          </Link>
         </div>
         <Menu
           theme="dark"

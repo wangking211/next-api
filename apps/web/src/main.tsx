@@ -12,7 +12,18 @@ import './index.css';
 loadConfig().finally(() => {
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      <ConfigProvider locale={zhCN}>
+      <ConfigProvider
+        locale={zhCN}
+        theme={{
+          token: {
+            colorPrimary: '#1677ff',
+            colorLink: '#1677ff',
+            borderRadius: 8,
+            fontFamily:
+              "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
+          },
+        }}
+      >
         <AntApp>
           <QueryClientProvider client={queryClient}>
             <BrowserRouter>

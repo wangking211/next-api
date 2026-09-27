@@ -11,6 +11,7 @@ import { KeysModule } from './keys/keys.module';
 import { ChannelsModule } from './channels/channels.module';
 import { ModelsModule } from './models/models.module';
 import { HealthModule } from './health/health.module';
+import { PublicModule } from './public/public.module';
 import { GatewayModule } from './gateway/gateway.module';
 import { UsageModule } from './usage/usage.module';
 import { BillingModule } from './billing/billing.module';
@@ -44,6 +45,7 @@ import { WithdrawalModule } from './billing/withdrawal.module';
     ChannelsModule,
     ModelsModule,
     HealthModule,
+    PublicModule,
     GatewayModule,
     UsageModule,
     BillingModule,
