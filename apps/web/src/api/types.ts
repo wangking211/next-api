@@ -127,8 +127,24 @@ export interface LogFilters {
 
 export interface UsageAnalytics {
   rangeDays: number;
-  totals: { requests: number; errors: number; success: number; tokens: number; cost: number };
-  byModel: { model: string; requests: number; tokens: number; cost: number; errors: number }[];
+  totals: {
+    requests: number;
+    errors: number;
+    success: number;
+    tokens: number;
+    cost: number;
+    upstreamCost: number;
+    margin: number;
+  };
+  byModel: {
+    model: string;
+    requests: number;
+    tokens: number;
+    cost: number;
+    upstreamCost: number;
+    margin: number;
+    errors: number;
+  }[];
   byChannel: {
     channelId: string | null;
     name: string;
@@ -136,8 +152,18 @@ export interface UsageAnalytics {
     requests: number;
     tokens: number;
     cost: number;
+    upstreamCost: number;
+    margin: number;
   }[];
-  byUser: { userId: string; name: string; requests: number; tokens: number; cost: number }[];
+  byUser: {
+    userId: string;
+    name: string;
+    requests: number;
+    tokens: number;
+    cost: number;
+    upstreamCost: number;
+    margin: number;
+  }[];
 }
 
 export interface Paginated<T> {

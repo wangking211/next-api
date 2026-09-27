@@ -168,6 +168,20 @@ export default function DashboardPage() {
             />
           </Card>
         </Col>
+        {isAdmin && (
+          <Col xs={12} md={6}>
+            <Card>
+              <Statistic
+                title="毛利 (USD)"
+                value={Number(analytics?.totals?.margin ?? 0).toFixed(6)}
+                prefix="$"
+                valueStyle={{
+                  color: (analytics?.totals?.margin ?? 0) >= 0 ? '#3f8600' : '#cf1322',
+                }}
+              />
+            </Card>
+          </Col>
+        )}
       </Row>
 
       <Card title="每日 Token 用量">
@@ -182,7 +196,7 @@ export default function DashboardPage() {
               key: m.model,
               label: m.model,
               value: m.tokens,
-              sub: `· $${m.cost.toFixed(4)} · 失败 ${m.errors}`,
+              sub: `· $${m.cost.toFixed(4)}${isAdmin ? ` · 毛利 $${m.margin.toFixed(4)}` : ''} · 失败 ${m.errors}`,
             }))}
           />
         </Col>
@@ -193,7 +207,7 @@ export default function DashboardPage() {
               key: c.channelId ?? c.name,
               label: `${c.name}${c.provider ? ` (${c.provider})` : ''}`,
               value: c.tokens,
-              sub: `· $${c.cost.toFixed(4)}`,
+              sub: `· $${c.cost.toFixed(4)}${isAdmin ? ` · 毛利 $${c.margin.toFixed(4)}` : ''}`,
             }))}
           />
         </Col>

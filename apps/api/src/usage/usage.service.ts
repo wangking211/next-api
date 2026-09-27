@@ -325,7 +325,7 @@ export class UsageService {
         by: ['model'],
         where: base,
         _count: { _all: true },
-        _sum: { totalTokens: true, cost: true },
+        _sum: { totalTokens: true, cost: true, upstreamCost: true },
       }),
       this.prisma.requestLog.groupBy({
         by: ['model'],
@@ -336,7 +336,7 @@ export class UsageService {
         by: ['channelId'],
         where: base,
         _count: { _all: true },
-        _sum: { totalTokens: true, cost: true },
+        _sum: { totalTokens: true, cost: true, upstreamCost: true },
       }),
       userId
         ? Promise.resolve([] as any[])
@@ -344,12 +344,12 @@ export class UsageService {
             by: ['userId'],
             where: base,
             _count: { _all: true },
-            _sum: { totalTokens: true, cost: true },
+            _sum: { totalTokens: true, cost: true, upstreamCost: true },
           }),
       this.prisma.requestLog.aggregate({
         where: base,
         _count: { _all: true },
-        _sum: { totalTokens: true, cost: true },
+        _sum: { totalTokens: true, cost: true, upstreamCost: true },
       }),
       this.prisma.requestLog.count({ where: { ...base, status: { gte: 400 } } }),
     ]);
@@ -374,11 +374,17 @@ export class UsageService {
     const chMap = new Map(channels.map((c) => [c.id, c]));
     const uMap = new Map(users.map((u) => [u.id, u]));
 
-    const mapAgg = (r: any) => ({
-      requests: r._count._all,
-      tokens: r._sum?.totalTokens ?? 0,
-      cost: Number(r._sum?.cost ?? 0),
-    });
+    const mapAgg = (r: any) => {
+      const revenue = Number(r._sum?.cost ?? 0);
+      const upstreamCost = Number(r._sum?.upstreamCost ?? 0);
+      return {
+        requests: r._count._all,
+        tokens: r._sum?.totalTokens ?? 0,
+        cost: revenue,
+        upstreamCost,
+        margin: revenue - upstreamCost,
+      };
+    };
 
     return {
       rangeDays: days,
@@ -388,6 +394,9 @@ export class UsageService {
         success: totals._count._all - totalErr,
         tokens: totals._sum.totalTokens ?? 0,
         cost: Number(totals._sum.cost ?? 0),
+        upstreamCost: Number(totals._sum.upstreamCost ?? 0),
+        margin:
+          Number(totals._sum.cost ?? 0) - Number(totals._sum.upstreamCost ?? 0),
       },
       byModel: byModel
         .map((r) => ({
