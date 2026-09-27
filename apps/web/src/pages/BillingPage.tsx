@@ -17,7 +17,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { billingApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
-import { formatDateTime, formatUsd } from '../utils/format';
+import { formatCredits, formatDateTime, toCredits } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
 import type { BalanceTransaction, BalanceTxType } from '../api/types';
 
@@ -50,7 +50,7 @@ export default function BillingPage() {
   const redeemMut = useMutation({
     mutationFn: billingApi.redeem,
     onSuccess: (res) => {
-      message.success(`兑换成功，入账 ${formatUsd(res.amount)}`);
+      message.success(`兑换成功，入账 ${formatCredits(res.amount)}`);
       setCode('');
       qc.invalidateQueries({ queryKey: ['billing'] });
     },
@@ -62,9 +62,9 @@ export default function BillingPage() {
       <Col span={24}>
         <Card>
           <Statistic
-            title="账户余额 (USD)"
-            value={Number(balance?.balance ?? 0).toFixed(6)}
-            prefix="$"
+            title="账户余额"
+            value={toCredits(balance?.balance).toFixed(2)}
+            suffix="积分"
           />
           <Space.Compact style={{ marginTop: 16, maxWidth: 420 }}>
             <Input
@@ -139,22 +139,22 @@ export default function BillingPage() {
                 ),
               },
               {
-                title: '金额',
+                title: '金额 (积分)',
                 dataIndex: 'amount',
                 render: (v: string) => {
                   const n = Number(v);
                   return (
                     <Typography.Text type={n >= 0 ? 'success' : 'danger'}>
                       {n >= 0 ? '+' : ''}
-                      {n.toFixed(6)}
+                      {toCredits(n).toFixed(2)}
                     </Typography.Text>
                   );
                 },
               },
               {
-                title: '余额快照',
+                title: '余额快照 (积分)',
                 dataIndex: 'balanceAfter',
-                render: (v: string) => formatUsd(v),
+                render: (v: string) => toCredits(v).toFixed(2),
               },
               { title: '说明', dataIndex: 'description', render: (v) => v ?? '-' },
             ]}

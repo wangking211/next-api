@@ -18,7 +18,7 @@ import { SearchOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminApi, usageApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
-import { formatUsd } from '../utils/format';
+import { formatCredits, fromCredits } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
 import type { AdminUser } from '../api/types';
 
@@ -56,10 +56,12 @@ export default function AdminUsersPage() {
   const mutate = useMutation({
     mutationFn: async (values: { amount: number; description?: string }) => {
       if (!target) return;
+      // 输入为积分，转换为内部 USD（1 USD = 100 积分）
+      const usd = fromCredits(values.amount);
       if (mode === 'recharge') {
-        await adminApi.recharge(target.id, values.amount, values.description);
+        await adminApi.recharge(target.id, usd, values.description);
       } else {
-        await adminApi.adjust(target.id, values.amount, values.description);
+        await adminApi.adjust(target.id, usd, values.description);
       }
     },
     onSuccess: () => {
@@ -125,9 +127,9 @@ export default function AdminUsersPage() {
               v === 'ACTIVE' ? <Tag color="green">正常</Tag> : <Tag color="red">封禁</Tag>,
           },
           {
-            title: '余额',
+            title: '余额 (积分)',
             dataIndex: 'balance',
-            render: (v: string) => formatUsd(v),
+            render: (v: string) => formatCredits(v),
           },
           {
             title: 'Key / 渠道',
@@ -165,13 +167,13 @@ export default function AdminUsersPage() {
         <Form form={form} layout="vertical" onFinish={(v) => mutate.mutate(v)} requiredMark={false}>
           <Form.Item
             name="amount"
-            label={mode === 'recharge' ? '充值金额 (USD)' : '调整金额 (USD，可负)'}
+            label={mode === 'recharge' ? '充值积分' : '调整积分（可负）'}
             rules={[{ required: true, message: '请输入金额' }]}
           >
             <InputNumber
-              min={mode === 'recharge' ? 0.000001 : undefined}
-              max={1000000}
-              step={0.1}
+              min={mode === 'recharge' ? 1 : undefined}
+              max={100000000}
+              step={100}
               style={{ width: '100%' }}
             />
           </Form.Item>
@@ -201,12 +203,12 @@ export default function AdminUsersPage() {
               <Statistic title="Token" value={uSummary.totalTokens} />
             </Col>
             <Col span={6}>
-              <Statistic title="费用" value={formatUsd(uSummary.cost)} />
+              <Statistic title="费用" value={formatCredits(uSummary.cost)} />
             </Col>
             <Col span={6}>
               <Statistic
                 title="毛利"
-                value={formatUsd(uAnalytics?.totals?.margin ?? 0)}
+                value={formatCredits(uAnalytics?.totals?.margin ?? 0)}
                 valueStyle={{
                   color: (uAnalytics?.totals?.margin ?? 0) >= 0 ? '#3f8600' : '#cf1322',
                 }}
@@ -228,13 +230,13 @@ export default function AdminUsersPage() {
               title: '费用',
               dataIndex: 'cost',
               width: 130,
-              render: (v: number) => formatUsd(v),
+              render: (v: number) => formatCredits(v),
             },
             {
               title: '毛利',
               dataIndex: 'margin',
               width: 130,
-              render: (v: number) => formatUsd(v),
+              render: (v: number) => formatCredits(v),
             },
           ]}
         />

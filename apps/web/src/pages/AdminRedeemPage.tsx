@@ -18,7 +18,7 @@ import { PlusOutlined, CopyOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { redeemCodesApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
-import { formatDateTime, formatUsd } from '../utils/format';
+import { formatCredits, formatDateTime, fromCredits } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
 import type { RedeemCode, RedeemCodeStatus } from '../api/types';
 
@@ -54,7 +54,7 @@ export default function AdminRedeemPage() {
       expiresAt?: { toISOString: () => string };
     }) =>
       redeemCodesApi.generate({
-        amount: values.amount,
+        amount: fromCredits(values.amount),
         quantity: values.quantity,
         note: values.note,
         expiresAt: values.expiresAt ? values.expiresAt.toISOString() : undefined,
@@ -129,9 +129,9 @@ export default function AdminRedeemPage() {
         columns={[
           { title: '兑换码', dataIndex: 'code', render: (v: string) => <code>{v}</code> },
           {
-            title: '面值',
+            title: '面值 (积分)',
             dataIndex: 'amount',
-            render: (v: string) => formatUsd(v),
+            render: (v: string) => formatCredits(v),
           },
           {
             title: '状态',
@@ -182,8 +182,8 @@ export default function AdminRedeemPage() {
           requiredMark={false}
           initialValues={{ quantity: 10 }}
         >
-          <Form.Item name="amount" label="单个面值 (USD)" rules={[{ required: true, message: '请输入面值' }]}>
-            <InputNumber min={0.000001} step={1} style={{ width: '100%' }} placeholder="例如 10" />
+          <Form.Item name="amount" label="单个面值（积分）" rules={[{ required: true, message: '请输入面值' }]}>
+            <InputNumber min={1} step={100} style={{ width: '100%' }} placeholder="例如 1000" />
           </Form.Item>
           <Form.Item name="quantity" label="数量" rules={[{ required: true }]}>
             <InputNumber min={1} max={1000} style={{ width: '100%' }} />

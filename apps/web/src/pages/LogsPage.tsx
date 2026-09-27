@@ -20,7 +20,7 @@ import { ReloadOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi, usageApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
-import { formatDateTime, formatUsd } from '../utils/format';
+import { formatDateTime, formatCredits } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
 import type { LogFilters, RequestLogRow } from '../api/types';
 
@@ -205,7 +205,7 @@ export default function LogsPage() {
               </Tooltip>
             ),
           },
-          { title: '费用', dataIndex: 'cost', render: (v: string) => formatUsd(v) },
+          { title: '费用', dataIndex: 'cost', render: (v: string) => formatCredits(v) },
           { title: '延迟', dataIndex: 'latencyMs', render: (v: number | null) => (v != null ? `${v}ms` : '-') },
           {
             title: '状态',
@@ -253,7 +253,7 @@ export default function LogsPage() {
               </Descriptions.Item>
               <Descriptions.Item label="总 Tokens">{detail.totalTokens}</Descriptions.Item>
               <Descriptions.Item label="费用">
-                {formatUsd(detail.cost)}
+                {formatCredits(detail.cost)}
               </Descriptions.Item>
               <Descriptions.Item label="延迟">
                 {detail.latencyMs != null ? `${detail.latencyMs}ms` : '-'}

@@ -22,36 +22,44 @@ import { channelsApi, modelsApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { usePageClamp } from '../hooks/usePageClamp';
-import type { ChannelInfo, ChannelTestResult } from '../api/types';
+import { CREDITS_PER_USD } from '../utils/format';
+import type { ChannelInfo, ChannelTestResult, ModelInfo } from '../api/types';
 
 type PriceRow = {
-  costInput?: number;
-  costOutput?: number;
-  priceInput?: number;
-  priceOutput?: number;
-  discount?: number;
+  costDiscount?: number;
+  priceDiscount?: number;
 };
 
 type SetPrice = (model: string, key: keyof PriceRow, value: number | null) => void;
 
-/** 渠道×模型 定价编辑表（成本/售价/折扣） */
+/** 渠道×模型 折扣编辑表；右侧实时显示按官方价折算的成本/售价（积分/1M） */
 function PricingTable({
   models,
   pricing,
   setP,
+  catalog,
 }: {
   models: string[];
   pricing: Record<string, PriceRow>;
   setP: SetPrice;
+  catalog: ModelInfo[];
 }) {
-  const num = (model: string, key: keyof PriceRow, opts: { max?: number; step?: number } = {}) => (
+  const official = (name: string) => {
+    const m = catalog.find((c) => c.name === name);
+    return m ? { in: Number(m.inputPrice), out: Number(m.outputPrice) } : { in: 0, out: 0 };
+  };
+  const disc = (model: string, key: keyof PriceRow) => pricing[model]?.[key] ?? 1;
+  const credits = (usdPerM: number, d: number) =>
+    (usdPerM * d * CREDITS_PER_USD).toFixed(2);
+  const num = (model: string, key: keyof PriceRow) => (
     <InputNumber
       size="small"
       min={0}
-      max={opts.max}
-      step={opts.step}
+      max={1}
+      step={0.05}
       style={{ width: 84 }}
       value={pricing[model]?.[key]}
+      placeholder="1"
       onChange={(v) => setP(model, key, v as number)}
     />
   );
@@ -64,12 +72,27 @@ function PricingTable({
       style={{ marginTop: 6 }}
       dataSource={models.map((m) => ({ model: m }))}
       columns={[
-        { title: '模型', dataIndex: 'model', width: 170, ellipsis: true },
-        { title: '成本入', width: 94, render: (_: unknown, r: { model: string }) => num(r.model, 'costInput') },
-        { title: '成本出', width: 94, render: (_: unknown, r: { model: string }) => num(r.model, 'costOutput') },
-        { title: '售价入', width: 94, render: (_: unknown, r: { model: string }) => num(r.model, 'priceInput') },
-        { title: '售价出', width: 94, render: (_: unknown, r: { model: string }) => num(r.model, 'priceOutput') },
-        { title: '折扣', width: 94, render: (_: unknown, r: { model: string }) => num(r.model, 'discount', { max: 1, step: 0.05 }) },
+        { title: '模型', dataIndex: 'model', width: 150, ellipsis: true },
+        { title: '上游折扣', width: 100, render: (_: unknown, r: { model: string }) => num(r.model, 'costDiscount') },
+        { title: '下游折扣', width: 100, render: (_: unknown, r: { model: string }) => num(r.model, 'priceDiscount') },
+        {
+          title: '成本(积分/1M)',
+          width: 150,
+          render: (_: unknown, r: { model: string }) => {
+            const o = official(r.model);
+            const d = disc(r.model, 'costDiscount');
+            return <Typography.Text type="secondary">{credits(o.in, d)} / {credits(o.out, d)}</Typography.Text>;
+          },
+        },
+        {
+          title: '售价(积分/1M)',
+          width: 150,
+          render: (_: unknown, r: { model: string }) => {
+            const o = official(r.model);
+            const d = disc(r.model, 'priceDiscount');
+            return <Typography.Text strong>{credits(o.in, d)} / {credits(o.out, d)}</Typography.Text>;
+          },
+        },
       ]}
     />
   );
@@ -174,11 +197,8 @@ export default function ChannelsPage() {
     models.map((m) => {
       const r = pricing[m] ?? {};
       const entry: Record<string, unknown> = { model: m };
-      if (r.costInput != null) entry.costInput = r.costInput;
-      if (r.costOutput != null) entry.costOutput = r.costOutput;
-      if (r.priceInput != null) entry.priceInput = r.priceInput;
-      if (r.priceOutput != null) entry.priceOutput = r.priceOutput;
-      if (r.discount != null) entry.discount = r.discount;
+      if (r.costDiscount != null) entry.costDiscount = r.costDiscount;
+      if (r.priceDiscount != null) entry.priceDiscount = r.priceDiscount;
       return entry;
     });
 
@@ -261,11 +281,8 @@ export default function ChannelsPage() {
     const p: Record<string, PriceRow> = {};
     for (const mp of r.modelPrices ?? []) {
       p[mp.model] = {
-        costInput: mp.costInput ?? undefined,
-        costOutput: mp.costOutput ?? undefined,
-        priceInput: mp.priceInput ?? undefined,
-        priceOutput: mp.priceOutput ?? undefined,
-        discount: mp.discount ?? undefined,
+        costDiscount: mp.costDiscount ?? undefined,
+        priceDiscount: mp.priceDiscount ?? mp.discount ?? undefined,
       };
     }
     setPricing(p);
@@ -325,11 +342,8 @@ export default function ChannelsPage() {
     const p: Record<string, PriceRow> = {};
     for (const mp of r.modelPrices ?? []) {
       p[mp.model] = {
-        costInput: mp.costInput ?? undefined,
-        costOutput: mp.costOutput ?? undefined,
-        priceInput: mp.priceInput ?? undefined,
-        priceOutput: mp.priceOutput ?? undefined,
-        discount: mp.discount ?? undefined,
+        costDiscount: mp.costDiscount ?? undefined,
+        priceDiscount: mp.priceDiscount ?? mp.discount ?? undefined,
       };
     }
     setPricing(p);
@@ -660,7 +674,7 @@ export default function ChannelsPage() {
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 逐模型定价（可选，USD/1M tokens；留空则用模型目录默认价 × 折扣）
               </Typography.Text>
-              <PricingTable models={selectedModels} pricing={pricing} setP={setP} />
+              <PricingTable models={selectedModels} pricing={pricing} setP={setP} catalog={catalog} />
             </div>
           )}
           <Space size={16}>
@@ -717,7 +731,7 @@ export default function ChannelsPage() {
           折扣。清空某项将恢复为默认。
         </Typography.Paragraph>
         {priceChannel && (
-          <PricingTable models={priceChannel.models} pricing={pricing} setP={setP} />
+          <PricingTable models={priceChannel.models} pricing={pricing} setP={setP} catalog={catalog} />
         )}
       </Modal>
     </Card>

@@ -181,8 +181,12 @@ model ChannelModel {
   /// 对用户售价 USD/1M tokens；为空时用 ModelCatalog 默认价 × discount
   priceInput  Decimal? @db.Decimal(18, 6)
   priceOutput Decimal? @db.Decimal(18, 6)
-  /// 折扣系数（0.8 = 八折），作用于默认价；显式 price 存在时忽略
-  discount    Decimal? @db.Decimal(6, 4)
+  /// 折扣系数（0.8 = 八折），作用于官方价；显式 price 存在时忽略
+  discount      Decimal? @db.Decimal(6, 4)
+  /// 上游成本折扣率（0.3 = 成本为官方价的 30%）
+  costDiscount  Decimal? @db.Decimal(6, 4)
+  /// 下游售价折扣率（0.5 = 售价为官方价的 50%）
+  priceDiscount Decimal? @db.Decimal(6, 4)
   enabled     Boolean  @default(true)
   /// 覆盖渠道优先级/权重（可选）
   priority    Int?

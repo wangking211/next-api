@@ -39,11 +39,23 @@ export class ChannelModelPriceDto {
   @Min(0)
   priceOutput?: number;
 
-  /** 折扣系数 0-1，例如 0.8 表示八折 */
+  /** 折扣系数 0-1，例如 0.8 表示八折（旧字段，等同 priceDiscount） */
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 4 })
   @Min(0)
   discount?: number;
+
+  /** 上游成本折扣率（0.3 = 成本为官方价的 30%） */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  costDiscount?: number;
+
+  /** 下游售价折扣率（0.5 = 售价为官方价的 50%） */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  priceDiscount?: number;
 
   @IsOptional()
   @IsBoolean()

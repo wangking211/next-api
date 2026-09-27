@@ -3,6 +3,7 @@ import { Alert, Button, Card, Col, Empty, Row, Statistic, Switch, Table, Tag, Ty
 import { useQuery } from '@tanstack/react-query';
 import { usageApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
+import { toCredits } from '../utils/format';
 import type { UsageDailyRow, RequestLogRow } from '../api/types';
 
 const { Text } = Typography;
@@ -17,7 +18,7 @@ function DailyBars({ rows }: { rows: UsageDailyRow[] }) {
         return (
           <div
             key={r.date}
-            title={`${r.date}\nTokens: ${r.totalTokens}\n请求: ${r.requests}\n费用: $${r.cost}`}
+            title={`${r.date}\nTokens: ${r.totalTokens}\n请求: ${r.requests}\n费用: ${toCredits(r.cost).toFixed(2)} 积分`}
             style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}
           >
             <div
@@ -162,9 +163,9 @@ export default function DashboardPage() {
         <Col xs={12} md={6}>
           <Card>
             <Statistic
-              title="费用 (USD)"
-              value={Number(summary?.cost ?? 0).toFixed(6)}
-              prefix="$"
+              title="费用"
+              value={toCredits(summary?.cost).toFixed(2)}
+              suffix="积分"
             />
           </Card>
         </Col>
@@ -172,9 +173,9 @@ export default function DashboardPage() {
           <Col xs={12} md={6}>
             <Card>
               <Statistic
-                title="毛利 (USD)"
-                value={Number(analytics?.totals?.margin ?? 0).toFixed(6)}
-                prefix="$"
+                title="毛利"
+                value={toCredits(analytics?.totals?.margin).toFixed(2)}
+                suffix="积分"
                 valueStyle={{
                   color: (analytics?.totals?.margin ?? 0) >= 0 ? '#3f8600' : '#cf1322',
                 }}
@@ -196,7 +197,7 @@ export default function DashboardPage() {
               key: m.model,
               label: m.model,
               value: m.tokens,
-              sub: `· $${m.cost.toFixed(4)}${isAdmin ? ` · 毛利 $${m.margin.toFixed(4)}` : ''} · 失败 ${m.errors}`,
+              sub: `· ${toCredits(m.cost).toFixed(2)} 积分${isAdmin ? ` · 毛利 ${toCredits(m.margin).toFixed(2)}` : ''} · 失败 ${m.errors}`,
             }))}
           />
         </Col>
@@ -207,7 +208,7 @@ export default function DashboardPage() {
               key: c.channelId ?? c.name,
               label: `${c.name}${c.provider ? ` (${c.provider})` : ''}`,
               value: c.tokens,
-              sub: `· $${c.cost.toFixed(4)}${isAdmin ? ` · 毛利 $${c.margin.toFixed(4)}` : ''}`,
+              sub: `· ${toCredits(c.cost).toFixed(2)} 积分${isAdmin ? ` · 毛利 ${toCredits(c.margin).toFixed(2)}` : ''}`,
             }))}
           />
         </Col>
@@ -219,7 +220,7 @@ export default function DashboardPage() {
                 key: u.userId,
                 label: u.name,
                 value: u.tokens,
-                sub: `· $${u.cost.toFixed(4)}${isAdmin ? ` · 毛利 $${u.margin.toFixed(4)}` : ''}`,
+                sub: `· ${toCredits(u.cost).toFixed(2)} 积分${isAdmin ? ` · 毛利 ${toCredits(u.margin).toFixed(2)}` : ''}`,
               }))}
             />
           </Col>

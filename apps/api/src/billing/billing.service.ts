@@ -33,8 +33,8 @@ export class BillingService {
   }
 
   /**
-   * 计算某模型在指定渠道的售价与成本。
-   * 优先级：ChannelModel 显式 price > ModelCatalog 默认价 × discount。
+   * 计算某模型在指定渠道的售价与成本（USD/1M tokens）。
+   * 成本 = 官方价 × costDiscount；售价 = 官方价 × priceDiscount；绝对字段存在时优先。
    */
   async getChannelPricing(
     channelId: string | null,
@@ -52,6 +52,8 @@ export class BillingService {
               costInput: true,
               costOutput: true,
               discount: true,
+              costDiscount: true,
+              priceDiscount: true,
             },
           })
         : Promise.resolve(null),
@@ -61,18 +63,39 @@ export class BillingService {
       }),
     ]);
 
-    const discount = cm?.discount != null ? Number(cm.discount) : 1;
-    const catalogIn = catalog ? Number(catalog.inputPrice) : 0;
-    const catalogOut = catalog ? Number(catalog.outputPrice) : 0;
-    const explicitIn = cm?.priceInput != null ? Number(cm.priceInput) : null;
-    const explicitOut = cm?.priceOutput != null ? Number(cm.priceOutput) : null;
+    const officialIn = catalog ? Number(catalog.inputPrice) : 0;
+    const officialOut = catalog ? Number(catalog.outputPrice) : 0;
+    // 兼容旧 discount：仅作为下游售价折扣
+    const priceDisc =
+      cm?.priceDiscount != null
+        ? Number(cm.priceDiscount)
+        : cm?.discount != null
+          ? Number(cm.discount)
+          : 1;
+    const costDisc = cm?.costDiscount != null ? Number(cm.costDiscount) : 1;
+
+    const priceInput =
+      cm?.priceInput != null ? Number(cm.priceInput) : officialIn * priceDisc;
+    const priceOutput =
+      cm?.priceOutput != null ? Number(cm.priceOutput) : officialOut * priceDisc;
+    const costInput =
+      cm?.costInput != null ? Number(cm.costInput) : officialIn * costDisc;
+    const costOutput =
+      cm?.costOutput != null ? Number(cm.costOutput) : officialOut * costDisc;
 
     return {
-      priceInput: explicitIn ?? catalogIn * discount,
-      priceOutput: explicitOut ?? catalogOut * discount,
-      costInput: cm?.costInput != null ? Number(cm.costInput) : 0,
-      costOutput: cm?.costOutput != null ? Number(cm.costOutput) : 0,
-      explicit: explicitIn != null || explicitOut != null || cm?.discount != null,
+      priceInput,
+      priceOutput,
+      costInput,
+      costOutput,
+      explicit:
+        cm?.priceInput != null ||
+        cm?.priceOutput != null ||
+        cm?.costInput != null ||
+        cm?.costOutput != null ||
+        cm?.costDiscount != null ||
+        cm?.priceDiscount != null ||
+        cm?.discount != null,
     };
   }
 

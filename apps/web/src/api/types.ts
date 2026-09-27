@@ -35,6 +35,8 @@ export interface ChannelModelPrice {
   priceInput: number | null;
   priceOutput: number | null;
   discount: number | null;
+  costDiscount: number | null;
+  priceDiscount: number | null;
   enabled: boolean;
   priority: number | null;
   weight: number | null;

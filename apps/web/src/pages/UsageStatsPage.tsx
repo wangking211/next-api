@@ -14,7 +14,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { usageApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
-import { formatUsd } from '../utils/format';
+import { formatCredits } from '../utils/format';
 import type { UsageAnalytics } from '../api/types';
 
 type KeyRow = UsageAnalytics['byApiKey'][number];
@@ -25,7 +25,7 @@ const costCol = (title: string, dataIndex: string, width = 120) => ({
   title,
   dataIndex,
   width,
-  render: (v: number) => formatUsd(v),
+  render: (v: number) => formatCredits(v),
 });
 
 export default function UsageStatsPage() {
@@ -84,17 +84,17 @@ export default function UsageStatsPage() {
             <Statistic title="Token" value={t?.tokens ?? 0} />
           </Col>
           <Col xs={12} md={4}>
-            <Statistic title="费用" value={formatUsd(t?.cost ?? 0)} />
+            <Statistic title="费用" value={formatCredits(t?.cost ?? 0)} />
           </Col>
           {isAdmin && (
             <>
               <Col xs={12} md={4}>
-                <Statistic title="成本" value={formatUsd(t?.upstreamCost ?? 0)} />
+                <Statistic title="成本" value={formatCredits(t?.upstreamCost ?? 0)} />
               </Col>
               <Col xs={12} md={4}>
                 <Statistic
                   title="毛利"
-                  value={formatUsd(t?.margin ?? 0)}
+                  value={formatCredits(t?.margin ?? 0)}
                   valueStyle={{ color: (t?.margin ?? 0) >= 0 ? '#3f8600' : '#cf1322' }}
                 />
               </Col>
