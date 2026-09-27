@@ -13,6 +13,9 @@ export default function LoginPage() {
   const { message } = App.useApp();
   const [loginLoading, setLoginLoading] = useState(false);
   const [registerLoading, setRegisterLoading] = useState(false);
+  const [activeKey, setActiveKey] = useState('login');
+  const [loginForm] = Form.useForm();
+  const [registerForm] = Form.useForm();
 
   const handleLogin = async (values: { identifier: string; password: string }) => {
     setLoginLoading(true);
@@ -20,7 +23,12 @@ export default function LoginPage() {
       await login(values.identifier, values.password);
       navigate('/dashboard');
     } catch (e) {
-      message.error(errorMessage(e));
+      const status = (e as any)?.response?.status;
+      if (status === 429) {
+        message.warning('登录失败次数过多，请稍后再试');
+      } else {
+        message.error(errorMessage(e));
+      }
     } finally {
       setLoginLoading(false);
     }
@@ -37,7 +45,14 @@ export default function LoginPage() {
       message.success('注册成功');
       navigate('/dashboard');
     } catch (e) {
-      message.error(errorMessage(e));
+      const status = (e as any)?.response?.status;
+      if (status === 409) {
+        message.warning('该邮箱或用户名已被注册，请直接登录');
+        loginForm.setFieldValue('identifier', values.email || values.username);
+        setActiveKey('login');
+      } else {
+        message.error(errorMessage(e));
+      }
     } finally {
       setRegisterLoading(false);
     }
@@ -62,12 +77,14 @@ export default function LoginPage() {
         </Paragraph>
         <Tabs
           centered
+          activeKey={activeKey}
+          onChange={setActiveKey}
           items={[
             {
               key: 'login',
               label: '登录',
               children: (
-                <Form layout="vertical" onFinish={handleLogin} requiredMark={false}>
+                <Form form={loginForm} layout="vertical" onFinish={handleLogin} requiredMark={false}>
                   <Form.Item
                     name="identifier"
                     label="邮箱或用户名"
@@ -92,7 +109,7 @@ export default function LoginPage() {
               key: 'register',
               label: '注册',
               children: (
-                <Form layout="vertical" onFinish={handleRegister} requiredMark={false}>
+                <Form form={registerForm} layout="vertical" onFinish={handleRegister} requiredMark={false}>
                   <Form.Item
                     name="email"
                     label="邮箱"
