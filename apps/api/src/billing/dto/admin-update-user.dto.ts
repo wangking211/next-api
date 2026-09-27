@@ -17,4 +17,11 @@ export class AdminUpdateUserDto {
   @IsOptional()
   @IsString()
   agentId?: string | null;
+
+  /** 代理返点比例（0-1）：其名下用户消耗的积分按此比例返给该代理 */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  @Max(1)
+  rebateRate?: number | null;
 }

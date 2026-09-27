@@ -187,7 +187,7 @@ export interface Paginated<T> {
   pageSize: number;
 }
 
-export type BalanceTxType = 'RECHARGE' | 'CONSUME' | 'ADJUST';
+export type BalanceTxType = 'RECHARGE' | 'CONSUME' | 'ADJUST' | 'COMMISSION';
 
 export interface BalanceTransaction {
   id: string;
@@ -209,6 +209,7 @@ export interface AdminUser {
   status: 'ACTIVE' | 'BANNED';
   balance: string;
   priceMultiplier: string | null;
+  rebateRate: string | null;
   agentId: string | null;
   agent: { id: string; username: string; priceMultiplier: string | null } | null;
   createdAt: string;

@@ -135,13 +135,19 @@ export class UsageService {
         }
 
         if (entry.chargeable && cost > 0) {
-          await this.billing.recordConsumption(
+          const commission = await this.billing.recordConsumption(
             tx,
             entry.userId,
             cost,
             log.id,
             `调用 ${entry.model}`,
           );
+          if (commission > 0) {
+            await tx.requestLog.update({
+              where: { id: log.id },
+              data: { commission },
+            });
+          }
         }
       });
     } catch (e) {

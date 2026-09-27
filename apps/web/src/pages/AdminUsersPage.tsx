@@ -55,12 +55,14 @@ export default function AdminUsersPage() {
       role?: string;
       priceMultiplier?: number | null;
       agentId?: string | null;
+      rebateRate?: number | null;
     }) => {
       if (!editUser) return;
       await adminApi.updateUser(editUser.id, {
         role: values.role,
         priceMultiplier: values.priceMultiplier ?? null,
         agentId: values.agentId ?? null,
+        rebateRate: values.rebateRate ?? null,
       });
     },
     onSuccess: () => {
@@ -77,6 +79,7 @@ export default function AdminUsersPage() {
     editForm.setFieldsValue({
       role: u.role,
       priceMultiplier: u.priceMultiplier != null ? Number(u.priceMultiplier) : undefined,
+      rebateRate: u.rebateRate != null ? Number(u.rebateRate) : undefined,
       agentId: u.agentId ?? undefined,
     });
   };
@@ -184,6 +187,11 @@ export default function AdminUsersPage() {
                 return `×${Number(r.agent.priceMultiplier)}（代理）`;
               return '×1';
             },
+          },
+          {
+            title: '返点',
+            render: (_, r) =>
+              r.rebateRate != null ? `${(Number(r.rebateRate) * 100).toFixed(0)}%` : '-',
           },
           {
             title: '代理',
@@ -353,6 +361,19 @@ export default function AdminUsersPage() {
               step={0.05}
               style={{ width: '100%' }}
               placeholder="留空=继承代理（默认 1）"
+            />
+          </Form.Item>
+          <Form.Item
+            name="rebateRate"
+            label="代理返点比例（0-1）"
+            extra="名下用户消耗的积分按此比例返给该代理（如 0.1 = 10%）"
+          >
+            <InputNumber
+              min={0}
+              max={1}
+              step={0.05}
+              style={{ width: '100%' }}
+              placeholder="例如 0.1"
             />
           </Form.Item>
         </Form>

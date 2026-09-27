@@ -191,21 +191,21 @@ export class BillingService {
     return this.applyChange(operatorId, userId, amount, BalanceTxType.ADJUST, description);
   }
 
-  /** 在既有事务内扣除调用消费，保持与用量记录原子。 */
+  /** 在既有事务内扣除调用消费，并给各级代理发放返点；返回返点合计。 */
   async recordConsumption(
     tx: Prisma.TransactionClient,
     userId: string,
     amount: number,
     requestLogId: string,
     description?: string,
-  ): Promise<void> {
+  ): Promise<number> {
     const cost = round6(amount);
-    if (cost <= 0) return;
+    if (cost <= 0) return 0;
     const exists = await tx.user.findUnique({
       where: { id: userId },
-      select: { id: true },
+      select: { id: true, username: true },
     });
-    if (!exists) return;
+    if (!exists) return 0;
     // 原子自减，避免并发下读-改-写丢更新
     const updated = await tx.user.update({
       where: { id: userId },
@@ -223,6 +223,58 @@ export class BillingService {
         description: description ?? null,
       },
     });
+    return this.payCommissions(tx, userId, exists.username, cost, requestLogId);
+  }
+
+  /** 沿 agent 链向上给各级代理按 rebateRate 发放返点，返回合计（USD）。 */
+  private async payCommissions(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    sourceName: string,
+    cost: number,
+    requestLogId: string,
+  ): Promise<number> {
+    let total = 0;
+    let currentId = userId;
+    const seen = new Set<string>([userId]);
+    for (let depth = 0; depth < 5; depth++) {
+      const u = await tx.user.findUnique({
+        where: { id: currentId },
+        select: { agentId: true },
+      });
+      const agentId = u?.agentId;
+      if (!agentId || seen.has(agentId)) break;
+      seen.add(agentId);
+      const agent = await tx.user.findUnique({
+        where: { id: agentId },
+        select: { id: true, rebateRate: true },
+      });
+      if (!agent) break;
+      const rate = agent.rebateRate != null ? Number(agent.rebateRate) : 0;
+      if (rate > 0) {
+        const commission = round6(cost * rate);
+        if (commission > 0) {
+          const upd = await tx.user.update({
+            where: { id: agent.id },
+            data: { balance: { increment: commission } },
+            select: { balance: true },
+          });
+          await tx.balanceTransaction.create({
+            data: {
+              userId: agent.id,
+              type: BalanceTxType.COMMISSION,
+              amount: commission,
+              balanceAfter: round6(Number(upd.balance)),
+              requestLogId,
+              description: `返点（来自 ${sourceName}）`,
+            },
+          });
+          total = round6(total + commission);
+        }
+      }
+      currentId = agentId;
+    }
+    return total;
   }
 
   // ---------------- 兑换码 ----------------

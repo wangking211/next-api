@@ -25,6 +25,7 @@ const TYPE_META: Record<BalanceTxType, { color: string; label: string }> = {
   RECHARGE: { color: 'green', label: '充值' },
   CONSUME: { color: 'blue', label: '消费' },
   ADJUST: { color: 'orange', label: '调整' },
+  COMMISSION: { color: 'purple', label: '返点' },
 };
 
 export default function BillingPage() {

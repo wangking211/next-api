@@ -242,7 +242,12 @@ export const adminApi = {
   },
   async updateUser(
     id: string,
-    body: { role?: string; priceMultiplier?: number | null; agentId?: string | null },
+    body: {
+      role?: string;
+      priceMultiplier?: number | null;
+      agentId?: string | null;
+      rebateRate?: number | null;
+    },
   ) {
     const { data } = await api.patch<AdminUser>(`/admin/users/${id}`, body);
     return data;
