@@ -105,6 +105,22 @@ export class BillingService {
     return p.priceInput === 0 && p.priceOutput === 0;
   }
 
+  /** 用户的有效售价折扣 = 用户折扣 > 所属代理折扣 > 1 */
+  async getUserDiscount(userId: string): Promise<number> {
+    const u = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { discount: true, agent: { select: { discount: true } } },
+    });
+    if (!u) return 1;
+    const d =
+      u.discount != null
+        ? Number(u.discount)
+        : u.agent?.discount != null
+          ? Number(u.agent.discount)
+          : 1;
+    return d > 0 ? d : 1;
+  }
+
   async listTransactions(
     userId: string,
     page = 1,

@@ -22,7 +22,7 @@ import { channelsApi, modelsApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { usePageClamp } from '../hooks/usePageClamp';
-import { CREDITS_PER_USD } from '../utils/format';
+import { getCreditsPerUsd } from '../utils/format';
 import type { ChannelInfo, ChannelTestResult, ModelInfo } from '../api/types';
 
 type PriceRow = {
@@ -50,7 +50,7 @@ function PricingTable({
   };
   const disc = (model: string, key: keyof PriceRow) => pricing[model]?.[key] ?? 1;
   const credits = (usdPerM: number, d: number) =>
-    (usdPerM * d * CREDITS_PER_USD).toFixed(2);
+    (usdPerM * d * getCreditsPerUsd()).toFixed(2);
   const num = (model: string, key: keyof PriceRow) => (
     <InputNumber
       size="small"

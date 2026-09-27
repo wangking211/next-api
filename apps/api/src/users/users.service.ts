@@ -50,15 +50,18 @@ export class UsersService {
     return this.prisma.user.delete({ where: { id } });
   }
 
-  async list(query?: string, page = 1, pageSize = 20) {
-    const where: Prisma.UserWhereInput = query
-      ? {
-          OR: [
-            { email: { contains: query, mode: 'insensitive' } },
-            { username: { contains: query, mode: 'insensitive' } },
-          ],
-        }
-      : {};
+  async list(query?: string, page = 1, pageSize = 20, role?: Role) {
+    const where: Prisma.UserWhereInput = {
+      ...(role ? { role } : {}),
+      ...(query
+        ? {
+            OR: [
+              { email: { contains: query, mode: 'insensitive' as const } },
+              { username: { contains: query, mode: 'insensitive' as const } },
+            ],
+          }
+        : {}),
+    };
     const [items, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
@@ -72,6 +75,9 @@ export class UsersService {
           role: true,
           status: true,
           balance: true,
+          discount: true,
+          agentId: true,
+          agent: { select: { id: true, username: true, discount: true } },
           createdAt: true,
           _count: { select: { apiKeys: true, channels: true } },
         },
@@ -79,6 +85,33 @@ export class UsersService {
       this.prisma.user.count({ where }),
     ]);
     return { items, total, page, pageSize };
+  }
+
+  /** 管理员：更新用户角色/额外折扣/归属代理（可清空折扣与代理） */
+  async updateUser(
+    id: string,
+    data: { role?: Role; discount?: number | null; agentId?: string | null },
+  ) {
+    const user = await this.findById(id);
+    if (!user) throw new NotFoundException('User not found');
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        ...(data.role !== undefined ? { role: data.role } : {}),
+        ...(data.discount !== undefined ? { discount: data.discount } : {}),
+        ...(data.agentId !== undefined ? { agentId: data.agentId } : {}),
+      },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        role: true,
+        status: true,
+        balance: true,
+        discount: true,
+        agentId: true,
+      },
+    });
   }
 }
 

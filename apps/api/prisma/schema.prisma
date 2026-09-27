@@ -10,6 +10,7 @@ datasource db {
 enum Role {
   USER
   ADMIN
+  AGENT
 }
 
 enum UserStatus {
@@ -25,6 +26,12 @@ model User {
   role         Role       @default(USER)
   status       UserStatus @default(ACTIVE)
   balance      Decimal    @default(0) @db.Decimal(18, 6)
+  /// 该用户的额外售价折扣率（0.9 = 九折）；为空时继承所属代理的折扣
+  discount     Decimal?   @db.Decimal(6, 4)
+  /// 所属代理/分销商（role=AGENT 的用户）
+  agentId      String?
+  agent        User?      @relation("AgentMembers", fields: [agentId], references: [id], onDelete: SetNull)
+  members      User[]     @relation("AgentMembers")
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 

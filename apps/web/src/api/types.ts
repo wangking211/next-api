@@ -205,9 +205,12 @@ export interface AdminUser {
   id: string;
   email: string;
   username: string;
-  role: 'USER' | 'ADMIN';
+  role: 'USER' | 'ADMIN' | 'AGENT';
   status: 'ACTIVE' | 'BANNED';
   balance: string;
+  discount: string | null;
+  agentId: string | null;
+  agent: { id: string; username: string; discount: string | null } | null;
   createdAt: string;
   _count: { apiKeys: number; channels: number };
 }

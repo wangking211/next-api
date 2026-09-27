@@ -109,6 +109,13 @@ export class GatewayController {
       }
       return cachedBalance;
     };
+    let cachedDiscount: number | null = null;
+    const getUserDiscount = async () => {
+      if (cachedDiscount === null) {
+        cachedDiscount = await this.billing.getUserDiscount(user.id);
+      }
+      return cachedDiscount;
+    };
     const maxOutputTokens =
       Number(body?.max_tokens ?? body?.max_completion_tokens ?? 0) ||
       this.defaultMaxOutputTokens;
@@ -128,8 +135,9 @@ export class GatewayController {
         // 预授权：按该渠道的售价预估上限，余额不足则跳过
         const p = await this.billing.getChannelPricing(channel.id, model);
         const required =
-          (promptFallback / 1_000_000) * p.priceInput +
-          (maxOutputTokens / 1_000_000) * p.priceOutput;
+          ((promptFallback / 1_000_000) * p.priceInput +
+            (maxOutputTokens / 1_000_000) * p.priceOutput) *
+          (await getUserDiscount());
         if (required > 0 && (await getBalance()) < required) {
           insufficientBalance = true;
           continue;

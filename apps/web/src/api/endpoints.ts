@@ -233,11 +233,18 @@ export const billingApi = {
 };
 
 export const adminApi = {
-  async users(q?: string, page = 1, pageSize = 20, signal?: AbortSignal) {
+  async users(q?: string, page = 1, pageSize = 20, signal?: AbortSignal, role?: string) {
     const { data } = await api.get<Paginated<AdminUser>>('/admin/users', {
-      params: { q, page, pageSize },
+      params: { q, page, pageSize, role },
       signal,
     });
+    return data;
+  },
+  async updateUser(
+    id: string,
+    body: { role?: string; discount?: number | null; agentId?: string | null },
+  ) {
+    const { data } = await api.patch<AdminUser>(`/admin/users/${id}`, body);
     return data;
   },
   async recharge(id: string, amount: number, description?: string) {

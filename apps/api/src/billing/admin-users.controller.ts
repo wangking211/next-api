@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -12,6 +13,7 @@ import { BillingService } from './billing.service';
 import { UsersService } from '../users/users.service';
 import { RechargeDto } from './dto/recharge.dto';
 import { AdjustDto } from './dto/adjust.dto';
+import { AdminUpdateUserDto } from './dto/admin-update-user.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -37,8 +39,15 @@ export class AdminUsersController {
     @Query('q') q?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('role') role?: string,
   ) {
-    return this.users.list(q, toInt(page, 1), Math.min(toInt(pageSize, 20), 100));
+    const roleFilter = role && role in Role ? (role as Role) : undefined;
+    return this.users.list(q, toInt(page, 1), Math.min(toInt(pageSize, 20), 100), roleFilter);
+  }
+
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() dto: AdminUpdateUserDto) {
+    return this.users.updateUser(id, dto);
   }
 
   @Get(':id/balance')

@@ -9,6 +9,7 @@ import {
   InputNumber,
   Modal,
   Row,
+  Select,
   Space,
   Statistic,
   Table,
@@ -33,7 +34,9 @@ export default function AdminUsersPage() {
   const [target, setTarget] = useState<AdminUser | null>(null);
   const [mode, setMode] = useState<Mode>('recharge');
   const [usageUser, setUsageUser] = useState<AdminUser | null>(null);
+  const [editUser, setEditUser] = useState<AdminUser | null>(null);
   const [form] = Form.useForm();
+  const [editForm] = Form.useForm();
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin', 'users', q, page, pageSize],
@@ -41,6 +44,42 @@ export default function AdminUsersPage() {
   });
 
   usePageClamp(page, setPage, data);
+
+  const { data: agents } = useQuery({
+    queryKey: ['admin', 'agents'],
+    queryFn: ({ signal }) => adminApi.users(undefined, 1, 100, signal, 'AGENT'),
+  });
+
+  const saveEditMut = useMutation({
+    mutationFn: async (values: {
+      role?: string;
+      discount?: number | null;
+      agentId?: string | null;
+    }) => {
+      if (!editUser) return;
+      await adminApi.updateUser(editUser.id, {
+        role: values.role,
+        discount: values.discount ?? null,
+        agentId: values.agentId ?? null,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+      setEditUser(null);
+      editForm.resetFields();
+      message.success('已保存');
+    },
+    onError: (e) => message.error(errorMessage(e)),
+  });
+
+  const openEdit = (u: AdminUser) => {
+    setEditUser(u);
+    editForm.setFieldsValue({
+      role: u.role,
+      discount: u.discount != null ? Number(u.discount) : undefined,
+      agentId: u.agentId ?? undefined,
+    });
+  };
 
   const { data: uSummary } = useQuery({
     queryKey: ['admin', 'user-usage', 'summary', usageUser?.id],
@@ -118,7 +157,13 @@ export default function AdminUsersPage() {
             title: '角色',
             dataIndex: 'role',
             render: (v: string) =>
-              v === 'ADMIN' ? <Tag color="gold">管理员</Tag> : <Tag>用户</Tag>,
+              v === 'ADMIN' ? (
+                <Tag color="gold">管理员</Tag>
+              ) : v === 'AGENT' ? (
+                <Tag color="purple">代理</Tag>
+              ) : (
+                <Tag>用户</Tag>
+              ),
           },
           {
             title: '状态',
@@ -132,13 +177,25 @@ export default function AdminUsersPage() {
             render: (v: string) => formatCredits(v),
           },
           {
+            title: '折扣',
+            render: (_, r) => {
+              if (r.discount != null) return `${Number(r.discount)}（自定义）`;
+              if (r.agent?.discount != null) return `${Number(r.agent.discount)}（代理）`;
+              return '-';
+            },
+          },
+          {
+            title: '代理',
+            render: (_, r) => r.agent?.username ?? '-',
+          },
+          {
             title: 'Key / 渠道',
             render: (_, r) => `${r._count.apiKeys} / ${r._count.channels}`,
           },
           {
             title: '操作',
             fixed: 'right',
-            width: 180,
+            width: 240,
             render: (_, r) => (
               <Space>
                 <Button size="small" type="primary" onClick={() => openModal(r, 'recharge')}>
@@ -146,6 +203,9 @@ export default function AdminUsersPage() {
                 </Button>
                 <Button size="small" onClick={() => openModal(r, 'adjust')}>
                   调整
+                </Button>
+                <Button size="small" onClick={() => openEdit(r)}>
+                  编辑
                 </Button>
                 <Button size="small" onClick={() => setUsageUser(r)}>
                   用量
@@ -240,6 +300,62 @@ export default function AdminUsersPage() {
             },
           ]}
         />
+      </Modal>
+
+      <Modal
+        title={`编辑用户 - ${editUser?.username ?? ''}`}
+        open={!!editUser}
+        onCancel={() => {
+          setEditUser(null);
+          editForm.resetFields();
+        }}
+        onOk={() => editForm.submit()}
+        confirmLoading={saveEditMut.isPending}
+        destroyOnClose
+      >
+        <Form
+          form={editForm}
+          layout="vertical"
+          onFinish={(v) => saveEditMut.mutate(v)}
+          requiredMark={false}
+        >
+          <Form.Item name="role" label="角色">
+            <Select
+              options={[
+                { value: 'USER', label: '用户' },
+                { value: 'AGENT', label: '代理/分销商' },
+                { value: 'ADMIN', label: '管理员' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            name="agentId"
+            label="归属代理（AGENT 用户）"
+            extra="用户继承代理折扣，除非设置了自定义折扣"
+          >
+            <Select
+              allowClear
+              placeholder="无"
+              options={(agents?.items ?? []).map((a) => ({
+                value: a.id,
+                label: a.username,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="discount"
+            label="自定义折扣率（0-1，留空=继承代理）"
+            extra="额外作用于售价：0.9 = 九折"
+          >
+            <InputNumber
+              min={0}
+              max={1}
+              step={0.05}
+              style={{ width: '100%' }}
+              placeholder="留空=继承代理"
+            />
+          </Form.Item>
+        </Form>
       </Modal>
     </Card>
   );

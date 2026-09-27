@@ -1,16 +1,18 @@
 /** 统一的金额/时间格式化，避免各页面各写一份、精度不一致 */
 
-/** 积分与美元换算：1 USD = 100 积分（内部以 USD 存储，展示/输入用积分） */
-export const CREDITS_PER_USD = 100;
+import { getCreditsPerUsd } from '../api/config';
 
+export { getCreditsPerUsd };
+
+/** 积分与美元换算：1 USD = N 积分（N 由后端 /api/config 提供，默认 100） */
 export function toCredits(usd: string | number | null | undefined): number {
   const n = Number(usd ?? 0);
-  return Number.isFinite(n) ? n * CREDITS_PER_USD : 0;
+  return Number.isFinite(n) ? n * getCreditsPerUsd() : 0;
 }
 
 export function fromCredits(credits: number | null | undefined): number {
   const n = Number(credits ?? 0);
-  return Number.isFinite(n) ? n / CREDITS_PER_USD : 0;
+  return Number.isFinite(n) ? n / getCreditsPerUsd() : 0;
 }
 
 /** 按积分展示（2 位小数） */
