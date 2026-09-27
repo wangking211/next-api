@@ -9,3 +9,4 @@ build/
 coverage/
 .vite/
 .hops-audit/
+.codegraph/
