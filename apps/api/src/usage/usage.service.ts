@@ -315,64 +315,92 @@ export class UsageService {
     return where;
   }
 
-  /** 使用分析：按模型/渠道/用户聚合。 */
-  async analytics(userId: string | null, days = 30) {
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const base: Prisma.RequestLogWhereInput = { ...this.scope(userId), createdAt: { gte: since } };
+  /** 使用分析：按模型/渠道/用户/Key 聚合；支持 days 或显式 from/to 时间段。 */
+  async analytics(
+    userId: string | null,
+    days = 30,
+    range?: { from?: string; to?: string },
+  ) {
+    const since = range?.from
+      ? new Date(range.from)
+      : new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const until = range?.to ? new Date(range.to) : undefined;
+    const created: Prisma.DateTimeFilter = {
+      gte: since,
+      ...(until ? { lte: until } : {}),
+    };
+    const base: Prisma.RequestLogWhereInput = { ...this.scope(userId), createdAt: created };
 
-    const [byModel, byModelErr, byChannel, byUser, totals, totalErr] = await Promise.all([
-      this.prisma.requestLog.groupBy({
-        by: ['model'],
-        where: base,
-        _count: { _all: true },
-        _sum: { totalTokens: true, cost: true, upstreamCost: true },
-      }),
-      this.prisma.requestLog.groupBy({
-        by: ['model'],
-        where: { ...base, status: { gte: 400 } },
-        _count: { _all: true },
-      }),
-      this.prisma.requestLog.groupBy({
-        by: ['channelId'],
-        where: base,
-        _count: { _all: true },
-        _sum: { totalTokens: true, cost: true, upstreamCost: true },
-      }),
-      userId
-        ? Promise.resolve([] as any[])
-        : this.prisma.requestLog.groupBy({
-            by: ['userId'],
-            where: base,
-            _count: { _all: true },
-            _sum: { totalTokens: true, cost: true, upstreamCost: true },
-          }),
-      this.prisma.requestLog.aggregate({
-        where: base,
-        _count: { _all: true },
-        _sum: { totalTokens: true, cost: true, upstreamCost: true },
-      }),
-      this.prisma.requestLog.count({ where: { ...base, status: { gte: 400 } } }),
-    ]);
+    const [byModel, byModelErr, byChannel, byUser, byApiKey, totals, totalErr] =
+      await Promise.all([
+        this.prisma.requestLog.groupBy({
+          by: ['model'],
+          where: base,
+          _count: { _all: true },
+          _sum: { totalTokens: true, cost: true, upstreamCost: true },
+        }),
+        this.prisma.requestLog.groupBy({
+          by: ['model'],
+          where: { ...base, status: { gte: 400 } },
+          _count: { _all: true },
+        }),
+        this.prisma.requestLog.groupBy({
+          by: ['channelId'],
+          where: base,
+          _count: { _all: true },
+          _sum: { totalTokens: true, cost: true, upstreamCost: true },
+        }),
+        userId
+          ? Promise.resolve([] as any[])
+          : this.prisma.requestLog.groupBy({
+              by: ['userId'],
+              where: base,
+              _count: { _all: true },
+              _sum: { totalTokens: true, cost: true, upstreamCost: true },
+            }),
+        this.prisma.requestLog.groupBy({
+          by: ['apiKeyId'],
+          where: base,
+          _count: { _all: true },
+          _sum: { totalTokens: true, cost: true, upstreamCost: true },
+        }),
+        this.prisma.requestLog.aggregate({
+          where: base,
+          _count: { _all: true },
+          _sum: { totalTokens: true, cost: true, upstreamCost: true },
+        }),
+        this.prisma.requestLog.count({ where: { ...base, status: { gte: 400 } } }),
+      ]);
 
     const errByModel = new Map(byModelErr.map((r) => [r.model, r._count._all]));
 
-    // 渠道/用户名称
+    // 渠道/用户/Key 名称
     const channelIds = byChannel.map((c) => c.channelId).filter(Boolean) as string[];
     const userIds = byUser.map((u) => u.userId).filter(Boolean) as string[];
-    const channels = channelIds.length
-      ? await this.prisma.channel.findMany({
-          where: { id: { in: channelIds } },
-          select: { id: true, name: true, provider: true },
-        })
-      : [];
-    const users = userIds.length
-      ? await this.prisma.user.findMany({
-          where: { id: { in: userIds } },
-          select: { id: true, username: true, email: true },
-        })
-      : [];
-    const chMap = new Map(channels.map((c) => [c.id, c]));
-    const uMap = new Map(users.map((u) => [u.id, u]));
+    const apiKeyIds = byApiKey.map((k) => k.apiKeyId).filter(Boolean) as string[];
+    const [channels, users, apiKeys] = await Promise.all([
+      channelIds.length
+        ? this.prisma.channel.findMany({
+            where: { id: { in: channelIds } },
+            select: { id: true, name: true, provider: true },
+          })
+        : Promise.resolve([] as any[]),
+      userIds.length
+        ? this.prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: { id: true, username: true, email: true },
+          })
+        : Promise.resolve([] as any[]),
+      apiKeyIds.length
+        ? this.prisma.apiKey.findMany({
+            where: { id: { in: apiKeyIds } },
+            select: { id: true, name: true, keyPrefix: true },
+          })
+        : Promise.resolve([] as any[]),
+    ]);
+    const chMap = new Map(channels.map((c: any) => [c.id, c]));
+    const uMap = new Map(users.map((u: any) => [u.id, u]));
+    const kMap = new Map(apiKeys.map((k: any) => [k.id, k]));
 
     const mapAgg = (r: any) => {
       const revenue = Number(r._sum?.cost ?? 0);
@@ -388,6 +416,8 @@ export class UsageService {
 
     return {
       rangeDays: days,
+      from: since.toISOString(),
+      to: (until ?? new Date()).toISOString(),
       totals: {
         requests: totals._count._all,
         errors: totalErr,
@@ -423,6 +453,15 @@ export class UsageService {
         }))
         .sort((a, b) => b.tokens - a.tokens)
         .slice(0, 20),
+      byApiKey: byApiKey
+        .map((r) => ({
+          apiKeyId: r.apiKeyId,
+          name: kMap.get(r.apiKeyId ?? '')?.name ?? '(已删除)',
+          keyPrefix: kMap.get(r.apiKeyId ?? '')?.keyPrefix ?? '',
+          ...mapAgg(r),
+        }))
+        .sort((a, b) => b.tokens - a.tokens)
+        .slice(0, 50),
     };
   }
 

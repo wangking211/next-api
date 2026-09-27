@@ -127,6 +127,8 @@ export interface LogFilters {
 
 export interface UsageAnalytics {
   rangeDays: number;
+  from: string;
+  to: string;
   totals: {
     requests: number;
     errors: number;
@@ -158,6 +160,16 @@ export interface UsageAnalytics {
   byUser: {
     userId: string;
     name: string;
+    requests: number;
+    tokens: number;
+    cost: number;
+    upstreamCost: number;
+    margin: number;
+  }[];
+  byApiKey: {
+    apiKeyId: string | null;
+    name: string;
+    keyPrefix: string;
     requests: number;
     tokens: number;
     cost: number;

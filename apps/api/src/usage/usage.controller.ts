@@ -52,8 +52,13 @@ export class UsageController {
     @Query('days') days?: string,
     @Query('scope') scope?: string,
     @Query('userId') userId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
-    return this.usage.analytics(this.scope(user, scope, userId), toInt(days, 30));
+    return this.usage.analytics(this.scope(user, scope, userId), toInt(days, 30), {
+      from: from || undefined,
+      to: to || undefined,
+    });
   }
 
   @Get('logs')

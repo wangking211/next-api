@@ -14,6 +14,7 @@ const ChannelsPage = lazy(() => import('./pages/ChannelsPage'));
 const AvailableModelsPage = lazy(() => import('./pages/AvailableModelsPage'));
 const ModelsPage = lazy(() => import('./pages/ModelsPage'));
 const LogsPage = lazy(() => import('./pages/LogsPage'));
+const UsageStatsPage = lazy(() => import('./pages/UsageStatsPage'));
 const BillingPage = lazy(() => import('./pages/BillingPage'));
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
 const AdminRedeemPage = lazy(() => import('./pages/AdminRedeemPage'));
@@ -43,6 +44,7 @@ export default function App() {
                 <Route path="/available-models" element={<AvailableModelsPage />} />
                 <Route path="/models" element={<ModelsPage />} />
                 <Route path="/logs" element={<LogsPage />} />
+                <Route path="/usage-stats" element={<UsageStatsPage />} />
                 <Route path="/billing" element={<BillingPage />} />
                 <Route element={<AdminRoute />}>
                   <Route path="/users" element={<AdminUsersPage />} />

@@ -181,9 +181,16 @@ export const usageApi = {
     });
     return data;
   },
-  async analytics(days = 30, scope?: 'all', signal?: AbortSignal, userId?: string) {
+  async analytics(
+    days = 30,
+    scope?: 'all',
+    signal?: AbortSignal,
+    userId?: string,
+    from?: string,
+    to?: string,
+  ) {
     const { data } = await api.get<UsageAnalytics>('/usage/analytics', {
-      params: { days, scope, userId },
+      params: { days, scope, userId, from, to },
       signal,
     });
     return data;
