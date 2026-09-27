@@ -28,10 +28,31 @@ export class ApiKeyGuard implements CanActivate {
     }
 
     const keyHash = this.crypto.hashApiKey(token);
-    const apiKey = await this.prisma.apiKey.findUnique({
+    let apiKey = await this.prisma.apiKey.findUnique({
       where: { keyHash },
       include: { user: true },
     });
+
+    // 兼容 pepper 启用前签发的旧 Key：旧哈希命中后自动升级为 HMAC 哈希
+    if (!apiKey && this.crypto.apiKeyHashingEnabled) {
+      const legacyHash = this.crypto.legacyHashApiKey(token);
+      const legacy = await this.prisma.apiKey.findUnique({
+        where: { keyHash: legacyHash },
+        include: { user: true },
+      });
+      if (legacy) {
+        apiKey = legacy;
+        try {
+          await this.prisma.apiKey.update({
+            where: { id: legacy.id },
+            data: { keyHash },
+          });
+        } catch {
+          // 升级失败（如唯一冲突）不阻断请求，下次访问再试
+        }
+      }
+    }
+
     if (!apiKey) throw new UnauthorizedException('Invalid API key');
 
     if (apiKey.status !== ApiKeyStatus.ACTIVE) {

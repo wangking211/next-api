@@ -4,6 +4,7 @@ import {
   createCipheriv,
   createDecipheriv,
   createHash,
+  createHmac,
   randomBytes,
   randomUUID,
 } from 'crypto';
@@ -12,6 +13,7 @@ import {
 export class CryptoService {
   private readonly key: Buffer;
   private readonly keyPrefix: string;
+  private readonly apiKeyPepper?: string;
 
   constructor(config: ConfigService) {
     const hex = config.get<string>('ENCRYPTION_KEY', '');
@@ -22,6 +24,7 @@ export class CryptoService {
     }
     this.key = Buffer.from(hex, 'hex');
     this.keyPrefix = config.get<string>('API_KEY_PREFIX', 'sk-');
+    this.apiKeyPepper = config.get<string>('API_KEY_PEPPER') || undefined;
   }
 
   /** AES-256-GCM encrypt. Output: base64(iv).base64(authTag).base64(cipher) */
@@ -63,7 +66,21 @@ export class CryptoService {
     };
   }
 
+  /** 是否启用了 pepper 的密钥哈希（用于判断是否需要兼容旧哈希） */
+  get apiKeyHashingEnabled(): boolean {
+    return !!this.apiKeyPepper;
+  }
+
+  /** 平台 Key 哈希：配置 API_KEY_PEPPER 时为 HMAC-SHA256，否则回退为裸 SHA-256 */
   hashApiKey(plaintext: string): string {
+    if (this.apiKeyPepper) {
+      return createHmac('sha256', this.apiKeyPepper).update(plaintext).digest('hex');
+    }
+    return createHash('sha256').update(plaintext).digest('hex');
+  }
+
+  /** 旧版无 pepper 的 SHA-256 哈希（仅用于双读兼容与平滑升级） */
+  legacyHashApiKey(plaintext: string): string {
     return createHash('sha256').update(plaintext).digest('hex');
   }
 

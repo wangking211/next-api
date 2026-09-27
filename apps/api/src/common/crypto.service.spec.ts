@@ -42,6 +42,14 @@ describe('CryptoService', () => {
     expect(plaintext.startsWith(prefix)).toBe(true);
   });
 
+  it('uses HMAC hashing when API_KEY_PEPPER is set, keeping legacy hash available', () => {
+    const svc = makeService({ API_KEY_PEPPER: 'pepper-abc' });
+    const { plaintext, hash } = svc.generateApiKey();
+    expect(svc.apiKeyHashingEnabled).toBe(true);
+    expect(hash).toBe(svc.hashApiKey(plaintext));
+    expect(hash).not.toBe(svc.legacyHashApiKey(plaintext));
+  });
+
   it('throws on invalid encryption key', () => {
     expect(() => makeService({ ENCRYPTION_KEY: 'short' })).toThrow(/32 bytes hex/);
   });
