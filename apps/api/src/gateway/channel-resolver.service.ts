@@ -17,20 +17,27 @@ export class ChannelResolverService {
    * 可用性以 ChannelModel 为准（同一模型可由多渠道提供）。
    */
   async resolve(userId: string, model: string): Promise<ResolvedChannel[]> {
-    const rows = await this.prisma.channelModel.findMany({
-      where: {
-        modelName: model,
-        enabled: true,
-        channel: {
-          status: ChannelStatus.ENABLED,
-          OR: [
-            { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
-            { ownerType: ChannelOwnerType.PLATFORM },
-          ],
+    const [rows, catalog] = await Promise.all([
+      this.prisma.channelModel.findMany({
+        where: {
+          modelName: model,
+          enabled: true,
+          channel: {
+            status: ChannelStatus.ENABLED,
+            OR: [
+              { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
+              { ownerType: ChannelOwnerType.PLATFORM },
+            ],
+          },
         },
-      },
-      include: { channel: true },
-    });
+        include: { channel: true },
+      }),
+      this.prisma.modelCatalog.findUnique({
+        where: { name: model },
+        select: { inputPrice: true },
+      }),
+    ]);
+    const officialIn = catalog ? Number(catalog.inputPrice) : 0;
 
     const ranked: {
       c: ResolvedChannel;
@@ -49,12 +56,16 @@ export class ChannelResolverService {
       }
       if (!apiKey) continue;
       const weight = Math.max(cm.weight ?? cm.channel.weight, 1);
+      // 路由成本 = 绝对成本 > 官方价 × 上游折扣；无有效成本则排最后
+      const rawCost =
+        cm.costInput != null
+          ? Number(cm.costInput)
+          : officialIn * (cm.costDiscount != null ? Number(cm.costDiscount) : 1);
       ranked.push({
         c: { channel: cm.channel, apiKey },
         tier: cm.channel.ownerType === ChannelOwnerType.USER ? 0 : 1,
         priority: cm.priority ?? cm.channel.priority,
-        // 用输入成本作为路由成本代理；未配置则视为无穷（同级排最后）
-        cost: cm.costInput != null ? Number(cm.costInput) : Number.POSITIVE_INFINITY,
+        cost: rawCost > 0 ? rawCost : Number.POSITIVE_INFINITY,
         // 指数竞速实现加权随机：weight 越大越可能排前
         race: -Math.log(Math.random() || 1e-9) / weight,
       });

@@ -35,7 +35,10 @@ function makeCM(overrides: Record<string, unknown>) {
 }
 
 function makeService(rows: any[], decryptImpl?: (s: string) => string) {
-  const prisma = { channelModel: { findMany: jest.fn().mockResolvedValue(rows) } };
+  const prisma = {
+    channelModel: { findMany: jest.fn().mockResolvedValue(rows) },
+    modelCatalog: { findUnique: jest.fn().mockResolvedValue(null) },
+  };
   const crypto = {
     decrypt: jest.fn((s: string) => (decryptImpl ? decryptImpl(s) : `key:${s}`)),
   };
