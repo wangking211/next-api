@@ -19,6 +19,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+          package-manager-cache: false
       - name: Enable pnpm (corepack)
         run: corepack enable
       - name: Install dependencies
@@ -72,6 +73,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+          package-manager-cache: false
       - name: Enable pnpm (corepack)
         run: corepack enable
       - name: Install dependencies
