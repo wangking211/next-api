@@ -62,7 +62,7 @@ jobs:
       DATABASE_URL: postgresql://aigw:aigw_dev_pass@localhost:5432/ai_gateway?schema=public
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: ci-jwt-secret-not-for-production
-      ENCRYPTION_KEY: 3f9a1c7e5b2d8460a1f3c5e7b9d0246813579bdf02468ace13579bdf02468a
+      ENCRYPTION_KEY: a3f9c1e75b2d84609f1c3e5a7b9d02468ace13579bdf02468ace13579bdf0246
       BOOTSTRAP_ADMIN_EMAIL: admin@aigw.local
       BOOTSTRAP_ADMIN_USERNAME: admin
       BOOTSTRAP_ADMIN_PASSWORD: admin123456
