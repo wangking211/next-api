@@ -32,6 +32,49 @@ type PriceRow = {
   discount?: number;
 };
 
+type SetPrice = (model: string, key: keyof PriceRow, value: number | null) => void;
+
+/** 渠道×模型 定价编辑表（成本/售价/折扣） */
+function PricingTable({
+  models,
+  pricing,
+  setP,
+}: {
+  models: string[];
+  pricing: Record<string, PriceRow>;
+  setP: SetPrice;
+}) {
+  const num = (model: string, key: keyof PriceRow, opts: { max?: number; step?: number } = {}) => (
+    <InputNumber
+      size="small"
+      min={0}
+      max={opts.max}
+      step={opts.step}
+      style={{ width: 84 }}
+      value={pricing[model]?.[key]}
+      onChange={(v) => setP(model, key, v as number)}
+    />
+  );
+  return (
+    <Table
+      size="small"
+      rowKey="model"
+      pagination={false}
+      scroll={{ y: 260, x: 620 }}
+      style={{ marginTop: 6 }}
+      dataSource={models.map((m) => ({ model: m }))}
+      columns={[
+        { title: '模型', dataIndex: 'model', width: 170, ellipsis: true },
+        { title: '成本入', width: 94, render: (_: unknown, r: { model: string }) => num(r.model, 'costInput') },
+        { title: '成本出', width: 94, render: (_: unknown, r: { model: string }) => num(r.model, 'costOutput') },
+        { title: '售价入', width: 94, render: (_: unknown, r: { model: string }) => num(r.model, 'priceInput') },
+        { title: '售价出', width: 94, render: (_: unknown, r: { model: string }) => num(r.model, 'priceOutput') },
+        { title: '折扣', width: 94, render: (_: unknown, r: { model: string }) => num(r.model, 'discount', { max: 1, step: 0.05 }) },
+      ]}
+    />
+  );
+}
+
 const PROVIDERS = [
   { value: 'openai', label: 'OpenAI', placeholder: 'https://api.openai.com/v1' },
   { value: 'anthropic', label: 'Anthropic', placeholder: 'https://api.anthropic.com/v1' },
@@ -121,25 +164,23 @@ export default function ChannelsPage() {
   const [modalTesting, setModalTesting] = useState(false);
   const [modalTest, setModalTest] = useState<ChannelTestResult | null>(null);
   const [pricing, setPricing] = useState<Record<string, PriceRow>>({});
+  const [priceChannel, setPriceChannel] = useState<ChannelInfo | null>(null);
   const selectedModels: string[] = Form.useWatch('models', form) ?? [];
 
   const setP = (model: string, key: keyof PriceRow, value: number | null) =>
     setPricing((p) => ({ ...p, [model]: { ...p[model], [key]: value ?? undefined } }));
 
   const buildModelPrices = (models: string[]) =>
-    models
-      .filter((m) => {
-        const r = pricing[m];
-        return (
-          r &&
-          (r.costInput != null ||
-            r.costOutput != null ||
-            r.priceInput != null ||
-            r.priceOutput != null ||
-            r.discount != null)
-        );
-      })
-      .map((m) => ({ model: m, ...pricing[m] }));
+    models.map((m) => {
+      const r = pricing[m] ?? {};
+      const entry: Record<string, unknown> = { model: m };
+      if (r.costInput != null) entry.costInput = r.costInput;
+      if (r.costOutput != null) entry.costOutput = r.costOutput;
+      if (r.priceInput != null) entry.priceInput = r.priceInput;
+      if (r.priceOutput != null) entry.priceOutput = r.priceOutput;
+      if (r.discount != null) entry.discount = r.discount;
+      return entry;
+    });
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['channels', filters, page, pageSize],
@@ -276,6 +317,32 @@ export default function ChannelsPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['channels'] });
       message.success('已删除');
+    },
+    onError: (e) => message.error(errorMessage(e)),
+  });
+
+  const openPricing = (r: ChannelInfo) => {
+    const p: Record<string, PriceRow> = {};
+    for (const mp of r.modelPrices ?? []) {
+      p[mp.model] = {
+        costInput: mp.costInput ?? undefined,
+        costOutput: mp.costOutput ?? undefined,
+        priceInput: mp.priceInput ?? undefined,
+        priceOutput: mp.priceOutput ?? undefined,
+        discount: mp.discount ?? undefined,
+      };
+    }
+    setPricing(p);
+    setPriceChannel(r);
+  };
+
+  const savePricingMut = useMutation({
+    mutationFn: (r: ChannelInfo) =>
+      channelsApi.update(r.id, { modelPrices: buildModelPrices(r.models) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['channels'] });
+      setPriceChannel(null);
+      message.success('定价已保存');
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -422,26 +489,40 @@ export default function ChannelsPage() {
               ),
           },
           {
-            title: '自定价',
+            title: '价格 / 折扣',
             render: (_: unknown, r: ChannelInfo) => {
-              const n = (r.modelPrices ?? []).filter(
-                (m) => m.priceInput != null || m.priceOutput != null || m.discount != null,
+              const rows = r.modelPrices ?? [];
+              const priced = rows.filter(
+                (m) => m.priceInput != null || m.priceOutput != null,
               ).length;
-              return n ? (
-                <Tag color="blue">{n} 个模型</Tag>
-              ) : (
-                <Typography.Text type="secondary">默认价</Typography.Text>
+              const discounts = rows
+                .map((m) => m.discount)
+                .filter((d): d is number => d != null);
+              return (
+                <Space size={4} wrap>
+                  {priced ? (
+                    <Tag color="blue">{priced} 个售价</Tag>
+                  ) : (
+                    <Typography.Text type="secondary">默认价</Typography.Text>
+                  )}
+                  {discounts.length > 0 && (
+                    <Tag color="orange">折扣 {Math.min(...discounts)}</Tag>
+                  )}
+                </Space>
               );
             },
           },
           {
             title: '操作',
             fixed: 'right',
-            width: 300,
+            width: 340,
             render: (_, r) => (
               <Space>
                 <Button size="small" loading={testingId === r.id} onClick={() => runTest(r)}>
                   测试
+                </Button>
+                <Button size="small" onClick={() => openPricing(r)}>
+                  定价
                 </Button>
                 <Button size="small" onClick={() => openEdit(r)}>
                   编辑
@@ -579,62 +660,7 @@ export default function ChannelsPage() {
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 逐模型定价（可选，USD/1M tokens；留空则用模型目录默认价 × 折扣）
               </Typography.Text>
-              <Table
-                size="small"
-                rowKey="model"
-                pagination={false}
-                scroll={{ y: 220, x: 560 }}
-                style={{ marginTop: 6 }}
-                dataSource={selectedModels.map((m) => ({ model: m }))}
-                columns={[
-                  { title: '模型', dataIndex: 'model', width: 150, ellipsis: true },
-                  {
-                    title: '成本入',
-                    width: 90,
-                    render: (_: unknown, r: { model: string }) => (
-                      <InputNumber size="small" min={0} style={{ width: 84 }}
-                        value={pricing[r.model]?.costInput}
-                        onChange={(v) => setP(r.model, 'costInput', v as number)} />
-                    ),
-                  },
-                  {
-                    title: '成本出',
-                    width: 90,
-                    render: (_: unknown, r: { model: string }) => (
-                      <InputNumber size="small" min={0} style={{ width: 84 }}
-                        value={pricing[r.model]?.costOutput}
-                        onChange={(v) => setP(r.model, 'costOutput', v as number)} />
-                    ),
-                  },
-                  {
-                    title: '售价入',
-                    width: 90,
-                    render: (_: unknown, r: { model: string }) => (
-                      <InputNumber size="small" min={0} style={{ width: 84 }}
-                        value={pricing[r.model]?.priceInput}
-                        onChange={(v) => setP(r.model, 'priceInput', v as number)} />
-                    ),
-                  },
-                  {
-                    title: '售价出',
-                    width: 90,
-                    render: (_: unknown, r: { model: string }) => (
-                      <InputNumber size="small" min={0} style={{ width: 84 }}
-                        value={pricing[r.model]?.priceOutput}
-                        onChange={(v) => setP(r.model, 'priceOutput', v as number)} />
-                    ),
-                  },
-                  {
-                    title: '折扣',
-                    width: 90,
-                    render: (_: unknown, r: { model: string }) => (
-                      <InputNumber size="small" min={0} max={1} step={0.05} style={{ width: 84 }}
-                        value={pricing[r.model]?.discount}
-                        onChange={(v) => setP(r.model, 'discount', v as number)} />
-                    ),
-                  },
-                ]}
-              />
+              <PricingTable models={selectedModels} pricing={pricing} setP={setP} />
             </div>
           )}
           <Space size={16}>
@@ -665,6 +691,34 @@ export default function ChannelsPage() {
         ]}
       >
         {testResult && <TestResults result={testResult.result} />}
+      </Modal>
+
+      <Modal
+        title={`渠道定价：${priceChannel?.name ?? ''}`}
+        open={!!priceChannel}
+        onCancel={() => setPriceChannel(null)}
+        width={720}
+        footer={[
+          <Button key="cancel" onClick={() => setPriceChannel(null)}>
+            取消
+          </Button>,
+          <Button
+            key="save"
+            type="primary"
+            loading={savePricingMut.isPending}
+            onClick={() => priceChannel && savePricingMut.mutate(priceChannel)}
+          >
+            保存
+          </Button>,
+        ]}
+      >
+        <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 8 }}>
+          成本 USD/1M tokens（用于按成本路由与毛利统计）；售价留空则用模型目录默认价 ×
+          折扣。清空某项将恢复为默认。
+        </Typography.Paragraph>
+        {priceChannel && (
+          <PricingTable models={priceChannel.models} pricing={pricing} setP={setP} />
+        )}
       </Modal>
     </Card>
   );

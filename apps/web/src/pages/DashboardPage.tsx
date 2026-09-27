@@ -219,7 +219,7 @@ export default function DashboardPage() {
                 key: u.userId,
                 label: u.name,
                 value: u.tokens,
-                sub: `· $${u.cost.toFixed(4)}`,
+                sub: `· $${u.cost.toFixed(4)}${isAdmin ? ` · 毛利 $${u.margin.toFixed(4)}` : ''}`,
               }))}
             />
           </Col>

@@ -15,8 +15,14 @@ function toInt(value: string | undefined, fallback: number): number {
 export class UsageController {
   constructor(private readonly usage: UsageService) {}
 
-  private scope(user: AuthUser, scope?: string): string | null {
-    if (scope === 'all' && user.role === Role.ADMIN) return null;
+  private scope(
+    user: AuthUser,
+    scope?: string,
+    targetUserId?: string,
+  ): string | null {
+    if (user.role !== Role.ADMIN) return user.id;
+    if (targetUserId) return targetUserId;
+    if (scope === 'all') return null;
     return user.id;
   }
 
@@ -25,8 +31,9 @@ export class UsageController {
     @CurrentUser() user: AuthUser,
     @Query('days') days?: string,
     @Query('scope') scope?: string,
+    @Query('userId') userId?: string,
   ) {
-    return this.usage.summary(this.scope(user, scope), toInt(days, 30));
+    return this.usage.summary(this.scope(user, scope, userId), toInt(days, 30));
   }
 
   @Get('daily')
@@ -34,8 +41,9 @@ export class UsageController {
     @CurrentUser() user: AuthUser,
     @Query('days') days?: string,
     @Query('scope') scope?: string,
+    @Query('userId') userId?: string,
   ) {
-    return this.usage.daily(this.scope(user, scope), toInt(days, 30));
+    return this.usage.daily(this.scope(user, scope, userId), toInt(days, 30));
   }
 
   @Get('analytics')
@@ -43,8 +51,9 @@ export class UsageController {
     @CurrentUser() user: AuthUser,
     @Query('days') days?: string,
     @Query('scope') scope?: string,
+    @Query('userId') userId?: string,
   ) {
-    return this.usage.analytics(this.scope(user, scope), toInt(days, 30));
+    return this.usage.analytics(this.scope(user, scope, userId), toInt(days, 30));
   }
 
   @Get('logs')

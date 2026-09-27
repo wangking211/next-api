@@ -167,23 +167,23 @@ export const modelsApi = {
 };
 
 export const usageApi = {
-  async summary(days = 30, scope?: 'all', signal?: AbortSignal) {
+  async summary(days = 30, scope?: 'all', signal?: AbortSignal, userId?: string) {
     const { data } = await api.get<UsageSummary>('/usage/summary', {
-      params: { days, scope },
+      params: { days, scope, userId },
       signal,
     });
     return data;
   },
-  async daily(days = 30, scope?: 'all', signal?: AbortSignal) {
+  async daily(days = 30, scope?: 'all', signal?: AbortSignal, userId?: string) {
     const { data } = await api.get<UsageDailyRow[]>('/usage/daily', {
-      params: { days, scope },
+      params: { days, scope, userId },
       signal,
     });
     return data;
   },
-  async analytics(days = 30, scope?: 'all', signal?: AbortSignal) {
+  async analytics(days = 30, scope?: 'all', signal?: AbortSignal, userId?: string) {
     const { data } = await api.get<UsageAnalytics>('/usage/analytics', {
-      params: { days, scope },
+      params: { days, scope, userId },
       signal,
     });
     return data;

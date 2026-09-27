@@ -3,17 +3,20 @@ import {
   App,
   Button,
   Card,
+  Col,
   Form,
   Input,
   InputNumber,
   Modal,
+  Row,
   Space,
+  Statistic,
   Table,
   Tag,
 } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { adminApi } from '../api/endpoints';
+import { adminApi, usageApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { formatUsd } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
@@ -29,6 +32,7 @@ export default function AdminUsersPage() {
   const [pageSize, setPageSize] = useState(20);
   const [target, setTarget] = useState<AdminUser | null>(null);
   const [mode, setMode] = useState<Mode>('recharge');
+  const [usageUser, setUsageUser] = useState<AdminUser | null>(null);
   const [form] = Form.useForm();
 
   const { data, isLoading } = useQuery({
@@ -37,6 +41,17 @@ export default function AdminUsersPage() {
   });
 
   usePageClamp(page, setPage, data);
+
+  const { data: uSummary } = useQuery({
+    queryKey: ['admin', 'user-usage', 'summary', usageUser?.id],
+    queryFn: ({ signal }) => usageApi.summary(30, undefined, signal, usageUser!.id),
+    enabled: !!usageUser,
+  });
+  const { data: uAnalytics } = useQuery({
+    queryKey: ['admin', 'user-usage', 'analytics', usageUser?.id],
+    queryFn: ({ signal }) => usageApi.analytics(30, undefined, signal, usageUser!.id),
+    enabled: !!usageUser,
+  });
 
   const mutate = useMutation({
     mutationFn: async (values: { amount: number; description?: string }) => {
@@ -130,6 +145,9 @@ export default function AdminUsersPage() {
                 <Button size="small" onClick={() => openModal(r, 'adjust')}>
                   调整
                 </Button>
+                <Button size="small" onClick={() => setUsageUser(r)}>
+                  用量
+                </Button>
               </Space>
             ),
           },
@@ -161,6 +179,65 @@ export default function AdminUsersPage() {
             <Input placeholder="例如：微信充值 / 活动赠送" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={`用量（近 30 天）- ${usageUser?.username ?? ''}`}
+        open={!!usageUser}
+        onCancel={() => setUsageUser(null)}
+        footer={[
+          <Button key="close" onClick={() => setUsageUser(null)}>
+            关闭
+          </Button>,
+        ]}
+        width={760}
+      >
+        {uSummary && (
+          <Row gutter={16} style={{ marginBottom: 12 }}>
+            <Col span={6}>
+              <Statistic title="请求" value={uSummary.requests} />
+            </Col>
+            <Col span={6}>
+              <Statistic title="Token" value={uSummary.totalTokens} />
+            </Col>
+            <Col span={6}>
+              <Statistic title="费用" value={formatUsd(uSummary.cost)} />
+            </Col>
+            <Col span={6}>
+              <Statistic
+                title="毛利"
+                value={formatUsd(uAnalytics?.totals?.margin ?? 0)}
+                valueStyle={{
+                  color: (uAnalytics?.totals?.margin ?? 0) >= 0 ? '#3f8600' : '#cf1322',
+                }}
+              />
+            </Col>
+          </Row>
+        )}
+        <Table
+          size="small"
+          rowKey="model"
+          pagination={false}
+          loading={!uAnalytics}
+          dataSource={uAnalytics?.byModel ?? []}
+          columns={[
+            { title: '模型', dataIndex: 'model', ellipsis: true },
+            { title: '请求', dataIndex: 'requests', width: 80 },
+            { title: 'Token', dataIndex: 'tokens', width: 110 },
+            {
+              title: '费用',
+              dataIndex: 'cost',
+              width: 130,
+              render: (v: number) => formatUsd(v),
+            },
+            {
+              title: '毛利',
+              dataIndex: 'margin',
+              width: 130,
+              render: (v: number) => formatUsd(v),
+            },
+          ]}
+        />
       </Modal>
     </Card>
   );
