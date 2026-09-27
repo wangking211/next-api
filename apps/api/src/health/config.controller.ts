@@ -10,6 +10,8 @@ export class ConfigController {
   get() {
     return {
       creditsPerUsd: Number(this.config.get<string>('CREDITS_PER_USD', '100')) || 100,
+      rebateMode: (this.config.get<string>('REBATE_MODE', 'stacked') || 'stacked'),
+      testMaxModels: Number(this.config.get<string>('TEST_MAX_MODELS', '100')) || 100,
     };
   }
 }
