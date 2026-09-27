@@ -21,14 +21,16 @@ export class BillingService {
     return { balance: Number(user.balance) };
   }
 
-  /** 该模型是否为 0 价（平台渠道对 0 价模型不校验余额）。目录缺失时按需付费处理。 */
-  async isModelFree(model: string): Promise<boolean> {
+  /** 读取模型单价（USD/1M tokens）；目录缺失返回 null。 */
+  async getModelPrices(
+    model: string,
+  ): Promise<{ input: number; output: number } | null> {
     const row = await this.prisma.modelCatalog.findUnique({
       where: { name: model },
       select: { inputPrice: true, outputPrice: true },
     });
-    if (!row) return false;
-    return Number(row.inputPrice) === 0 && Number(row.outputPrice) === 0;
+    if (!row) return null;
+    return { input: Number(row.inputPrice), output: Number(row.outputPrice) };
   }
 
   async listTransactions(

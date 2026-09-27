@@ -36,6 +36,7 @@ function upstreamErrorMessage(e: UpstreamError): string {
 @Controller('v1')
 export class GatewayController {
   private readonly streamIdleMs: number;
+  private readonly defaultMaxOutputTokens: number;
 
   constructor(
     private readonly resolver: ChannelResolverService,
@@ -47,6 +48,8 @@ export class GatewayController {
   ) {
     this.streamIdleMs =
       Number(config.get<string>('STREAM_IDLE_TIMEOUT_MS', '120000')) || 120000;
+    this.defaultMaxOutputTokens =
+      Number(config.get<string>('PREAUTH_MAX_OUTPUT_TOKENS', '4096')) || 4096;
   }
 
   @Get('models')
@@ -98,7 +101,7 @@ export class GatewayController {
     const requestPreview = flattenMessages(body);
     let lastError: UpstreamError | null = null;
 
-    // 平台渠道需余额：0 价模型豁免；对每个候选渠道逐一判断，避免 BYOK→平台故障转移绕过校验
+    // 平台渠道需余额：0 价模型豁免；对每个候选渠道按“输入 + 最大输出”预估上限做预授权，避免单次调用透支
     let cachedBalance: number | null = null;
     const getBalance = async () => {
       if (cachedBalance === null) {
@@ -106,11 +109,18 @@ export class GatewayController {
       }
       return cachedBalance;
     };
-    let modelFree: boolean | null = null;
-    const isModelFree = async () => {
-      if (modelFree === null) modelFree = await this.billing.isModelFree(model);
-      return modelFree;
+    let pricesLoaded = false;
+    let prices: { input: number; output: number } | null = null;
+    const loadPrices = async () => {
+      if (!pricesLoaded) {
+        prices = await this.billing.getModelPrices(model);
+        pricesLoaded = true;
+      }
+      return prices;
     };
+    const maxOutputTokens =
+      Number(body?.max_tokens ?? body?.max_completion_tokens ?? 0) ||
+      this.defaultMaxOutputTokens;
     let insufficientBalance = false;
 
     // 客户端断开时中止上游请求，避免连接泄漏
@@ -123,8 +133,14 @@ export class GatewayController {
 
     for (let i = 0; i < channels.length; i++) {
       const { channel, apiKey: upstreamKey } = channels[i];
-      if (channel.ownerType === ChannelOwnerType.PLATFORM && !(await isModelFree())) {
-        if ((await getBalance()) <= 0) {
+      if (channel.ownerType === ChannelOwnerType.PLATFORM) {
+        const p = await loadPrices();
+        // 未知模型无法定价，退化为“余额需为正”
+        const required = p
+          ? (promptFallback / 1_000_000) * p.input +
+            (maxOutputTokens / 1_000_000) * p.output
+          : Number.EPSILON;
+        if (required > 0 && (await getBalance()) < required) {
           insufficientBalance = true;
           continue;
         }
