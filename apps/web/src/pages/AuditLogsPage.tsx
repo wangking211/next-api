@@ -3,6 +3,8 @@ import { Card, Input, Table, Tag, Tooltip, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { auditApi } from '../api/endpoints';
+import { formatDateTime } from '../utils/format';
+import { usePageClamp } from '../hooks/usePageClamp';
 import type { AuditLog } from '../api/types';
 
 export default function AuditLogsPage() {
@@ -14,6 +16,8 @@ export default function AuditLogsPage() {
     queryKey: ['audit-logs', action, page, pageSize],
     queryFn: ({ signal }) => auditApi.list(page, pageSize, action || undefined, signal),
   });
+
+  usePageClamp(page, setPage, data);
 
   return (
     <Card
@@ -51,7 +55,7 @@ export default function AuditLogsPage() {
             title: '时间',
             dataIndex: 'createdAt',
             width: 180,
-            render: (v: string) => new Date(v).toLocaleString(),
+            render: (v: string) => formatDateTime(v),
           },
           {
             title: '操作者',

@@ -18,6 +18,8 @@ import { PlusOutlined, CopyOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { redeemCodesApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
+import { formatDateTime, formatUsd } from '../utils/format';
+import { usePageClamp } from '../hooks/usePageClamp';
 import type { RedeemCode, RedeemCodeStatus } from '../api/types';
 
 const STATUS_META: Record<RedeemCodeStatus, { color: string; label: string }> = {
@@ -41,6 +43,8 @@ export default function AdminRedeemPage() {
     queryFn: ({ signal }) =>
       redeemCodesApi.list(page, pageSize, status === 'ALL' ? undefined : status, signal),
   });
+
+  usePageClamp(page, setPage, data);
 
   const generateMut = useMutation({
     mutationFn: (values: {
@@ -127,7 +131,7 @@ export default function AdminRedeemPage() {
           {
             title: '面值',
             dataIndex: 'amount',
-            render: (v: string) => `$${Number(v).toFixed(6)}`,
+            render: (v: string) => formatUsd(v),
           },
           {
             title: '状态',
@@ -140,12 +144,12 @@ export default function AdminRedeemPage() {
           {
             title: '过期时间',
             dataIndex: 'expiresAt',
-            render: (v: string | null) => (v ? new Date(v).toLocaleString() : '永久'),
+            render: (v: string | null) => (v ? formatDateTime(v) : '永久'),
           },
           {
             title: '使用时间',
             dataIndex: 'usedAt',
-            render: (v: string | null) => (v ? new Date(v).toLocaleString() : '-'),
+            render: (v: string | null) => (v ? formatDateTime(v) : '-'),
           },
           {
             title: '操作',

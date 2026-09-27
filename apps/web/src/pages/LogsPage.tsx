@@ -20,6 +20,8 @@ import { ReloadOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi, usageApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
+import { formatDateTime, formatUsd } from '../utils/format';
+import { usePageClamp } from '../hooks/usePageClamp';
 import type { LogFilters, RequestLogRow } from '../api/types';
 
 function TextBlock({ title, text }: { title: string; text: string | null }) {
@@ -61,6 +63,8 @@ export default function LogsPage() {
     queryKey: ['usage', 'logs', page, pageSize, scope, filters],
     queryFn: ({ signal }) => usageApi.logs(page, pageSize, scope, filters, signal),
   });
+
+  usePageClamp(page, setPage, data);
   const { data: detail, isLoading: detailLoading } = useQuery({
     queryKey: ['usage', 'log', detailId, scope],
     queryFn: ({ signal }) => usageApi.logDetail(detailId!, scope, signal),
@@ -181,7 +185,7 @@ export default function LogsPage() {
             title: '时间',
             dataIndex: 'createdAt',
             width: 170,
-            render: (v: string) => new Date(v).toLocaleString(),
+            render: (v: string) => formatDateTime(v),
           },
           { title: '模型', dataIndex: 'model' },
           { title: '服务商', dataIndex: 'provider', render: (v: string | null) => v ?? '-' },
@@ -201,7 +205,7 @@ export default function LogsPage() {
               </Tooltip>
             ),
           },
-          { title: '费用', dataIndex: 'cost', render: (v: string) => `$${Number(v).toFixed(6)}` },
+          { title: '费用', dataIndex: 'cost', render: (v: string) => formatUsd(v) },
           { title: '延迟', dataIndex: 'latencyMs', render: (v: number | null) => (v != null ? `${v}ms` : '-') },
           {
             title: '状态',
@@ -235,7 +239,7 @@ export default function LogsPage() {
           <>
             <Descriptions column={2} size="small" bordered>
               <Descriptions.Item label="时间">
-                {new Date(detail.createdAt).toLocaleString()}
+                {formatDateTime(detail.createdAt)}
               </Descriptions.Item>
               <Descriptions.Item label="模型">{detail.model}</Descriptions.Item>
               <Descriptions.Item label="服务商">{detail.provider ?? '-'}</Descriptions.Item>
@@ -249,7 +253,7 @@ export default function LogsPage() {
               </Descriptions.Item>
               <Descriptions.Item label="总 Tokens">{detail.totalTokens}</Descriptions.Item>
               <Descriptions.Item label="费用">
-                ${Number(detail.cost).toFixed(6)}
+                {formatUsd(detail.cost)}
               </Descriptions.Item>
               <Descriptions.Item label="延迟">
                 {detail.latencyMs != null ? `${detail.latencyMs}ms` : '-'}

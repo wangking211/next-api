@@ -11,17 +11,18 @@ export default function LoginPage() {
   const { login, register } = useAuth();
   const navigate = useNavigate();
   const { message } = App.useApp();
-  const [loading, setLoading] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [registerLoading, setRegisterLoading] = useState(false);
 
   const handleLogin = async (values: { identifier: string; password: string }) => {
-    setLoading(true);
+    setLoginLoading(true);
     try {
       await login(values.identifier, values.password);
       navigate('/dashboard');
     } catch (e) {
       message.error(errorMessage(e));
     } finally {
-      setLoading(false);
+      setLoginLoading(false);
     }
   };
 
@@ -30,7 +31,7 @@ export default function LoginPage() {
     username: string;
     password: string;
   }) => {
-    setLoading(true);
+    setRegisterLoading(true);
     try {
       await register(values.email, values.username, values.password);
       message.success('注册成功');
@@ -38,7 +39,7 @@ export default function LoginPage() {
     } catch (e) {
       message.error(errorMessage(e));
     } finally {
-      setLoading(false);
+      setRegisterLoading(false);
     }
   };
 
@@ -52,7 +53,7 @@ export default function LoginPage() {
         background: '#f0f2f5',
       }}
     >
-      <Card style={{ width: 400 }}>
+      <Card style={{ width: 400, maxWidth: '100%', margin: 16 }}>
         <Title level={3} style={{ textAlign: 'center', marginBottom: 4 }}>
           AI Gateway
         </Title>
@@ -81,7 +82,7 @@ export default function LoginPage() {
                   >
                     <Input.Password prefix={<LockOutlined />} placeholder="密码" />
                   </Form.Item>
-                  <Button type="primary" htmlType="submit" block loading={loading}>
+                  <Button type="primary" htmlType="submit" block loading={loginLoading}>
                     登录
                   </Button>
                 </Form>
@@ -119,11 +120,15 @@ export default function LoginPage() {
                     rules={[
                       { required: true, message: '请输入密码' },
                       { min: 8, message: '至少 8 个字符' },
+                      {
+                        pattern: /(?=.*[A-Za-z])(?=.*\d)/,
+                        message: '需同时包含字母和数字',
+                      },
                     ]}
                   >
-                    <Input.Password prefix={<LockOutlined />} placeholder="至少 8 位" />
+                    <Input.Password prefix={<LockOutlined />} placeholder="至少 8 位，含字母和数字" />
                   </Form.Item>
-                  <Button type="primary" htmlType="submit" block loading={loading}>
+                  <Button type="primary" htmlType="submit" block loading={registerLoading}>
                     注册
                   </Button>
                 </Form>

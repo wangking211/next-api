@@ -18,6 +18,7 @@ import { PlusOutlined, CopyOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { keysApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
+import { formatDateTime, formatUsd } from '../utils/format';
 import type { ApiKeyCreated, ApiKeyInfo } from '../api/types';
 
 export default function KeysPage() {
@@ -105,8 +106,8 @@ export default function KeysPage() {
             title: '费用用量',
             render: (_, r) =>
               r.costLimit
-                ? `$${Number(r.costUsed).toFixed(4)} / $${Number(r.costLimit).toFixed(4)}`
-                : `$${Number(r.costUsed).toFixed(4)} / ∞`,
+                ? `${formatUsd(r.costUsed)} / ${formatUsd(r.costLimit)}`
+                : `${formatUsd(r.costUsed)} / ∞`,
           },
           {
             title: 'RPM',
@@ -116,7 +117,7 @@ export default function KeysPage() {
           {
             title: '最近使用',
             dataIndex: 'lastUsedAt',
-            render: (v: string | null) => (v ? new Date(v).toLocaleString() : '从未'),
+            render: (v: string | null) => (v ? formatDateTime(v) : '从未'),
           },
           {
             title: '操作',

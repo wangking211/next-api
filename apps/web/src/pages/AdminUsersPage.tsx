@@ -15,6 +15,8 @@ import { SearchOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
+import { formatUsd } from '../utils/format';
+import { usePageClamp } from '../hooks/usePageClamp';
 import type { AdminUser } from '../api/types';
 
 type Mode = 'recharge' | 'adjust';
@@ -33,6 +35,8 @@ export default function AdminUsersPage() {
     queryKey: ['admin', 'users', q, page, pageSize],
     queryFn: ({ signal }) => adminApi.users(q || undefined, page, pageSize, signal),
   });
+
+  usePageClamp(page, setPage, data);
 
   const mutate = useMutation({
     mutationFn: async (values: { amount: number; description?: string }) => {
@@ -108,7 +112,7 @@ export default function AdminUsersPage() {
           {
             title: '余额',
             dataIndex: 'balance',
-            render: (v: string) => `$${Number(v).toFixed(6)}`,
+            render: (v: string) => formatUsd(v),
           },
           {
             title: 'Key / 渠道',
@@ -148,6 +152,7 @@ export default function AdminUsersPage() {
           >
             <InputNumber
               min={mode === 'recharge' ? 0.000001 : undefined}
+              max={1000000}
               step={0.1}
               style={{ width: '100%' }}
             />

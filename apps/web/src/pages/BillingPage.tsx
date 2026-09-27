@@ -17,6 +17,8 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { billingApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
+import { formatDateTime, formatUsd } from '../utils/format';
+import { usePageClamp } from '../hooks/usePageClamp';
 import type { BalanceTransaction, BalanceTxType } from '../api/types';
 
 const TYPE_META: Record<BalanceTxType, { color: string; label: string }> = {
@@ -43,10 +45,12 @@ export default function BillingPage() {
       billingApi.transactions(page, pageSize, type === 'ALL' ? undefined : type, signal),
   });
 
+  usePageClamp(page, setPage, data);
+
   const redeemMut = useMutation({
     mutationFn: billingApi.redeem,
     onSuccess: (res) => {
-      message.success(`兑换成功，入账 $${res.amount.toFixed(6)}`);
+      message.success(`兑换成功，入账 ${formatUsd(res.amount)}`);
       setCode('');
       qc.invalidateQueries({ queryKey: ['billing'] });
     },
@@ -125,7 +129,7 @@ export default function BillingPage() {
                 title: '时间',
                 dataIndex: 'createdAt',
                 width: 180,
-                render: (v: string) => new Date(v).toLocaleString(),
+                render: (v: string) => formatDateTime(v),
               },
               {
                 title: '类型',
@@ -150,7 +154,7 @@ export default function BillingPage() {
               {
                 title: '余额快照',
                 dataIndex: 'balanceAfter',
-                render: (v: string) => `$${Number(v).toFixed(6)}`,
+                render: (v: string) => formatUsd(v),
               },
               { title: '说明', dataIndex: 'description', render: (v) => v ?? '-' },
             ]}

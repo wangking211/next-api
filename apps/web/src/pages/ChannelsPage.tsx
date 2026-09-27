@@ -21,6 +21,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { channelsApi, modelsApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { usePageClamp } from '../hooks/usePageClamp';
 import type { ChannelInfo, ChannelTestResult } from '../api/types';
 
 const PROVIDERS = [
@@ -116,6 +117,8 @@ export default function ChannelsPage() {
     queryKey: ['channels', filters, page, pageSize],
     queryFn: ({ signal }) => channelsApi.list({ ...filters, page, pageSize }, signal),
   });
+
+  usePageClamp(page, setPage, data);
   const { data: catalog = [] } = useQuery({
     queryKey: ['models'],
     queryFn: ({ signal }) => modelsApi.list(signal),
