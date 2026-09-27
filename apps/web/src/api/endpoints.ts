@@ -3,6 +3,8 @@ import {
   ApiKeyCreated,
   ApiKeyInfo,
   AdminUser,
+  AgentMember,
+  AgentOverview,
   AuditLog,
   AvailableChannelModels,
   BalanceTransaction,
@@ -289,6 +291,17 @@ export const auditApi = {
       params: { page, pageSize, action },
       signal,
     });
+    return data;
+  },
+};
+
+export const agentApi = {
+  async overview(signal?: AbortSignal) {
+    const { data } = await api.get<AgentOverview>('/agent/overview', { signal });
+    return data;
+  },
+  async members(signal?: AbortSignal) {
+    const { data } = await api.get<AgentMember[]>('/agent/members', { signal });
     return data;
   },
 };

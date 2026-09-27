@@ -16,6 +16,7 @@ const ModelsPage = lazy(() => import('./pages/ModelsPage'));
 const LogsPage = lazy(() => import('./pages/LogsPage'));
 const UsageStatsPage = lazy(() => import('./pages/UsageStatsPage'));
 const BillingPage = lazy(() => import('./pages/BillingPage'));
+const AgentPage = lazy(() => import('./pages/AgentPage'));
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
 const AdminRedeemPage = lazy(() => import('./pages/AdminRedeemPage'));
 const AuditLogsPage = lazy(() => import('./pages/AuditLogsPage'));
@@ -46,6 +47,7 @@ export default function App() {
                 <Route path="/logs" element={<LogsPage />} />
                 <Route path="/usage-stats" element={<UsageStatsPage />} />
                 <Route path="/billing" element={<BillingPage />} />
+                <Route path="/agent" element={<AgentPage />} />
                 <Route element={<AdminRoute />}>
                   <Route path="/users" element={<AdminUsersPage />} />
                   <Route path="/redeem-codes" element={<AdminRedeemPage />} />

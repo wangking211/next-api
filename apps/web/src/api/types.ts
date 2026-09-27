@@ -2,7 +2,7 @@ export interface UserInfo {
   id: string;
   email: string;
   username: string;
-  role: 'USER' | 'ADMIN';
+  role: 'USER' | 'ADMIN' | 'AGENT';
   createdAt: string;
 }
 
@@ -289,4 +289,24 @@ export interface CommonModel {
   provider: string;
   inputPrice: number;
   outputPrice: number;
+}
+
+export interface AgentOverview {
+  balance: number;
+  rebateRate: number | null;
+  priceMultiplier: number | null;
+  memberCount: number;
+  commissionTotal: number;
+  membersUsage30d: { requests: number; tokens: number; cost: number };
+}
+
+export interface AgentMember {
+  id: string;
+  username: string;
+  email: string;
+  status: string;
+  balance: number;
+  priceMultiplier: number | null;
+  createdAt: string;
+  usage30d: { requests: number; tokens: number; cost: number };
 }

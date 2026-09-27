@@ -15,6 +15,7 @@ import { GatewayModule } from './gateway/gateway.module';
 import { UsageModule } from './usage/usage.module';
 import { BillingModule } from './billing/billing.module';
 import { AuditModule } from './audit/audit.module';
+import { AgentModule } from './agent/agent.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { AuditModule } from './audit/audit.module';
     UsageModule,
     BillingModule,
     AuditModule,
+    AgentModule,
   ],
 })
 export class AppModule {}

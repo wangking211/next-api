@@ -14,6 +14,7 @@ import {
   AuditOutlined,
   TagsOutlined,
   BarChartOutlined,
+  ApartmentOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
@@ -27,7 +28,7 @@ export default function AppLayout() {
   const { user, logout } = useAuth();
 
   const selectedKey = useMemo(() => {
-    const match = ['/keys', '/channels', '/available-models', '/models', '/logs', '/usage-stats', '/billing', '/users', '/redeem-codes', '/audit-logs'].find((p) =>
+    const match = ['/keys', '/channels', '/available-models', '/models', '/logs', '/usage-stats', '/billing', '/agent', '/users', '/redeem-codes', '/audit-logs'].find((p) =>
       location.pathname.startsWith(p),
     );
     return match ?? '/dashboard';
@@ -42,6 +43,9 @@ export default function AppLayout() {
     { key: '/logs', icon: <FileTextOutlined />, label: '调用日志' },
     { key: '/usage-stats', icon: <BarChartOutlined />, label: '使用统计' },
     { key: '/billing', icon: <WalletOutlined />, label: '余额与账单' },
+    ...(user?.role === 'AGENT' || user?.role === 'ADMIN'
+      ? [{ key: '/agent', icon: <ApartmentOutlined />, label: '代理中心' }]
+      : []),
     ...(user?.role === 'ADMIN'
       ? [
           { key: '/users', icon: <TeamOutlined />, label: '用户管理' },
