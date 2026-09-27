@@ -3,6 +3,7 @@ services:
     image: postgres:16-alpine
     container_name: ai-gateway-postgres
     restart: unless-stopped
+    mem_limit: 384m
     environment:
       POSTGRES_USER: aigw
       POSTGRES_PASSWORD: aigw_dev_pass
@@ -21,6 +22,7 @@ services:
     image: redis:7-alpine
     container_name: ai-gateway-redis
     restart: unless-stopped
+    mem_limit: 160m
     command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "6379:6379"
@@ -39,10 +41,14 @@ services:
       dockerfile: apps/api/Dockerfile
     container_name: ai-gateway-api
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    mem_limit: 720m
     environment:
       DATABASE_URL: postgresql://aigw:aigw_dev_pass@postgres:5432/ai_gateway?schema=public
       REDIS_URL: redis://redis:6379
       NODE_ENV: ${NODE_ENV:-development}
+      NODE_OPTIONS: ${NODE_OPTIONS:---max-old-space-size=512}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
@@ -63,6 +69,12 @@ services:
     command: >
       sh -c "apps/api/node_modules/.bin/prisma migrate deploy --schema apps/api/prisma/schema.prisma &&
              node apps/api/dist/main.js"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
 
   web:
     profiles: ["full"]
@@ -71,10 +83,18 @@ services:
       dockerfile: apps/web/Dockerfile
     container_name: ai-gateway-web
     restart: unless-stopped
+    mem_limit: 96m
     ports:
       - "8080:80"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   pgdata:
