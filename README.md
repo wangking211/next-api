@@ -206,22 +206,35 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile full u
 
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) 会在 `main` 分支 **CI 成功后自动** SSH 到服务器执行 `./deploy.sh`，也可在 Actions 页面手动触发。
 
-需在仓库 **Settings → Secrets and variables → Actions** 配置：
+#### 1. 生成部署密钥并安装公钥
 
-| Secret | 必填 | 说明 |
+```bash
+# 生成专用密钥（无口令）
+ssh-keygen -t ed25519 -f ~/.ssh/aigw_deploy -N '' -C 'github-actions-deploy'
+
+# 把公钥装到服务器（或手动追加到 ~/.ssh/authorized_keys）
+ssh-copy-id -i ~/.ssh/aigw_deploy.pub root@<服务器>
+
+# 验证可用（BatchMode 禁止回退到密码，失败即报错）
+ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器> 'echo key-auth-ok'
+```
+
+#### 2. 在仓库中添加 Secrets
+
+打开 **Settings → Secrets and variables → Actions → New repository secret**，逐个添加：
+
+| Secret | 必填 | 值 |
 | --- | --- | --- |
-| `DEPLOY_HOST` | 是 | 服务器地址（如 `170.106.82.224`） |
-| `DEPLOY_SSH_KEY` | 是 | 部署私钥全文（含 `-----BEGIN/END OPENSSH PRIVATE KEY-----`） |
+| `DEPLOY_HOST` | 是 | 服务器地址，如 `170.106.82.224` |
+| `DEPLOY_SSH_KEY` | 是 | 上一步私钥的**全文**，含 `-----BEGIN/END OPENSSH PRIVATE KEY-----`（用 `cat ~/.ssh/aigw_deploy` 取） |
 | `DEPLOY_USER` | 否 | SSH 用户，默认 `root` |
 | `DEPLOY_PATH` | 否 | 仓库目录，默认 `/opt/AiProject` |
 
-部署私钥对应的公钥需加入服务器 `~/.ssh/authorized_keys`：
+#### 3. 触发部署与验证
 
-```bash
-ssh-keygen -t ed25519 -f ~/.ssh/aigw_deploy -N '' -C 'github-actions-deploy'
-ssh-copy-id -i ~/.ssh/aigw_deploy.pub root@<服务器>
-# 将 ~/.ssh/aigw_deploy 的全文填入 DEPLOY_SSH_KEY
-```
+- 推送到 `main` 后 CI 通过即自动部署；或在 **Actions → Deploy → Run workflow** 手动触发；
+- **未配置 `DEPLOY_HOST` / `DEPLOY_SSH_KEY` 时，Deploy 会以明确报错失败（属预期）**，配置 secrets 后重跑该任务即可；
+- 部署脚本自身会校验容器健康与 `/api/health`，失败会在日志中体现。
 
 ## 安全说明
 
