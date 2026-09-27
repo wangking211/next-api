@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { User } from '@prisma/client';
+import { Prisma, User } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { UsersService } from '../users/users.service';
 import { RedisService } from '../redis/redis.service';
@@ -68,11 +68,20 @@ export class AuthService {
     if (byUsername) throw new ConflictException('Username already taken');
 
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
-    const user = await this.users.create({
-      email,
-      username: dto.username,
-      passwordHash,
-    });
+    let user: User;
+    try {
+      user = await this.users.create({
+        email,
+        username: dto.username,
+        passwordHash,
+      });
+    } catch (e) {
+      // 并发/重复注册命中唯一约束时返回 409，而非 500
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ConflictException('Email or username already registered');
+      }
+      throw e;
+    }
     return this.sign(user);
   }
 
