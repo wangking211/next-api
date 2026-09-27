@@ -105,20 +105,23 @@ export class BillingService {
     return p.priceInput === 0 && p.priceOutput === 0;
   }
 
-  /** 用户的有效售价折扣 = 用户折扣 > 所属代理折扣 > 1 */
-  async getUserDiscount(userId: string): Promise<number> {
+  /** 用户的有效售价倍率 = 用户倍率 > 所属代理倍率 > 1（作用在渠道价之上） */
+  async getUserMultiplier(userId: string): Promise<number> {
     const u = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { discount: true, agent: { select: { discount: true } } },
+      select: {
+        priceMultiplier: true,
+        agent: { select: { priceMultiplier: true } },
+      },
     });
     if (!u) return 1;
-    const d =
-      u.discount != null
-        ? Number(u.discount)
-        : u.agent?.discount != null
-          ? Number(u.agent.discount)
+    const m =
+      u.priceMultiplier != null
+        ? Number(u.priceMultiplier)
+        : u.agent?.priceMultiplier != null
+          ? Number(u.agent.priceMultiplier)
           : 1;
-    return d > 0 ? d : 1;
+    return m > 0 ? m : 1;
   }
 
   async listTransactions(

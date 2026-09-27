@@ -75,9 +75,9 @@ export class UsersService {
           role: true,
           status: true,
           balance: true,
-          discount: true,
+          priceMultiplier: true,
           agentId: true,
-          agent: { select: { id: true, username: true, discount: true } },
+          agent: { select: { id: true, username: true, priceMultiplier: true } },
           createdAt: true,
           _count: { select: { apiKeys: true, channels: true } },
         },
@@ -87,10 +87,10 @@ export class UsersService {
     return { items, total, page, pageSize };
   }
 
-  /** 管理员：更新用户角色/额外折扣/归属代理（可清空折扣与代理） */
+  /** 管理员：更新用户角色/售价倍率/归属代理（可清空倍率与代理） */
   async updateUser(
     id: string,
-    data: { role?: Role; discount?: number | null; agentId?: string | null },
+    data: { role?: Role; priceMultiplier?: number | null; agentId?: string | null },
   ) {
     const user = await this.findById(id);
     if (!user) throw new NotFoundException('User not found');
@@ -98,7 +98,9 @@ export class UsersService {
       where: { id },
       data: {
         ...(data.role !== undefined ? { role: data.role } : {}),
-        ...(data.discount !== undefined ? { discount: data.discount } : {}),
+        ...(data.priceMultiplier !== undefined
+          ? { priceMultiplier: data.priceMultiplier }
+          : {}),
         ...(data.agentId !== undefined ? { agentId: data.agentId } : {}),
       },
       select: {
@@ -108,7 +110,7 @@ export class UsersService {
         role: true,
         status: true,
         balance: true,
-        discount: true,
+        priceMultiplier: true,
         agentId: true,
       },
     });

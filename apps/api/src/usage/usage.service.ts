@@ -63,7 +63,7 @@ export class UsageService {
     this.maxChars = Number(config.get<string>('LOG_CONTENT_MAX', '20000')) || 20000;
   }
 
-  /** 按渠道×模型定价计算向用户收取的费用与上游成本（售价再乘用户/代理折扣）。 */
+  /** 按渠道×模型定价计算费用；售价再乘用户/代理倍率（相对渠道价）。 */
   async computeCosts(
     channelId: string | null,
     model: string,
@@ -72,11 +72,11 @@ export class UsageService {
     userId?: string,
   ): Promise<{ cost: number; upstreamCost: number }> {
     const pricing = await this.billing.getChannelPricing(channelId, model);
-    const discount = userId ? await this.billing.getUserDiscount(userId) : 1;
+    const multiplier = userId ? await this.billing.getUserMultiplier(userId) : 1;
     const cost = round6(
       ((promptTokens / 1_000_000) * pricing.priceInput +
         (completionTokens / 1_000_000) * pricing.priceOutput) *
-        discount,
+        multiplier,
     );
     const upstreamCost = round6(
       (promptTokens / 1_000_000) * pricing.costInput +

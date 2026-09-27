@@ -208,9 +208,9 @@ export interface AdminUser {
   role: 'USER' | 'ADMIN' | 'AGENT';
   status: 'ACTIVE' | 'BANNED';
   balance: string;
-  discount: string | null;
+  priceMultiplier: string | null;
   agentId: string | null;
-  agent: { id: string; username: string; discount: string | null } | null;
+  agent: { id: string; username: string; priceMultiplier: string | null } | null;
   createdAt: string;
   _count: { apiKeys: number; channels: number };
 }

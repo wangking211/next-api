@@ -53,13 +53,13 @@ export default function AdminUsersPage() {
   const saveEditMut = useMutation({
     mutationFn: async (values: {
       role?: string;
-      discount?: number | null;
+      priceMultiplier?: number | null;
       agentId?: string | null;
     }) => {
       if (!editUser) return;
       await adminApi.updateUser(editUser.id, {
         role: values.role,
-        discount: values.discount ?? null,
+        priceMultiplier: values.priceMultiplier ?? null,
         agentId: values.agentId ?? null,
       });
     },
@@ -76,7 +76,7 @@ export default function AdminUsersPage() {
     setEditUser(u);
     editForm.setFieldsValue({
       role: u.role,
-      discount: u.discount != null ? Number(u.discount) : undefined,
+      priceMultiplier: u.priceMultiplier != null ? Number(u.priceMultiplier) : undefined,
       agentId: u.agentId ?? undefined,
     });
   };
@@ -177,11 +177,12 @@ export default function AdminUsersPage() {
             render: (v: string) => formatCredits(v),
           },
           {
-            title: '折扣',
+            title: '用户倍率',
             render: (_, r) => {
-              if (r.discount != null) return `${Number(r.discount)}（自定义）`;
-              if (r.agent?.discount != null) return `${Number(r.agent.discount)}（代理）`;
-              return '-';
+              if (r.priceMultiplier != null) return `×${Number(r.priceMultiplier)}（自定义）`;
+              if (r.agent?.priceMultiplier != null)
+                return `×${Number(r.agent.priceMultiplier)}（代理）`;
+              return '×1';
             },
           },
           {
@@ -343,16 +344,15 @@ export default function AdminUsersPage() {
             />
           </Form.Item>
           <Form.Item
-            name="discount"
-            label="自定义折扣率（0-1，留空=继承代理）"
-            extra="额外作用于售价：0.9 = 九折"
+            name="priceMultiplier"
+            label="用户倍率（×渠道价，1=相同，>1 加价）"
+            extra="留空=继承代理；用户价 = 渠道价 × 该倍率"
           >
             <InputNumber
               min={0}
-              max={1}
               step={0.05}
               style={{ width: '100%' }}
-              placeholder="留空=继承代理"
+              placeholder="留空=继承代理（默认 1）"
             />
           </Form.Item>
         </Form>

@@ -109,12 +109,12 @@ export class GatewayController {
       }
       return cachedBalance;
     };
-    let cachedDiscount: number | null = null;
-    const getUserDiscount = async () => {
-      if (cachedDiscount === null) {
-        cachedDiscount = await this.billing.getUserDiscount(user.id);
+    let cachedMultiplier: number | null = null;
+    const getUserMultiplier = async () => {
+      if (cachedMultiplier === null) {
+        cachedMultiplier = await this.billing.getUserMultiplier(user.id);
       }
-      return cachedDiscount;
+      return cachedMultiplier;
     };
     const maxOutputTokens =
       Number(body?.max_tokens ?? body?.max_completion_tokens ?? 0) ||
@@ -137,7 +137,7 @@ export class GatewayController {
         const required =
           ((promptFallback / 1_000_000) * p.priceInput +
             (maxOutputTokens / 1_000_000) * p.priceOutput) *
-          (await getUserDiscount());
+          (await getUserMultiplier());
         if (required > 0 && (await getBalance()) < required) {
           insufficientBalance = true;
           continue;

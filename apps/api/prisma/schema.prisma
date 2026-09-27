@@ -26,8 +26,8 @@ model User {
   role         Role       @default(USER)
   status       UserStatus @default(ACTIVE)
   balance      Decimal    @default(0) @db.Decimal(18, 6)
-  /// 该用户的额外售价折扣率（0.9 = 九折）；为空时继承所属代理的折扣
-  discount     Decimal?   @db.Decimal(6, 4)
+  /// 用户价倍率（相对渠道价）：用户价 = 渠道价 × 倍率；为空时继承所属代理的倍率，代理也为空则 1
+  priceMultiplier Decimal? @db.Decimal(6, 4)
   /// 所属代理/分销商（role=AGENT 的用户）
   agentId      String?
   agent        User?      @relation("AgentMembers", fields: [agentId], references: [id], onDelete: SetNull)
