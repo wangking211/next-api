@@ -9,8 +9,11 @@ function makeService(code: any, balance = 0, claimCount = 1) {
       updateMany: jest.fn().mockResolvedValue({ count: claimCount }),
     },
     user: {
-      findUnique: jest.fn().mockResolvedValue({ balance }),
-      update: jest.fn().mockResolvedValue({}),
+      findUnique: jest.fn().mockResolvedValue({ id: 'user1', balance }),
+      update: jest.fn(({ data }: any) => {
+        const inc = data?.balance?.increment ?? 0;
+        return Promise.resolve({ balance: balance + inc });
+      }),
     },
     balanceTransaction: { create: jest.fn().mockResolvedValue({}) },
   };
@@ -31,7 +34,8 @@ describe('BillingService.redeem', () => {
     expect(res).toEqual({ balance: 15, amount: 10 });
     expect(tx.user.update).toHaveBeenCalledWith({
       where: { id: 'user1' },
-      data: { balance: 15 },
+      data: { balance: { increment: 10 } },
+      select: { balance: true },
     });
     expect(tx.redeemCode.updateMany).toHaveBeenCalledWith({
       where: { id: 'rc1', status: RedeemCodeStatus.UNUSED },

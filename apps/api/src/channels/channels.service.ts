@@ -10,6 +10,7 @@ import { CryptoService } from '../common/crypto.service';
 import { AuthUser } from '../common/interfaces/auth.interface';
 import { ProviderRegistry } from '../gateway/providers/provider.registry';
 import { UpstreamError } from '../gateway/types';
+import { assertPublicHttpUrl, UnsafeUrlError } from '../common/url-safety';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
 
@@ -59,6 +60,18 @@ export class ChannelsService {
     private readonly crypto: CryptoService,
     private readonly providers: ProviderRegistry,
   ) {}
+
+  private async assertSafeBaseUrl(baseUrl: string): Promise<void> {
+    // 生产环境禁止渠道 baseUrl 指向私网/回环（SSRF）；如需本地 mock 上游可设 ALLOW_PRIVATE_UPSTREAM=true
+    if (process.env.NODE_ENV !== 'production' || process.env.ALLOW_PRIVATE_UPSTREAM === 'true') {
+      return;
+    }
+    try {
+      await assertPublicHttpUrl(baseUrl);
+    } catch (e) {
+      throw new BadRequestException(e instanceof UnsafeUrlError ? e.message : 'baseUrl 不安全');
+    }
+  }
 
   private view(c: Channel) {
     let preview = '';
@@ -134,6 +147,8 @@ export class ChannelsService {
       ? ChannelOwnerType.PLATFORM
       : ChannelOwnerType.USER;
 
+    await this.assertSafeBaseUrl(dto.baseUrl);
+
     const channel = await this.prisma.channel.create({
       data: {
         ownerType,
@@ -165,6 +180,7 @@ export class ChannelsService {
 
   async update(user: AuthUser, id: string, dto: UpdateChannelDto) {
     await this.findAccessible(user, id);
+    if (dto.baseUrl) await this.assertSafeBaseUrl(dto.baseUrl);
     const channel = await this.prisma.channel.update({
       where: { id },
       data: {
@@ -320,6 +336,7 @@ export class ChannelsService {
       }
     }
     const models = this.resolveTestModels(dto, []);
+    if (dto.baseUrl) await this.assertSafeBaseUrl(dto.baseUrl);
     return this.runUpstreamTests(
       { provider: dto.provider, baseUrl: dto.baseUrl, apiKey },
       models,

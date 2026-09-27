@@ -6,7 +6,7 @@ import {
   StreamResult,
   UpstreamError,
 } from '../types';
-import { joinUrl, sseEvents, describeFetchError } from './stream.util';
+import { joinUrl, sseEvents, describeFetchError, combineSignals } from './stream.util';
 
 const ANTHROPIC_VERSION = '2023-06-01';
 
@@ -145,6 +145,7 @@ export class AnthropicProvider implements Provider {
     body: Record<string, any>,
     stream: boolean,
     timeoutMs = 120000,
+    signal?: AbortSignal,
   ): Promise<Response> {
     const url = joinUrl(channel.baseUrl, 'messages');
     try {
@@ -155,7 +156,8 @@ export class AnthropicProvider implements Provider {
           ...(stream ? { Accept: 'text/event-stream' } : {}),
         },
         body: JSON.stringify(stream ? { ...body, stream: true } : body),
-        signal: AbortSignal.timeout(timeoutMs),
+        redirect: 'manual',
+        signal: combineSignals(timeoutMs, signal),
       });
     } catch (e: any) {
       throw new UpstreamError(
@@ -171,7 +173,7 @@ export class AnthropicProvider implements Provider {
     apiKey: string,
     req: ChatRequest,
   ): Promise<NonStreamResult> {
-    const res = await this.request(channel, apiKey, buildAnthropicBody(req), false, req.timeoutMs);
+    const res = await this.request(channel, apiKey, buildAnthropicBody(req), false, req.timeoutMs, req.signal);
     const text = await res.text();
     let json: any;
     try {
@@ -201,7 +203,7 @@ export class AnthropicProvider implements Provider {
     apiKey: string,
     req: ChatRequest,
   ): Promise<StreamResult> {
-    const res = await this.request(channel, apiKey, buildAnthropicBody(req), true, req.timeoutMs);
+    const res = await this.request(channel, apiKey, buildAnthropicBody(req), true, req.timeoutMs, req.signal);
     if (!res.ok) {
       const text = await res.text();
       let json: any;

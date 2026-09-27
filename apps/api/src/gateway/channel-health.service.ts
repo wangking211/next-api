@@ -45,14 +45,17 @@ export class ChannelHealthService {
         channel.failureCount >= this.threshold &&
         channel.status === ChannelStatus.ENABLED
       ) {
-        await this.prisma.channel.update({
-          where: { id: channelId },
+        // 条件更新：并发下只有一个请求能完成"启用→禁用"转换，避免重复告警
+        const disabled = await this.prisma.channel.updateMany({
+          where: { id: channelId, status: ChannelStatus.ENABLED },
           data: { status: ChannelStatus.DISABLED, autoDisabled: true },
         });
-        this.logger.warn(
-          `渠道 "${channel.name}" 连续失败 ${channel.failureCount} 次，已自动禁用`,
-        );
-        await this.sendAlert(channel, message);
+        if (disabled.count === 1) {
+          this.logger.warn(
+            `渠道 "${channel.name}" 连续失败 ${channel.failureCount} 次，已自动禁用`,
+          );
+          await this.sendAlert(channel, message);
+        }
       }
     } catch {
       /* ignore */

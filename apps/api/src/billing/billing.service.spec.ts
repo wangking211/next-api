@@ -5,8 +5,12 @@ import { BalanceTxType } from '@prisma/client';
 function makeService(balance: number) {
   const tx = {
     user: {
-      findUnique: jest.fn().mockResolvedValue({ balance }),
-      update: jest.fn().mockResolvedValue({}),
+      findUnique: jest.fn().mockResolvedValue({ id: 'user1', balance }),
+      update: jest.fn(({ data }: any) => {
+        const inc = data?.balance?.increment ?? 0;
+        const dec = data?.balance?.decrement ?? 0;
+        return Promise.resolve({ balance: balance + inc - dec });
+      }),
     },
     balanceTransaction: { create: jest.fn().mockResolvedValue({}) },
   };
@@ -23,7 +27,8 @@ describe('BillingService', () => {
     await service.recharge('admin1', 'user1', 3, 'top up');
     expect(tx.user.update).toHaveBeenCalledWith({
       where: { id: 'user1' },
-      data: { balance: 8 },
+      data: { balance: { increment: 3 } },
+      select: { balance: true },
     });
     expect(tx.balanceTransaction.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -50,7 +55,8 @@ describe('BillingService', () => {
     await service.adjust('admin1', 'user1', -2.5, 'correction');
     expect(tx.user.update).toHaveBeenCalledWith({
       where: { id: 'user1' },
-      data: { balance: 7.5 },
+      data: { balance: { increment: -2.5 } },
+      select: { balance: true },
     });
     expect(tx.balanceTransaction.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ amount: -2.5, balanceAfter: 7.5, type: BalanceTxType.ADJUST }),
@@ -62,7 +68,8 @@ describe('BillingService', () => {
     await service.recordConsumption(tx as any, 'user1', 0.000025, 'log1', 'call gpt');
     expect(tx.user.update).toHaveBeenCalledWith({
       where: { id: 'user1' },
-      data: { balance: 0.999975 },
+      data: { balance: { decrement: 0.000025 } },
+      select: { balance: true },
     });
     expect(tx.balanceTransaction.create).toHaveBeenCalledWith({
       data: expect.objectContaining({

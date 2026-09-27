@@ -204,6 +204,9 @@ model RequestLog {
 
   @@index([userId, createdAt])
   @@index([apiKeyId, createdAt])
+  @@index([channelId, createdAt])
+  @@index([status, createdAt])
+  @@index([createdAt])
 }
 
 model UsageDaily {
@@ -221,4 +224,5 @@ model UsageDaily {
 
   @@unique([userId, apiKeyId, date])
   @@index([userId, date])
+  @@index([apiKeyId, date])
 }

@@ -40,11 +40,22 @@ async function bootstrap() {
     ],
   });
 
-  const corsOrigin = config.get<string>('CORS_ORIGIN', '*');
-  app.enableCors({
-    origin: corsOrigin === '*' ? true : corsOrigin.split(',').map((o) => o.trim()),
-    credentials: true,
-  });
+  const corsOrigin = config.get<string>('CORS_ORIGIN', '').trim();
+  const isProd = config.get<string>('NODE_ENV') === 'production';
+  if (corsOrigin && corsOrigin !== '*') {
+    app.enableCors({
+      origin: corsOrigin
+        .split(',')
+        .map((o) => o.trim())
+        .filter(Boolean),
+      credentials: true,
+    });
+  } else if (isProd) {
+    // 生产未显式配置来源时关闭跨域（同源请求不受影响），避免反射任意 Origin + credentials
+    app.enableCors({ origin: false });
+  } else {
+    app.enableCors({ origin: true, credentials: true });
+  }
 
   app.useGlobalPipes(
     new ValidationPipe({

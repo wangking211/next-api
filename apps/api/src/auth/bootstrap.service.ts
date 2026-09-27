@@ -27,7 +27,7 @@ export class BootstrapService {
       return;
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(password, 12);
     await this.users.create({
       email: email.toLowerCase(),
       username,

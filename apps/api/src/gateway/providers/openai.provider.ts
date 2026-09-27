@@ -6,7 +6,7 @@ import {
   StreamResult,
   UpstreamError,
 } from '../types';
-import { joinUrl, pipeRaw, describeFetchError } from './stream.util';
+import { joinUrl, pipeRaw, describeFetchError, combineSignals } from './stream.util';
 
 function extractUsage(json: any) {
   const u = json?.usage;
@@ -47,7 +47,8 @@ export class OpenAiCompatibleProvider implements Provider {
         method: 'POST',
         headers: this.headers(apiKey),
         body: JSON.stringify(req.body),
-        signal: AbortSignal.timeout(req.timeoutMs ?? 120000),
+        redirect: 'manual',
+        signal: combineSignals(req.timeoutMs, req.signal),
       });
     } catch (e: any) {
       throw new UpstreamError(
@@ -84,7 +85,8 @@ export class OpenAiCompatibleProvider implements Provider {
         method: 'POST',
         headers: { ...this.headers(apiKey), Accept: 'text/event-stream' },
         body: JSON.stringify({ ...req.body, stream: true }),
-        signal: AbortSignal.timeout(req.timeoutMs ?? 120000),
+        redirect: 'manual',
+        signal: combineSignals(req.timeoutMs, req.signal),
       });
     } catch (e: any) {
       throw new UpstreamError(

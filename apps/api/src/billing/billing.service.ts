@@ -21,6 +21,16 @@ export class BillingService {
     return { balance: Number(user.balance) };
   }
 
+  /** 该模型是否为 0 价（平台渠道对 0 价模型不校验余额）。目录缺失时按需付费处理。 */
+  async isModelFree(model: string): Promise<boolean> {
+    const row = await this.prisma.modelCatalog.findUnique({
+      where: { name: model },
+      select: { inputPrice: true, outputPrice: true },
+    });
+    if (!row) return false;
+    return Number(row.inputPrice) === 0 && Number(row.outputPrice) === 0;
+  }
+
   async listTransactions(
     userId: string,
     page = 1,
@@ -51,20 +61,22 @@ export class BillingService {
     description?: string,
   ) {
     const delta = round6(amount);
-    if (delta === 0) throw new NotFoundException('Amount must be non-zero');
+    if (delta === 0) throw new BadRequestException('Amount must be non-zero');
 
     return this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.findUnique({
+      const exists = await tx.user.findUnique({
         where: { id: userId },
+        select: { id: true },
+      });
+      if (!exists) throw new NotFoundException('User not found');
+
+      // 原子自增，避免读-改-写丢更新
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: { balance: { increment: delta } },
         select: { balance: true },
       });
-      if (!user) throw new NotFoundException('User not found');
-
-      const balanceAfter = round6(Number(user.balance) + delta);
-      await tx.user.update({
-        where: { id: userId },
-        data: { balance: balanceAfter },
-      });
+      const balanceAfter = round6(Number(updated.balance));
       return tx.balanceTransaction.create({
         data: {
           userId,
@@ -96,16 +108,18 @@ export class BillingService {
   ): Promise<void> {
     const cost = round6(amount);
     if (cost <= 0) return;
-    const user = await tx.user.findUnique({
+    const exists = await tx.user.findUnique({
       where: { id: userId },
+      select: { id: true },
+    });
+    if (!exists) return;
+    // 原子自减，避免并发下读-改-写丢更新
+    const updated = await tx.user.update({
+      where: { id: userId },
+      data: { balance: { decrement: cost } },
       select: { balance: true },
     });
-    if (!user) return;
-    const balanceAfter = round6(Number(user.balance) - cost);
-    await tx.user.update({
-      where: { id: userId },
-      data: { balance: balanceAfter },
-    });
+    const balanceAfter = round6(Number(updated.balance));
     await tx.balanceTransaction.create({
       data: {
         userId,
@@ -201,16 +215,13 @@ export class BillingService {
         throw new BadRequestException('兑换码已被使用');
       }
 
-      const user = await tx.user.findUnique({
+      const amount = Number(rc.amount);
+      const updated = await tx.user.update({
         where: { id: userId },
+        data: { balance: { increment: amount } },
         select: { balance: true },
       });
-      const amount = Number(rc.amount);
-      const balanceAfter = round6(Number(user?.balance ?? 0) + amount);
-      await tx.user.update({
-        where: { id: userId },
-        data: { balance: balanceAfter },
-      });
+      const balanceAfter = round6(Number(updated.balance));
       await tx.balanceTransaction.create({
         data: {
           userId,

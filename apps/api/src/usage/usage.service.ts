@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -46,6 +46,7 @@ function utcDay(d = new Date()): Date {
 
 @Injectable()
 export class UsageService {
+  private readonly logger = new Logger(UsageService.name);
   private readonly logContent: boolean;
   private readonly maxChars: number;
 
@@ -129,36 +130,60 @@ export class UsageService {
             `调用 ${entry.model}`,
           );
         }
-
-        const existing = await tx.usageDaily.findFirst({
-          where: { userId: entry.userId, apiKeyId: entry.apiKeyId, date },
-        });
-        const inc = {
-          requests: { increment: 1 },
-          promptTokens: { increment: entry.promptTokens },
-          completionTokens: { increment: entry.completionTokens },
-          totalTokens: { increment: entry.totalTokens },
-          cost: { increment: cost },
-        };
-        if (existing) {
-          await tx.usageDaily.update({ where: { id: existing.id }, data: inc });
-        } else {
-          await tx.usageDaily.create({
-            data: {
-              userId: entry.userId,
-              apiKeyId: entry.apiKeyId,
-              date,
-              requests: 1,
-              promptTokens: entry.promptTokens,
-              completionTokens: entry.completionTokens,
-              totalTokens: entry.totalTokens,
-              cost,
-            },
-          });
-        }
       });
-    } catch {
-      // 计量失败不应影响主流程
+    } catch (e) {
+      // 明细/扣费失败必须可见，避免静默丢失计费
+      this.logger.error(
+        `用量记录失败 user=${entry.userId} model=${entry.model}: ${(e as Error)?.message}`,
+      );
+      return;
+    }
+
+    // 日聚合单独执行：失败不影响已提交的明细与扣费
+    try {
+      await this.aggregateDaily(entry, cost, date);
+    } catch (e) {
+      this.logger.error(
+        `用量日聚合失败 user=${entry.userId} date=${date.toISOString().slice(0, 10)}: ${(e as Error)?.message}`,
+      );
+    }
+  }
+
+  /** 按天聚合：先查后写，命中唯一约束时回退为原子自增 */
+  private async aggregateDaily(entry: UsageEntry, cost: number, date: Date): Promise<void> {
+    const where = { userId: entry.userId, apiKeyId: entry.apiKeyId, date };
+    const inc = {
+      requests: { increment: 1 },
+      promptTokens: { increment: entry.promptTokens },
+      completionTokens: { increment: entry.completionTokens },
+      totalTokens: { increment: entry.totalTokens },
+      cost: { increment: cost },
+    };
+
+    const existing = await this.prisma.usageDaily.findFirst({ where });
+    if (existing) {
+      await this.prisma.usageDaily.update({ where: { id: existing.id }, data: inc });
+      return;
+    }
+    try {
+      await this.prisma.usageDaily.create({
+        data: {
+          userId: entry.userId,
+          apiKeyId: entry.apiKeyId,
+          date,
+          requests: 1,
+          promptTokens: entry.promptTokens,
+          completionTokens: entry.completionTokens,
+          totalTokens: entry.totalTokens,
+          cost,
+        },
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        await this.prisma.usageDaily.updateMany({ where, data: inc });
+        return;
+      }
+      throw e;
     }
   }
 

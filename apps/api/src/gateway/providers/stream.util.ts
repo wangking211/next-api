@@ -7,6 +7,19 @@ export function joinUrl(base: string, path: string): string {
   return `${base.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
 }
 
+/** 组合总超时与外部中止信号；timeoutMs<=0 表示不设总超时 */
+export function combineSignals(
+  timeoutMs: number | undefined,
+  external?: AbortSignal,
+): AbortSignal {
+  const signals: AbortSignal[] = [];
+  if (timeoutMs && timeoutMs > 0) signals.push(AbortSignal.timeout(timeoutMs));
+  if (external) signals.push(external);
+  if (signals.length === 0) return AbortSignal.timeout(120000);
+  if (signals.length === 1) return signals[0];
+  return AbortSignal.any(signals);
+}
+
 /** 归纳 fetch 失败的具体原因（网络错误/超时/TLS 等） */
 export function describeFetchError(e: any): string {
   const cause = e?.cause;

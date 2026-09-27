@@ -47,9 +47,9 @@ describe('ChannelHealthService', () => {
       status: ChannelStatus.ENABLED,
     });
     await service.recordFailure('c1', 'boom');
-    expect(prisma.channel.update).toHaveBeenCalledTimes(2);
-    expect(prisma.channel.update).toHaveBeenLastCalledWith({
-      where: { id: 'c1' },
+    expect(prisma.channel.update).toHaveBeenCalledTimes(1);
+    expect(prisma.channel.updateMany).toHaveBeenCalledWith({
+      where: { id: 'c1', status: ChannelStatus.ENABLED },
       data: { status: ChannelStatus.DISABLED, autoDisabled: true },
     });
   });

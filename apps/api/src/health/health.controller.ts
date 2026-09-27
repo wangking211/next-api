@@ -1,4 +1,5 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 
@@ -10,7 +11,7 @@ export class HealthController {
   ) {}
 
   @Get()
-  async check() {
+  async check(@Res({ passthrough: true }) res: Response) {
     let db = 'down';
     let redis = 'down';
     try {
@@ -25,8 +26,11 @@ export class HealthController {
     } catch {
       /* ignore */
     }
+    const ok = db === 'up' && redis === 'up';
+    // 降级时返回 503，便于负载均衡/编排正确摘除实例
+    if (!ok) res.status(503);
     return {
-      status: db === 'up' && redis === 'up' ? 'ok' : 'degraded',
+      status: ok ? 'ok' : 'degraded',
       db,
       redis,
       timestamp: new Date().toISOString(),

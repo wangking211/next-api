@@ -14,8 +14,10 @@ export interface ChatRequest {
   model: string;
   /** 原始 OpenAI 兼容请求体 */
   body: Record<string, any>;
-  /** 上游请求超时（毫秒），默认 120000 */
+  /** 上游请求超时（毫秒），默认 120000；传 0 表示不设总超时（由外部 signal/空闲超时控制） */
   timeoutMs?: number;
+  /** 外部中止信号（如客户端断开时 abort 上游） */
+  signal?: AbortSignal;
 }
 
 export interface UsageInfo {

@@ -6,7 +6,7 @@ import {
   StreamResult,
   UpstreamError,
 } from '../types';
-import { joinUrl, sseEvents, describeFetchError } from './stream.util';
+import { joinUrl, sseEvents, describeFetchError, combineSignals } from './stream.util';
 
 function toGeminiParts(content: any): any[] {
   if (typeof content === 'string') return [{ text: content }];
@@ -154,6 +154,7 @@ export class GeminiProvider implements Provider {
     body: Record<string, any>,
     stream: boolean,
     timeoutMs = 120000,
+    signal?: AbortSignal,
   ): Promise<Response> {
     const path = `models/${encodeURIComponent(model)}:${stream ? 'streamGenerateContent?alt=sse' : 'generateContent'}`;
     const url = joinUrl(channel.baseUrl, path);
@@ -162,7 +163,8 @@ export class GeminiProvider implements Provider {
         method: 'POST',
         headers: this.headers(apiKey),
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs),
+        redirect: 'manual',
+        signal: combineSignals(timeoutMs, signal),
       });
     } catch (e: any) {
       throw new UpstreamError(
@@ -185,6 +187,7 @@ export class GeminiProvider implements Provider {
       buildGeminiBody(req),
       false,
       req.timeoutMs,
+      req.signal,
     );
     const text = await res.text();
     let json: any;
@@ -222,6 +225,7 @@ export class GeminiProvider implements Provider {
       buildGeminiBody(req),
       true,
       req.timeoutMs,
+      req.signal,
     );
     if (!res.ok) {
       const text = await res.text();

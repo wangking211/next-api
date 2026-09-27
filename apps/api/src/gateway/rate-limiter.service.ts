@@ -1,10 +1,11 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../redis/redis.service';
 import { openaiError } from './types';
 
 @Injectable()
 export class RateLimiterService {
+  private readonly logger = new Logger(RateLimiterService.name);
   private readonly defaultRpm: number;
 
   constructor(
@@ -23,9 +24,15 @@ export class RateLimiterService {
     const key = `ratelimit:key:${apiKeyId}:${bucket}`;
     let count: number;
     try {
-      count = await this.redis.client.incr(key);
-      if (count === 1) await this.redis.client.expire(key, 65);
-    } catch {
+      // Lua 脚本保证 INCR+EXPIRE 原子，避免中途失败留下无 TTL 的永久计数键
+      count = (await this.redis.client.eval(
+        "local c = redis.call('INCR', KEYS[1]) if c == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end return c",
+        1,
+        key,
+        65,
+      )) as number;
+    } catch (e) {
+      this.logger.warn(`限流检查失败（放行）: ${(e as Error)?.message}`);
       return; // Redis 不可用时放行，不阻断主流程
     }
 
