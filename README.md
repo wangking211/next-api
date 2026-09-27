@@ -200,6 +200,29 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile full u
 
 典型服务器拓扑：容器仅监听回环地址（api `127.0.0.1:3000`、web `127.0.0.1:8081`），由宿主机 nginx 反向代理并终结 TLS（如 `xiaopuyun.com` → `127.0.0.1:8081`，Certbot 管理证书）。
 
+宿主机 nginx 站点配置已纳入版本管理，见 [`ops/nginx/`](ops/nginx/README.md)。
+
+### 自动部署（GitHub Actions）
+
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) 会在 `main` 分支 **CI 成功后自动** SSH 到服务器执行 `./deploy.sh`，也可在 Actions 页面手动触发。
+
+需在仓库 **Settings → Secrets and variables → Actions** 配置：
+
+| Secret | 必填 | 说明 |
+| --- | --- | --- |
+| `DEPLOY_HOST` | 是 | 服务器地址（如 `170.106.82.224`） |
+| `DEPLOY_SSH_KEY` | 是 | 部署私钥全文（含 `-----BEGIN/END OPENSSH PRIVATE KEY-----`） |
+| `DEPLOY_USER` | 否 | SSH 用户，默认 `root` |
+| `DEPLOY_PATH` | 否 | 仓库目录，默认 `/opt/AiProject` |
+
+部署私钥对应的公钥需加入服务器 `~/.ssh/authorized_keys`：
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/aigw_deploy -N '' -C 'github-actions-deploy'
+ssh-copy-id -i ~/.ssh/aigw_deploy.pub root@<服务器>
+# 将 ~/.ssh/aigw_deploy 的全文填入 DEPLOY_SSH_KEY
+```
+
 ## 安全说明
 
 - 平台 key：仅存 SHA-256 哈希，明文只在创建时返回一次。
