@@ -31,7 +31,7 @@ export default function AdminUsersPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin', 'users', q, page, pageSize],
-    queryFn: () => adminApi.users(q || undefined, page, pageSize),
+    queryFn: ({ signal }) => adminApi.users(q || undefined, page, pageSize, signal),
   });
 
   const mutate = useMutation({

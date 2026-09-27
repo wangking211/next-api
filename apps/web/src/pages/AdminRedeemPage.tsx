@@ -38,8 +38,8 @@ export default function AdminRedeemPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['redeem-codes', page, pageSize, status],
-    queryFn: () =>
-      redeemCodesApi.list(page, pageSize, status === 'ALL' ? undefined : status),
+    queryFn: ({ signal }) =>
+      redeemCodesApi.list(page, pageSize, status === 'ALL' ? undefined : status, signal),
   });
 
   const generateMut = useMutation({

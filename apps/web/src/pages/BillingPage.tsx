@@ -35,12 +35,12 @@ export default function BillingPage() {
 
   const { data: balance } = useQuery({
     queryKey: ['billing', 'me'],
-    queryFn: billingApi.me,
+    queryFn: ({ signal }) => billingApi.me(signal),
   });
   const { data, isLoading } = useQuery({
     queryKey: ['billing', 'transactions', page, pageSize, type],
-    queryFn: () =>
-      billingApi.transactions(page, pageSize, type === 'ALL' ? undefined : type),
+    queryFn: ({ signal }) =>
+      billingApi.transactions(page, pageSize, type === 'ALL' ? undefined : type, signal),
   });
 
   const redeemMut = useMutation({

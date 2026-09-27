@@ -29,7 +29,7 @@ export default function KeysPage() {
 
   const { data: keys = [], isLoading } = useQuery({
     queryKey: ['keys'],
-    queryFn: keysApi.list,
+    queryFn: ({ signal }) => keysApi.list(signal),
   });
 
   const createMut = useMutation({

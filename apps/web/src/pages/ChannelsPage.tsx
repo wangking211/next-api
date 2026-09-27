@@ -114,15 +114,15 @@ export default function ChannelsPage() {
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['channels', filters, page, pageSize],
-    queryFn: () => channelsApi.list({ ...filters, page, pageSize }),
+    queryFn: ({ signal }) => channelsApi.list({ ...filters, page, pageSize }, signal),
   });
   const { data: catalog = [] } = useQuery({
     queryKey: ['models'],
-    queryFn: modelsApi.list,
+    queryFn: ({ signal }) => modelsApi.list(signal),
   });
   const { data: suggestions = [] } = useQuery({
     queryKey: ['model-suggestions'],
-    queryFn: modelsApi.suggestions,
+    queryFn: ({ signal }) => modelsApi.suggestions(signal),
   });
 
   const modelOptions = useMemo(() => {

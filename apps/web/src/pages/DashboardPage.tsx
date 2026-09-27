@@ -97,19 +97,19 @@ export default function DashboardPage() {
 
   const { data: summary, isError, refetch } = useQuery({
     queryKey: ['usage', 'summary', scope],
-    queryFn: () => usageApi.summary(30, scope),
+    queryFn: ({ signal }) => usageApi.summary(30, scope, signal),
   });
   const { data: daily = [] } = useQuery({
     queryKey: ['usage', 'daily', scope],
-    queryFn: () => usageApi.daily(30, scope),
+    queryFn: ({ signal }) => usageApi.daily(30, scope, signal),
   });
   const { data: analytics } = useQuery({
     queryKey: ['usage', 'analytics', scope],
-    queryFn: () => usageApi.analytics(30, scope),
+    queryFn: ({ signal }) => usageApi.analytics(30, scope, signal),
   });
   const { data: logs } = useQuery({
     queryKey: ['usage', 'logs', 'recent', scope],
-    queryFn: () => usageApi.logs(1, 8, scope),
+    queryFn: ({ signal }) => usageApi.logs(1, 8, scope, {}, signal),
   });
 
   const successRate =

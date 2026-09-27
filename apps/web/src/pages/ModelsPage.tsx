@@ -30,7 +30,7 @@ export default function ModelsPage() {
 
   const { data: models = [], isLoading } = useQuery({
     queryKey: ['models'],
-    queryFn: modelsApi.list,
+    queryFn: ({ signal }) => modelsApi.list(signal),
   });
 
   const createMut = useMutation({

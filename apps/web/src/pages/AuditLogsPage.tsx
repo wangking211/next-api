@@ -12,7 +12,7 @@ export default function AuditLogsPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['audit-logs', action, page, pageSize],
-    queryFn: () => auditApi.list(page, pageSize, action || undefined),
+    queryFn: ({ signal }) => auditApi.list(page, pageSize, action || undefined, signal),
   });
 
   return (

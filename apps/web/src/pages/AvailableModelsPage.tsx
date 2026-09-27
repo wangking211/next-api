@@ -8,7 +8,7 @@ export default function AvailableModelsPage() {
   const { message } = App.useApp();
   const { data, isLoading } = useQuery({
     queryKey: ['available-models'],
-    queryFn: channelsApi.availableModels,
+    queryFn: ({ signal }) => channelsApi.availableModels(signal),
   });
 
   const copy = async (text: string) => {

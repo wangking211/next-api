@@ -46,8 +46,8 @@ export const authApi = {
 };
 
 export const keysApi = {
-  async list() {
-    const { data } = await api.get<ApiKeyInfo[]>('/keys');
+  async list(signal?: AbortSignal) {
+    const { data } = await api.get<ApiKeyInfo[]>('/keys', { signal });
     return data;
   },
   async create(body: {
@@ -89,12 +89,15 @@ export const channelsApi = {
       ownerType?: string;
       model?: string;
     } = {},
+    signal?: AbortSignal,
   ) {
-    const { data } = await api.get<Paginated<ChannelInfo>>('/channels', { params });
+    const { data } = await api.get<Paginated<ChannelInfo>>('/channels', { params, signal });
     return data;
   },
-  async availableModels() {
-    const { data } = await api.get<AvailableChannelModels>('/channels/available-models');
+  async availableModels(signal?: AbortSignal) {
+    const { data } = await api.get<AvailableChannelModels>('/channels/available-models', {
+      signal,
+    });
     return data;
   },
   async test(id: string, models?: string[]) {
@@ -135,12 +138,12 @@ export const channelsApi = {
 };
 
 export const modelsApi = {
-  async list() {
-    const { data } = await api.get<ModelInfo[]>('/models');
+  async list(signal?: AbortSignal) {
+    const { data } = await api.get<ModelInfo[]>('/models', { signal });
     return data;
   },
-  async suggestions() {
-    const { data } = await api.get<CommonModel[]>('/models/suggestions');
+  async suggestions(signal?: AbortSignal) {
+    const { data } = await api.get<CommonModel[]>('/models/suggestions', { signal });
     return data;
   },
   async create(body: {
@@ -164,47 +167,52 @@ export const modelsApi = {
 };
 
 export const usageApi = {
-  async summary(days = 30, scope?: 'all') {
+  async summary(days = 30, scope?: 'all', signal?: AbortSignal) {
     const { data } = await api.get<UsageSummary>('/usage/summary', {
       params: { days, scope },
+      signal,
     });
     return data;
   },
-  async daily(days = 30, scope?: 'all') {
+  async daily(days = 30, scope?: 'all', signal?: AbortSignal) {
     const { data } = await api.get<UsageDailyRow[]>('/usage/daily', {
       params: { days, scope },
+      signal,
     });
     return data;
   },
-  async analytics(days = 30, scope?: 'all') {
+  async analytics(days = 30, scope?: 'all', signal?: AbortSignal) {
     const { data } = await api.get<UsageAnalytics>('/usage/analytics', {
       params: { days, scope },
+      signal,
     });
     return data;
   },
-  async logs(page = 1, pageSize = 20, scope?: 'all', filters: LogFilters = {}) {
+  async logs(page = 1, pageSize = 20, scope?: 'all', filters: LogFilters = {}, signal?: AbortSignal) {
     const { data } = await api.get<Paginated<RequestLogRow>>('/usage/logs', {
       params: { page, pageSize, scope, ...filters },
+      signal,
     });
     return data;
   },
-  async logDetail(id: string, scope?: 'all') {
+  async logDetail(id: string, scope?: 'all', signal?: AbortSignal) {
     const { data } = await api.get<RequestLogDetail>(`/usage/logs/${id}`, {
       params: { scope },
+      signal,
     });
     return data;
   },
 };
 
 export const billingApi = {
-  async me() {
-    const { data } = await api.get<{ balance: number }>('/billing/me');
+  async me(signal?: AbortSignal) {
+    const { data } = await api.get<{ balance: number }>('/billing/me', { signal });
     return data;
   },
-  async transactions(page = 1, pageSize = 20, type?: BalanceTxType) {
+  async transactions(page = 1, pageSize = 20, type?: BalanceTxType, signal?: AbortSignal) {
     const { data } = await api.get<Paginated<BalanceTransaction>>(
       '/billing/transactions',
-      { params: { page, pageSize, type } },
+      { params: { page, pageSize, type }, signal },
     );
     return data;
   },
@@ -218,9 +226,10 @@ export const billingApi = {
 };
 
 export const adminApi = {
-  async users(q?: string, page = 1, pageSize = 20) {
+  async users(q?: string, page = 1, pageSize = 20, signal?: AbortSignal) {
     const { data } = await api.get<Paginated<AdminUser>>('/admin/users', {
       params: { q, page, pageSize },
+      signal,
     });
     return data;
   },
@@ -242,9 +251,10 @@ export const redeemCodesApi = {
     const { data } = await api.post<GenerateCodesResult>('/admin/redeem-codes', body);
     return data;
   },
-  async list(page = 1, pageSize = 20, status?: RedeemCodeStatus) {
+  async list(page = 1, pageSize = 20, status?: RedeemCodeStatus, signal?: AbortSignal) {
     const { data } = await api.get<Paginated<RedeemCode>>('/admin/redeem-codes', {
       params: { page, pageSize, status },
+      signal,
     });
     return data;
   },
@@ -255,9 +265,10 @@ export const redeemCodesApi = {
 };
 
 export const auditApi = {
-  async list(page = 1, pageSize = 20, action?: string) {
+  async list(page = 1, pageSize = 20, action?: string, signal?: AbortSignal) {
     const { data } = await api.get<Paginated<AuditLog>>('/admin/audit-logs', {
       params: { page, pageSize, action },
+      signal,
     });
     return data;
   },

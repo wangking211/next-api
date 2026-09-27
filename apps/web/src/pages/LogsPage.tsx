@@ -59,16 +59,16 @@ export default function LogsPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['usage', 'logs', page, pageSize, scope, filters],
-    queryFn: () => usageApi.logs(page, pageSize, scope, filters),
+    queryFn: ({ signal }) => usageApi.logs(page, pageSize, scope, filters, signal),
   });
   const { data: detail, isLoading: detailLoading } = useQuery({
     queryKey: ['usage', 'log', detailId, scope],
-    queryFn: () => usageApi.logDetail(detailId!, scope),
+    queryFn: ({ signal }) => usageApi.logDetail(detailId!, scope, signal),
     enabled: !!detailId,
   });
   const { data: userList } = useQuery({
     queryKey: ['admin', 'users', 'for-filter'],
-    queryFn: () => adminApi.users(undefined, 1, 100),
+    queryFn: ({ signal }) => adminApi.users(undefined, 1, 100, signal),
     enabled: !!isAdmin,
   });
 
