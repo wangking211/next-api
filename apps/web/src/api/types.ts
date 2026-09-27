@@ -187,7 +187,7 @@ export interface Paginated<T> {
   pageSize: number;
 }
 
-export type BalanceTxType = 'RECHARGE' | 'CONSUME' | 'ADJUST' | 'COMMISSION';
+export type BalanceTxType = 'RECHARGE' | 'CONSUME' | 'ADJUST' | 'COMMISSION' | 'TRANSFER';
 
 export interface BalanceTransaction {
   id: string;

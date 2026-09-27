@@ -49,6 +49,7 @@ enum BalanceTxType {
   CONSUME
   ADJUST
   COMMISSION
+  TRANSFER
 }
 
 model BalanceTransaction {

@@ -304,4 +304,14 @@ export const agentApi = {
     const { data } = await api.get<AgentMember[]>('/agent/members', { signal });
     return data;
   },
+  async createMember(body: { email: string; username: string; password: string }) {
+    const { data } = await api.post('/agent/members', body);
+    return data;
+  },
+  async rechargeMember(id: string, amountUsd: number) {
+    const { data } = await api.post(`/agent/members/${id}/recharge`, {
+      amount: amountUsd,
+    });
+    return data;
+  },
 };

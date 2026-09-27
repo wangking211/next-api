@@ -1,8 +1,19 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { BalanceTxType } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateMemberDto } from './dto/create-member.dto';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+function round6(n: number): number {
+  return Math.round(n * 1e6) / 1e6;
+}
 
 @Injectable()
 export class AgentService {
@@ -93,6 +104,95 @@ export class AgentService {
           tokens: u?._sum?.totalTokens ?? 0,
           cost: u?._sum?.cost ? Number(u._sum.cost) : 0,
         },
+      };
+    });
+  }
+
+  /** 代理创建名下成员（role=USER，agentId=代理） */
+  async createMember(agentId: string, dto: CreateMemberDto) {
+    const email = dto.email.toLowerCase().trim();
+    const [byEmail, byUsername] = await Promise.all([
+      this.prisma.user.findUnique({ where: { email } }),
+      this.prisma.user.findUnique({ where: { username: dto.username } }),
+    ]);
+    if (byEmail) throw new ConflictException('Email already registered');
+    if (byUsername) throw new ConflictException('Username already taken');
+
+    const passwordHash = await bcrypt.hash(dto.password, 12);
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        username: dto.username,
+        passwordHash,
+        role: 'USER',
+        agentId,
+      },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        status: true,
+        balance: true,
+        priceMultiplier: true,
+        createdAt: true,
+      },
+    });
+    return { ...user, balance: Number(user.balance) };
+  }
+
+  /** 代理用自身余额给名下成员充值（转账，双方各记流水） */
+  async rechargeMember(agentId: string, memberId: string, amountUsd: number) {
+    const cost = round6(amountUsd);
+    if (cost <= 0) throw new BadRequestException('Amount must be positive');
+
+    const member = await this.prisma.user.findUnique({
+      where: { id: memberId },
+      select: { id: true, agentId: true, username: true },
+    });
+    if (!member || member.agentId !== agentId) {
+      throw new NotFoundException('Member not found');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const agent = await tx.user.findUnique({
+        where: { id: agentId },
+        select: { balance: true, username: true },
+      });
+      if (!agent) throw new NotFoundException('Agent not found');
+      if (Number(agent.balance) < cost) {
+        throw new BadRequestException('代理余额不足');
+      }
+      const au = await tx.user.update({
+        where: { id: agentId },
+        data: { balance: { decrement: cost } },
+        select: { balance: true },
+      });
+      const mu = await tx.user.update({
+        where: { id: memberId },
+        data: { balance: { increment: cost } },
+        select: { balance: true },
+      });
+      await tx.balanceTransaction.create({
+        data: {
+          userId: agentId,
+          type: BalanceTxType.TRANSFER,
+          amount: -cost,
+          balanceAfter: round6(Number(au.balance)),
+          description: `转给成员 ${member.username}`,
+        },
+      });
+      await tx.balanceTransaction.create({
+        data: {
+          userId: memberId,
+          type: BalanceTxType.TRANSFER,
+          amount: cost,
+          balanceAfter: round6(Number(mu.balance)),
+          description: `来自代理 ${agent.username}`,
+        },
+      });
+      return {
+        agentBalance: round6(Number(au.balance)),
+        memberBalance: round6(Number(mu.balance)),
       };
     });
   }
