@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { withdrawalsApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { formatCredits, formatDateTime } from '../utils/format';
+import { downloadCsv, toCsv } from '../utils/csv';
 import type { Withdrawal, WithdrawalStatus } from '../api/types';
 
 export default function AdminWithdrawalsPage() {
@@ -31,16 +32,37 @@ export default function AdminWithdrawalsPage() {
     <Card
       title="提现管理"
       extra={
-        <Segmented
-          value={status}
-          onChange={(v) => setStatus(v as WithdrawalStatus | 'ALL')}
-          options={[
-            { label: '待审批', value: 'PENDING' },
-            { label: '已通过', value: 'APPROVED' },
-            { label: '已驳回', value: 'REJECTED' },
-            { label: '全部', value: 'ALL' },
-          ]}
-        />
+        <Space>
+          <Segmented
+            value={status}
+            onChange={(v) => setStatus(v as WithdrawalStatus | 'ALL')}
+            options={[
+              { label: '待审批', value: 'PENDING' },
+              { label: '已通过', value: 'APPROVED' },
+              { label: '已驳回', value: 'REJECTED' },
+              { label: '全部', value: 'ALL' },
+            ]}
+          />
+          <Button
+            onClick={() =>
+              downloadCsv(
+                'withdrawals.csv',
+                toCsv<Withdrawal>(
+                  [
+                    { label: '时间', value: (r) => formatDateTime(r.createdAt) },
+                    { label: '用户', value: (r) => r.user?.username ?? r.userId },
+                    { label: '金额(积分)', value: (r) => (Number(r.amount) * 100).toFixed(2) },
+                    { label: '状态', value: (r) => r.status },
+                    { label: '备注', value: (r) => r.note ?? '' },
+                  ],
+                  data ?? [],
+                ),
+              )
+            }
+          >
+            导出 CSV
+          </Button>
+        </Space>
       }
     >
       <Table<Withdrawal>

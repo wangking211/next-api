@@ -210,6 +210,77 @@ export class UsageService {
     return userId ? { userId } : {};
   }
 
+  /** 按当前筛选导出调用明细 CSV（上限 5 万行）。 */
+  async exportLogs(userId: string | null, q: LogQuery = {}): Promise<string> {
+    const where = this.buildLogWhere(userId, q);
+    const rows = await this.prisma.requestLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 50000,
+      select: {
+        createdAt: true,
+        model: true,
+        provider: true,
+        isStream: true,
+        promptTokens: true,
+        completionTokens: true,
+        totalTokens: true,
+        cost: true,
+        commission: true,
+        latencyMs: true,
+        status: true,
+        errorMessage: true,
+        apiKey: { select: { name: true } },
+        channel: { select: { name: true } },
+      },
+    });
+
+    const esc = (v: unknown): string => {
+      const s = v == null ? '' : String(v);
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = [
+      '时间',
+      '模型',
+      '服务商',
+      '渠道',
+      'Key',
+      '流式',
+      '输入tokens',
+      '输出tokens',
+      '总tokens',
+      '费用(USD)',
+      '返点(USD)',
+      '延迟ms',
+      '状态',
+      '错误',
+    ];
+    const lines = [header.join(',')];
+    for (const r of rows) {
+      lines.push(
+        [
+          r.createdAt.toISOString(),
+          r.model,
+          r.provider ?? '',
+          r.channel?.name ?? '',
+          r.apiKey?.name ?? '',
+          r.isStream ? 'stream' : 'non-stream',
+          r.promptTokens,
+          r.completionTokens,
+          r.totalTokens,
+          Number(r.cost),
+          Number(r.commission),
+          r.latencyMs ?? '',
+          r.status,
+          r.errorMessage ?? '',
+        ]
+          .map(esc)
+          .join(','),
+      );
+    }
+    return lines.join('\n');
+  }
+
   async summary(userId: string | null, days = 30) {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const agg = await this.prisma.requestLog.aggregate({

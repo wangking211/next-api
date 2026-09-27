@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  App,
   Button,
   Card,
   DatePicker,
@@ -19,8 +20,10 @@ import {
 import { ReloadOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi, usageApi } from '../api/endpoints';
+import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { formatDateTime, formatCredits } from '../utils/format';
+import { downloadBlob } from '../utils/csv';
 import { usePageClamp } from '../hooks/usePageClamp';
 import type { LogFilters, RequestLogRow } from '../api/types';
 
@@ -50,6 +53,7 @@ function TextBlock({ title, text }: { title: string; text: string | null }) {
 
 export default function LogsPage() {
   const { user } = useAuth();
+  const { message } = App.useApp();
   const isAdmin = user?.role === 'ADMIN';
   const [all, setAll] = useState(false);
   const [page, setPage] = useState(1);
@@ -93,6 +97,15 @@ export default function LogsPage() {
     form.resetFields();
     setFilters({});
     setPage(1);
+  };
+
+  const exportCsv = async () => {
+    try {
+      const blob = await usageApi.exportLogs({ scope, ...filters });
+      downloadBlob('request-logs.csv', blob);
+    } catch (e) {
+      message.error(errorMessage(e));
+    }
   };
 
   return (
@@ -161,6 +174,7 @@ export default function LogsPage() {
             <Button icon={<ReloadOutlined />} onClick={reset}>
               重置
             </Button>
+            <Button onClick={exportCsv}>导出 CSV</Button>
           </Space>
         </Form.Item>
       </Form>

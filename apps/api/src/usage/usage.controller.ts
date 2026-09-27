@@ -1,4 +1,5 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, Res, UseGuards } from '@nestjs/common';
+import { Response } from 'express';
 import { Role } from '@prisma/client';
 import { UsageService, LogQuery } from './usage.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -91,6 +92,40 @@ export class UsageController {
       to: to || undefined,
     };
     return this.usage.logs(this.scope(user, scope), query);
+  }
+
+  @Get('logs/export')
+  async exportLogs(
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+    @Query('scope') scope?: string,
+    @Query('apiKeyId') apiKeyId?: string,
+    @Query('channelId') channelId?: string,
+    @Query('userId') targetUserId?: string,
+    @Query('model') model?: string,
+    @Query('status') status?: string,
+    @Query('stream') stream?: string,
+    @Query('q') q?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const query: LogQuery = {
+      apiKeyId: apiKeyId || undefined,
+      channelId: channelId || undefined,
+      model: model || undefined,
+      status: status === 'success' || status === 'error' ? status : undefined,
+      stream: stream === 'true' ? true : stream === 'false' ? false : undefined,
+      q: q || undefined,
+      from: from || undefined,
+      to: to || undefined,
+    };
+    const csv = await this.usage.exportLogs(
+      this.scope(user, scope, targetUserId),
+      query,
+    );
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="request-logs.csv"');
+    res.send('\uFEFF' + csv);
   }
 
   @Get('logs/:id')

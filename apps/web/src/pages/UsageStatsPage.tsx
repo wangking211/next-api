@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  Button,
   Card,
   Col,
   DatePicker,
@@ -15,6 +16,7 @@ import { useQuery } from '@tanstack/react-query';
 import { usageApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
 import { formatCredits } from '../utils/format';
+import { downloadCsv, toCsv } from '../utils/csv';
 import type { UsageAnalytics } from '../api/types';
 
 type KeyRow = UsageAnalytics['byApiKey'][number];
@@ -44,6 +46,27 @@ export default function UsageStatsPage() {
 
   const t = data?.totals;
 
+  const exportKeys = () => {
+    const rows = data?.byApiKey ?? [];
+    const csv = toCsv<KeyRow>(
+      [
+        { label: 'Key', value: (r) => r.name },
+        { label: '前缀', value: (r) => r.keyPrefix },
+        { label: '请求', value: (r) => r.requests },
+        { label: 'Token', value: (r) => r.tokens },
+        { label: '费用(积分)', value: (r) => (r.cost * 100).toFixed(2) },
+        ...(isAdmin
+          ? [
+              { label: '成本(积分)', value: (r: KeyRow) => (r.upstreamCost * 100).toFixed(2) },
+              { label: '毛利(积分)', value: (r: KeyRow) => (r.margin * 100).toFixed(2) },
+            ]
+          : []),
+      ],
+      rows,
+    );
+    downloadCsv('usage-by-key.csv', csv);
+  };
+
   return (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
       <Card
@@ -67,6 +90,7 @@ export default function UsageStatsPage() {
                 查看全部用户 <Switch checked={all} onChange={setAll} />
               </span>
             )}
+            <Button onClick={exportKeys}>导出 CSV</Button>
           </Space>
         }
       >

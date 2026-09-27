@@ -211,6 +211,17 @@ export const usageApi = {
     });
     return data;
   },
+  async exportLogs(
+    params: { scope?: 'all' } & LogFilters,
+    signal?: AbortSignal,
+  ): Promise<Blob> {
+    const res = await api.get('/usage/logs/export', {
+      params,
+      responseType: 'blob',
+      signal,
+    });
+    return res.data as Blob;
+  },
 };
 
 export const billingApi = {
