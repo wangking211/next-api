@@ -8,6 +8,7 @@
     "dev:api": "pnpm --filter @ai-gateway/api dev",
     "dev:web": "pnpm --filter @ai-gateway/web dev",
     "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
     "test": "pnpm --filter @ai-gateway/api test",
     "test:e2e": "node tests/run-e2e.mjs",
     "db:up": "docker compose up -d",
