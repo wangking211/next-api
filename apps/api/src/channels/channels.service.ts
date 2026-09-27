@@ -435,6 +435,8 @@ export class ChannelsService {
     if (unique.length === 0) {
       throw new BadRequestException('请提供用于测试的模型名');
     }
-    return unique.slice(0, 20); // 单次测试上限，避免误操作
+    // 单次测试上限（可用 TEST_MAX_MODELS 调整）
+    const max = Number(process.env.TEST_MAX_MODELS ?? 100) || 100;
+    return unique.slice(0, max);
   }
 }

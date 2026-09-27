@@ -60,6 +60,7 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:-}
       CREDITS_PER_USD: ${CREDITS_PER_USD:-100}
       REBATE_MODE: ${REBATE_MODE:-stacked}
+      TEST_MAX_MODELS: ${TEST_MAX_MODELS:-100}
       DEFAULT_RPM: ${DEFAULT_RPM:-0}
       PORT: 3000
     ports:

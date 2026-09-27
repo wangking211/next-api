@@ -188,6 +188,8 @@ export default function ChannelsPage() {
   const [modalTest, setModalTest] = useState<ChannelTestResult | null>(null);
   const [pricing, setPricing] = useState<Record<string, PriceRow>>({});
   const [priceChannel, setPriceChannel] = useState<ChannelInfo | null>(null);
+  const [testPick, setTestPick] = useState<ChannelInfo | null>(null);
+  const [pickModels, setPickModels] = useState<string[]>([]);
   const selectedModels: string[] = Form.useWatch('models', form) ?? [];
 
   const setP = (model: string, key: keyof PriceRow, value: number | null) =>
@@ -361,10 +363,10 @@ export default function ChannelsPage() {
     onError: (e) => message.error(errorMessage(e)),
   });
 
-  const runTest = async (r: ChannelInfo) => {
+  const runTest = async (r: ChannelInfo, models: string[]) => {
     setTestingId(r.id);
     try {
-      const result = await channelsApi.test(r.id, r.models);
+      const result = await channelsApi.test(r.id, models);
       setTestResult({ channel: r, result });
     } catch (e) {
       message.error(errorMessage(e));
@@ -532,7 +534,14 @@ export default function ChannelsPage() {
             width: 340,
             render: (_, r) => (
               <Space>
-                <Button size="small" loading={testingId === r.id} onClick={() => runTest(r)}>
+                <Button
+                  size="small"
+                  loading={testingId === r.id}
+                  onClick={() => {
+                    setTestPick(r);
+                    setPickModels(r.models);
+                  }}
+                >
                   测试
                 </Button>
                 <Button size="small" onClick={() => openPricing(r)}>
@@ -692,6 +701,44 @@ export default function ChannelsPage() {
             <TestResults result={modalTest} />
           </div>
         )}
+      </Modal>
+
+      <Modal
+        title={`测试渠道：${testPick?.name ?? ''}`}
+        open={!!testPick}
+        onCancel={() => setTestPick(null)}
+        okText="开始测试"
+        confirmLoading={!!testPick && testingId === testPick.id}
+        onOk={() => {
+          if (testPick && pickModels.length > 0) runTest(testPick, pickModels);
+          setTestPick(null);
+        }}
+        width={560}
+      >
+        <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+          选择要测试的模型（默认全部）。模型较多时，可只测单个或部分。
+        </Typography.Paragraph>
+        <Space size={8} style={{ marginBottom: 8 }}>
+          <Button size="small" onClick={() => setPickModels(testPick?.models ?? [])}>
+            全选
+          </Button>
+          <Button size="small" onClick={() => setPickModels([])}>
+            清空
+          </Button>
+          <Typography.Text type="secondary">
+            已选 {pickModels.length} / {testPick?.models.length ?? 0}
+          </Typography.Text>
+        </Space>
+        <Select
+          mode="multiple"
+          allowClear
+          style={{ width: '100%' }}
+          placeholder="选择模型"
+          value={pickModels}
+          onChange={setPickModels}
+          optionFilterProp="label"
+          options={(testPick?.models ?? []).map((m) => ({ value: m, label: m }))}
+        />
       </Modal>
 
       <Modal
