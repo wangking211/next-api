@@ -42,6 +42,22 @@ model User {
   logs        RequestLog[]
   usage       UsageDaily[]
   balanceTxs  BalanceTransaction[]
+  withdrawals WithdrawalRequest[]
+}
+
+model WithdrawalRequest {
+  id           String           @id @default(uuid())
+  userId       String
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount       Decimal          @db.Decimal(18, 6)
+  status       WithdrawalStatus @default(PENDING)
+  note         String?
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime         @default(now())
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
 }
 
 enum BalanceTxType {
@@ -50,6 +66,13 @@ enum BalanceTxType {
   ADJUST
   COMMISSION
   TRANSFER
+  WITHDRAW
+}
+
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 model BalanceTransaction {

@@ -28,7 +28,7 @@ export default function AppLayout() {
   const { user, logout } = useAuth();
 
   const selectedKey = useMemo(() => {
-    const match = ['/keys', '/channels', '/available-models', '/models', '/logs', '/usage-stats', '/billing', '/agent', '/users', '/redeem-codes', '/audit-logs'].find((p) =>
+    const match = ['/keys', '/channels', '/available-models', '/models', '/logs', '/usage-stats', '/billing', '/agent', '/users', '/redeem-codes', '/audit-logs', '/withdrawals'].find((p) =>
       location.pathname.startsWith(p),
     );
     return match ?? '/dashboard';
@@ -51,6 +51,7 @@ export default function AppLayout() {
           { key: '/users', icon: <TeamOutlined />, label: '用户管理' },
           { key: '/redeem-codes', icon: <GiftOutlined />, label: '兑换码' },
           { key: '/audit-logs', icon: <AuditOutlined />, label: '操作审计' },
+          { key: '/withdrawals', icon: <WalletOutlined />, label: '提现管理' },
         ]
       : []),
   ];

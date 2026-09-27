@@ -27,6 +27,7 @@ const TYPE_META: Record<BalanceTxType, { color: string; label: string }> = {
   ADJUST: { color: 'orange', label: '调整' },
   COMMISSION: { color: 'purple', label: '返点' },
   TRANSFER: { color: 'geekblue', label: '转账' },
+  WITHDRAW: { color: 'volcano', label: '提现' },
 };
 
 export default function BillingPage() {

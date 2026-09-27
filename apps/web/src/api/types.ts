@@ -187,7 +187,13 @@ export interface Paginated<T> {
   pageSize: number;
 }
 
-export type BalanceTxType = 'RECHARGE' | 'CONSUME' | 'ADJUST' | 'COMMISSION' | 'TRANSFER';
+export type BalanceTxType =
+  | 'RECHARGE'
+  | 'CONSUME'
+  | 'ADJUST'
+  | 'COMMISSION'
+  | 'TRANSFER'
+  | 'WITHDRAW';
 
 export interface BalanceTransaction {
   id: string;
@@ -309,4 +315,18 @@ export interface AgentMember {
   priceMultiplier: number | null;
   createdAt: string;
   usage30d: { requests: number; tokens: number; cost: number };
+}
+
+export type WithdrawalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface Withdrawal {
+  id: string;
+  userId: string;
+  amount: string;
+  status: WithdrawalStatus;
+  note: string | null;
+  reviewedById: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  user?: { id: string; username: string; email: string };
 }

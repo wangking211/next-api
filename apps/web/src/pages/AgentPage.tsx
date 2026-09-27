@@ -17,18 +17,20 @@ import {
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { agentApi, billingApi } from '../api/endpoints';
+import { agentApi, billingApi, withdrawalsApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { formatCredits, formatDateTime, fromCredits } from '../utils/format';
-import type { AgentMember, BalanceTransaction } from '../api/types';
+import type { AgentMember, BalanceTransaction, Withdrawal } from '../api/types';
 
 export default function AgentPage() {
   const { message } = App.useApp();
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [rechargeTarget, setRechargeTarget] = useState<AgentMember | null>(null);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [createForm] = Form.useForm();
   const [rechargeForm] = Form.useForm();
+  const [withdrawForm] = Form.useForm();
 
   const { data: overview, isLoading } = useQuery({
     queryKey: ['agent', 'overview'],
@@ -41,6 +43,10 @@ export default function AgentPage() {
   const { data: commissions } = useQuery({
     queryKey: ['agent', 'commissions'],
     queryFn: ({ signal }) => billingApi.transactions(1, 50, 'COMMISSION', signal),
+  });
+  const { data: withdrawals } = useQuery({
+    queryKey: ['agent', 'withdrawals'],
+    queryFn: ({ signal }) => withdrawalsApi.mine(signal),
   });
 
   const invalidate = () => {
@@ -72,15 +78,29 @@ export default function AgentPage() {
     onError: (e) => message.error(errorMessage(e)),
   });
 
+  const withdrawMut = useMutation({
+    mutationFn: (amount: number) => withdrawalsApi.create(fromCredits(amount)),
+    onSuccess: () => {
+      invalidate();
+      setWithdrawOpen(false);
+      withdrawForm.resetFields();
+      message.success('提现申请已提交，等待管理员审批');
+    },
+    onError: (e) => message.error(errorMessage(e)),
+  });
+
   return (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
       <Card
         title="代理中心"
         loading={isLoading}
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            新增成员
-          </Button>
+          <Space>
+            <Button onClick={() => setWithdrawOpen(true)}>提现</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              新增成员
+            </Button>
+          </Space>
         }
       >
         <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
@@ -246,6 +266,66 @@ export default function AgentPage() {
           <Form.Item
             name="amount"
             label="充值积分（从我的余额转出）"
+            rules={[{ required: true, message: '请输入积分' }]}
+          >
+            <InputNumber min={1} step={100} style={{ width: '100%' }} />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Card title="提现记录" size="small">
+        <Table<Withdrawal>
+          rowKey="id"
+          size="small"
+          dataSource={withdrawals ?? []}
+          pagination={false}
+          columns={[
+            {
+              title: '时间',
+              dataIndex: 'createdAt',
+              width: 180,
+              render: (v: string) => formatDateTime(v),
+            },
+            {
+              title: '金额',
+              dataIndex: 'amount',
+              width: 130,
+              render: (v: string) => formatCredits(v),
+            },
+            {
+              title: '状态',
+              dataIndex: 'status',
+              width: 100,
+              render: (v: string) =>
+                v === 'APPROVED' ? (
+                  <Tag color="green">已通过</Tag>
+                ) : v === 'REJECTED' ? (
+                  <Tag color="red">已驳回</Tag>
+                ) : (
+                  <Tag color="orange">待审批</Tag>
+                ),
+            },
+            { title: '备注', dataIndex: 'note', render: (v) => v ?? '-' },
+          ]}
+        />
+      </Card>
+
+      <Modal
+        title="申请提现"
+        open={withdrawOpen}
+        onCancel={() => setWithdrawOpen(false)}
+        onOk={() => withdrawForm.submit()}
+        confirmLoading={withdrawMut.isPending}
+        destroyOnClose
+      >
+        <Form
+          form={withdrawForm}
+          layout="vertical"
+          onFinish={(v) => withdrawMut.mutate(v.amount)}
+          requiredMark={false}
+        >
+          <Form.Item
+            name="amount"
+            label="提现积分（从我的余额冻结，等待审批）"
             rules={[{ required: true, message: '请输入积分' }]}
           >
             <InputNumber min={1} step={100} style={{ width: '100%' }} />

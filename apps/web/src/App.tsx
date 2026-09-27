@@ -20,6 +20,7 @@ const AgentPage = lazy(() => import('./pages/AgentPage'));
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
 const AdminRedeemPage = lazy(() => import('./pages/AdminRedeemPage'));
 const AuditLogsPage = lazy(() => import('./pages/AuditLogsPage'));
+const AdminWithdrawalsPage = lazy(() => import('./pages/AdminWithdrawalsPage'));
 
 function PageFallback() {
   return (
@@ -52,6 +53,7 @@ export default function App() {
                   <Route path="/users" element={<AdminUsersPage />} />
                   <Route path="/redeem-codes" element={<AdminRedeemPage />} />
                   <Route path="/audit-logs" element={<AuditLogsPage />} />
+                  <Route path="/withdrawals" element={<AdminWithdrawalsPage />} />
                 </Route>
               </Route>
             </Route>

@@ -5,8 +5,7 @@ import {
   AdminUser,
   AgentMember,
   AgentOverview,
-  AuditLog,
-  AvailableChannelModels,
+  AuditLog,  AvailableChannelModels,
   BalanceTransaction,
   BalanceTxType,
   ChannelInfo,
@@ -24,6 +23,7 @@ import {
   UsageDailyRow,
   UsageSummary,
   UserInfo,
+  Withdrawal,
 } from './types';
 
 export const authApi = {
@@ -311,6 +311,33 @@ export const agentApi = {
   async rechargeMember(id: string, amountUsd: number) {
     const { data } = await api.post(`/agent/members/${id}/recharge`, {
       amount: amountUsd,
+    });
+    return data;
+  },
+};
+
+export const withdrawalsApi = {
+  async create(amountUsd: number, note?: string) {
+    const { data } = await api.post<Withdrawal>('/withdrawals', {
+      amount: amountUsd,
+      note,
+    });
+    return data;
+  },
+  async mine(signal?: AbortSignal) {
+    const { data } = await api.get<Withdrawal[]>('/withdrawals', { signal });
+    return data;
+  },
+  async listAll(status?: string, signal?: AbortSignal) {
+    const { data } = await api.get<Withdrawal[]>('/admin/withdrawals', {
+      params: { status },
+      signal,
+    });
+    return data;
+  },
+  async review(id: string, action: 'APPROVE' | 'REJECT') {
+    const { data } = await api.patch<Withdrawal>(`/admin/withdrawals/${id}`, {
+      action,
     });
     return data;
   },
