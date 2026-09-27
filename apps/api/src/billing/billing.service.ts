@@ -8,6 +8,17 @@ function round6(n: number): number {
   return Math.round(n * 1e6) / 1e6;
 }
 
+export interface ChannelPricing {
+  /** 对用户售价 USD/1M tokens */
+  priceInput: number;
+  priceOutput: number;
+  /** 上游成本 USD/1M tokens */
+  costInput: number;
+  costOutput: number;
+  /** 是否来自渠道×模型显式定价（否则为目录默认价） */
+  explicit: boolean;
+}
+
 @Injectable()
 export class BillingService {
   constructor(private readonly prisma: PrismaService) {}
@@ -21,16 +32,54 @@ export class BillingService {
     return { balance: Number(user.balance) };
   }
 
-  /** 读取模型单价（USD/1M tokens）；目录缺失返回 null。 */
-  async getModelPrices(
+  /**
+   * 计算某模型在指定渠道的售价与成本。
+   * 优先级：ChannelModel 显式 price > ModelCatalog 默认价 × discount。
+   */
+  async getChannelPricing(
+    channelId: string | null,
     model: string,
-  ): Promise<{ input: number; output: number } | null> {
-    const row = await this.prisma.modelCatalog.findUnique({
-      where: { name: model },
-      select: { inputPrice: true, outputPrice: true },
-    });
-    if (!row) return null;
-    return { input: Number(row.inputPrice), output: Number(row.outputPrice) };
+  ): Promise<ChannelPricing> {
+    const [cm, catalog] = await Promise.all([
+      channelId
+        ? this.prisma.channelModel.findUnique({
+            where: {
+              channelId_modelName: { channelId, modelName: model },
+            },
+            select: {
+              priceInput: true,
+              priceOutput: true,
+              costInput: true,
+              costOutput: true,
+              discount: true,
+            },
+          })
+        : Promise.resolve(null),
+      this.prisma.modelCatalog.findUnique({
+        where: { name: model },
+        select: { inputPrice: true, outputPrice: true },
+      }),
+    ]);
+
+    const discount = cm?.discount != null ? Number(cm.discount) : 1;
+    const catalogIn = catalog ? Number(catalog.inputPrice) : 0;
+    const catalogOut = catalog ? Number(catalog.outputPrice) : 0;
+    const explicitIn = cm?.priceInput != null ? Number(cm.priceInput) : null;
+    const explicitOut = cm?.priceOutput != null ? Number(cm.priceOutput) : null;
+
+    return {
+      priceInput: explicitIn ?? catalogIn * discount,
+      priceOutput: explicitOut ?? catalogOut * discount,
+      costInput: cm?.costInput != null ? Number(cm.costInput) : 0,
+      costOutput: cm?.costOutput != null ? Number(cm.costOutput) : 0,
+      explicit: explicitIn != null || explicitOut != null || cm?.discount != null,
+    };
+  }
+
+  /** 该模型在渠道下是否为 0 价（免费，无需余额） */
+  async isFree(channelId: string | null, model: string): Promise<boolean> {
+    const p = await this.getChannelPricing(channelId, model);
+    return p.priceInput === 0 && p.priceOutput === 0;
   }
 
   async listTransactions(

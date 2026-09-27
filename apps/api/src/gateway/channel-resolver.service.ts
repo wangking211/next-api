@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Channel, ChannelOwnerType, ChannelStatus } from '@prisma/client';
+import { ChannelOwnerType, ChannelStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
 import { ResolvedChannel } from './types';
@@ -13,74 +13,96 @@ export class ChannelResolverService {
 
   /**
    * 为指定用户 + 模型选择候选渠道。
-   * 排序：用户自有 BYOK 渠道优先于平台渠道；同级按 priority 降序、weight 加权随机。
+   * 排序：用户自有 BYOK 优先于平台；同级按 priority 降序、上游成本升序（利润最大）、weight 加权随机。
+   * 可用性以 ChannelModel 为准（同一模型可由多渠道提供）。
    */
   async resolve(userId: string, model: string): Promise<ResolvedChannel[]> {
-    const channels = await this.prisma.channel.findMany({
+    const rows = await this.prisma.channelModel.findMany({
       where: {
-        status: ChannelStatus.ENABLED,
-        models: { has: model },
-        OR: [
-          { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
-          { ownerType: ChannelOwnerType.PLATFORM },
-        ],
+        modelName: model,
+        enabled: true,
+        channel: {
+          status: ChannelStatus.ENABLED,
+          OR: [
+            { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
+            { ownerType: ChannelOwnerType.PLATFORM },
+          ],
+        },
       },
+      include: { channel: true },
     });
 
-    const candidates: ResolvedChannel[] = [];
-    for (const channel of channels) {
-      try {
-        const apiKey = this.crypto.decrypt(channel.apiKeyEnc);
-        if (apiKey) candidates.push({ channel, apiKey });
-      } catch {
-        // 解密失败的渠道跳过
-      }
-    }
+    const ranked: {
+      c: ResolvedChannel;
+      tier: number;
+      priority: number;
+      cost: number;
+      race: number;
+    }[] = [];
 
-    const ranked = candidates.map((c) => ({
-      c,
-      tier: c.channel.ownerType === ChannelOwnerType.USER ? 0 : 1,
-      // 指数竞速实现加权随机：weight 越大越可能排前
-      race: -Math.log(Math.random() || 1e-9) / Math.max(c.channel.weight, 1),
-    }));
+    for (const cm of rows) {
+      let apiKey: string;
+      try {
+        apiKey = this.crypto.decrypt(cm.channel.apiKeyEnc);
+      } catch {
+        continue; // 解密失败的渠道跳过
+      }
+      if (!apiKey) continue;
+      const weight = Math.max(cm.weight ?? cm.channel.weight, 1);
+      ranked.push({
+        c: { channel: cm.channel, apiKey },
+        tier: cm.channel.ownerType === ChannelOwnerType.USER ? 0 : 1,
+        priority: cm.priority ?? cm.channel.priority,
+        // 用输入成本作为路由成本代理；未配置则视为无穷（同级排最后）
+        cost: cm.costInput != null ? Number(cm.costInput) : Number.POSITIVE_INFINITY,
+        // 指数竞速实现加权随机：weight 越大越可能排前
+        race: -Math.log(Math.random() || 1e-9) / weight,
+      });
+    }
 
     ranked.sort(
       (a, b) =>
         a.tier - b.tier ||
-        b.c.channel.priority - a.c.channel.priority ||
+        b.priority - a.priority ||
+        a.cost - b.cost ||
         a.race - b.race,
     );
 
     return ranked.map((r) => r.c);
   }
 
-  supportsAnyModel(userId: string, model: string): Promise<Channel | null> {
-    return this.prisma.channel.findFirst({
+  supportsAnyModel(userId: string, model: string): Promise<unknown> {
+    return this.prisma.channelModel.findFirst({
       where: {
-        status: ChannelStatus.ENABLED,
-        models: { has: model },
-        OR: [
-          { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
-          { ownerType: ChannelOwnerType.PLATFORM },
-        ],
+        modelName: model,
+        enabled: true,
+        channel: {
+          status: ChannelStatus.ENABLED,
+          OR: [
+            { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
+            { ownerType: ChannelOwnerType.PLATFORM },
+          ],
+        },
       },
     });
   }
 
   /** 汇总用户当前可实际调用的模型（自有+平台启用渠道所支持的模型） */
   async availableModels(userId: string): Promise<string[]> {
-    const channels = await this.prisma.channel.findMany({
+    const rows = await this.prisma.channelModel.findMany({
       where: {
-        status: ChannelStatus.ENABLED,
-        OR: [
-          { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
-          { ownerType: ChannelOwnerType.PLATFORM },
-        ],
+        enabled: true,
+        channel: {
+          status: ChannelStatus.ENABLED,
+          OR: [
+            { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
+            { ownerType: ChannelOwnerType.PLATFORM },
+          ],
+        },
       },
-      select: { models: true },
+      distinct: ['modelName'],
+      select: { modelName: true },
     });
-    const set = new Set<string>();
-    for (const c of channels) for (const m of c.models) set.add(m);
-    return [...set].sort();
+    return rows.map((r) => r.modelName).sort();
   }
 }

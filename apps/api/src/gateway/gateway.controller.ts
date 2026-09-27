@@ -109,15 +109,6 @@ export class GatewayController {
       }
       return cachedBalance;
     };
-    let pricesLoaded = false;
-    let prices: { input: number; output: number } | null = null;
-    const loadPrices = async () => {
-      if (!pricesLoaded) {
-        prices = await this.billing.getModelPrices(model);
-        pricesLoaded = true;
-      }
-      return prices;
-    };
     const maxOutputTokens =
       Number(body?.max_tokens ?? body?.max_completion_tokens ?? 0) ||
       this.defaultMaxOutputTokens;
@@ -134,12 +125,11 @@ export class GatewayController {
     for (let i = 0; i < channels.length; i++) {
       const { channel, apiKey: upstreamKey } = channels[i];
       if (channel.ownerType === ChannelOwnerType.PLATFORM) {
-        const p = await loadPrices();
-        // 未知模型无法定价，退化为“余额需为正”
-        const required = p
-          ? (promptFallback / 1_000_000) * p.input +
-            (maxOutputTokens / 1_000_000) * p.output
-          : Number.EPSILON;
+        // 预授权：按该渠道的售价预估上限，余额不足则跳过
+        const p = await this.billing.getChannelPricing(channel.id, model);
+        const required =
+          (promptFallback / 1_000_000) * p.priceInput +
+          (maxOutputTokens / 1_000_000) * p.priceOutput;
         if (required > 0 && (await getBalance()) < required) {
           insufficientBalance = true;
           continue;

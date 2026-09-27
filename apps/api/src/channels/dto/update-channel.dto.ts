@@ -9,8 +9,11 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ChannelStatus } from '@prisma/client';
+import { ChannelModelPriceDto } from './channel-model-price.dto';
 
 export class UpdateChannelDto {
   @IsOptional()
@@ -55,4 +58,10 @@ export class UpdateChannelDto {
   @IsOptional()
   @IsEnum(ChannelStatus)
   status?: ChannelStatus;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ChannelModelPriceDto)
+  modelPrices?: ChannelModelPriceDto[];
 }

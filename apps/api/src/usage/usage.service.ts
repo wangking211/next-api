@@ -44,6 +44,10 @@ function utcDay(d = new Date()): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
+function round6(n: number): number {
+  return Math.round(n * 1e6) / 1e6;
+}
+
 @Injectable()
 export class UsageService {
   private readonly logger = new Logger(UsageService.name);
@@ -59,25 +63,29 @@ export class UsageService {
     this.maxChars = Number(config.get<string>('LOG_CONTENT_MAX', '20000')) || 20000;
   }
 
-  async computeCost(
+  /** 按渠道×模型定价计算向用户收取的费用与上游成本。 */
+  async computeCosts(
+    channelId: string | null,
     model: string,
     promptTokens: number,
     completionTokens: number,
-  ): Promise<number> {
-    const catalog = await this.prisma.modelCatalog.findUnique({
-      where: { name: model },
-    });
-    if (!catalog) return 0;
-    const input = Number(catalog.inputPrice);
-    const output = Number(catalog.outputPrice);
-    const cost =
-      (promptTokens / 1_000_000) * input + (completionTokens / 1_000_000) * output;
-    return Math.round(cost * 1e6) / 1e6;
+  ): Promise<{ cost: number; upstreamCost: number }> {
+    const pricing = await this.billing.getChannelPricing(channelId, model);
+    const cost = round6(
+      (promptTokens / 1_000_000) * pricing.priceInput +
+        (completionTokens / 1_000_000) * pricing.priceOutput,
+    );
+    const upstreamCost = round6(
+      (promptTokens / 1_000_000) * pricing.costInput +
+        (completionTokens / 1_000_000) * pricing.costOutput,
+    );
+    return { cost, upstreamCost };
   }
 
   /** 记录一次调用：写明细、累计 key 用量、按天聚合。 */
   async record(entry: UsageEntry): Promise<void> {
-    const cost = await this.computeCost(
+    const { cost, upstreamCost } = await this.computeCosts(
+      entry.channelId,
       entry.model,
       entry.promptTokens,
       entry.completionTokens,
@@ -97,6 +105,7 @@ export class UsageService {
             completionTokens: entry.completionTokens,
             totalTokens: entry.totalTokens,
             cost,
+            upstreamCost,
             latencyMs: entry.latencyMs,
             status: entry.status,
             errorMessage: entry.errorMessage ?? null,

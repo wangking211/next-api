@@ -9,8 +9,11 @@ import {
   Min,
   MinLength,
   ArrayMinSize,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ChannelOwnerType } from '@prisma/client';
+import { ChannelModelPriceDto } from './channel-model-price.dto';
 
 export class CreateChannelDto {
   @IsString()
@@ -51,4 +54,11 @@ export class CreateChannelDto {
   @IsInt()
   @Min(0)
   priority?: number;
+
+  /** 逐模型定价（成本/售价/折扣），同模型可跨渠道各异 */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ChannelModelPriceDto)
+  modelPrices?: ChannelModelPriceDto[];
 }

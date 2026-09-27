@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Channel, ChannelOwnerType, ChannelStatus, Prisma, Role } from '@prisma/client';
+import { Channel, ChannelModel, ChannelOwnerType, ChannelStatus, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
 import { AuthUser } from '../common/interfaces/auth.interface';
@@ -13,6 +13,7 @@ import { UpstreamError } from '../gateway/types';
 import { assertPublicHttpUrl, UnsafeUrlError } from '../common/url-safety';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
+import { ChannelModelPriceDto } from './dto/channel-model-price.dto';
 
 export interface ChannelQuery {
   page?: number;
@@ -73,7 +74,7 @@ export class ChannelsService {
     }
   }
 
-  private view(c: Channel) {
+  private view(c: Channel & { modelPrices?: ChannelModel[] }) {
     let preview = '';
     try {
       const key = this.crypto.decrypt(c.apiKeyEnc);
@@ -81,8 +82,57 @@ export class ChannelsService {
     } catch {
       preview = '****';
     }
-    const { apiKeyEnc, ...rest } = c;
-    return { ...rest, apiKeyPreview: preview, hasApiKey: !!apiKeyEnc };
+    const { apiKeyEnc, modelPrices, ...rest } = c;
+    return {
+      ...rest,
+      apiKeyPreview: preview,
+      hasApiKey: !!apiKeyEnc,
+      modelPrices: (modelPrices ?? []).map((m) => ({
+        model: m.modelName,
+        costInput: m.costInput != null ? Number(m.costInput) : null,
+        costOutput: m.costOutput != null ? Number(m.costOutput) : null,
+        priceInput: m.priceInput != null ? Number(m.priceInput) : null,
+        priceOutput: m.priceOutput != null ? Number(m.priceOutput) : null,
+        discount: m.discount != null ? Number(m.discount) : null,
+        enabled: m.enabled,
+        priority: m.priority,
+        weight: m.weight,
+      })),
+    };
+  }
+
+  /** 同步渠道×模型定价行；prune=true 时删除不在列表中的模型行 */
+  private async upsertChannelModels(
+    channelId: string,
+    models: string[],
+    modelPrices?: ChannelModelPriceDto[],
+    prune = false,
+  ): Promise<void> {
+    const priceMap = new Map((modelPrices ?? []).map((p) => [p.model, p]));
+    const names = new Set<string>([...models, ...priceMap.keys()]);
+    for (const model of names) {
+      const p = priceMap.get(model);
+      const pricing = {
+        costInput: p?.costInput ?? null,
+        costOutput: p?.costOutput ?? null,
+        priceInput: p?.priceInput ?? null,
+        priceOutput: p?.priceOutput ?? null,
+        discount: p?.discount ?? null,
+        priority: p?.priority ?? null,
+        weight: p?.weight ?? null,
+        enabled: p?.enabled ?? true,
+      };
+      await this.prisma.channelModel.upsert({
+        where: { channelId_modelName: { channelId, modelName: model } },
+        create: { channelId, modelName: model, ...pricing },
+        update: pricing,
+      });
+    }
+    if (prune) {
+      await this.prisma.channelModel.deleteMany({
+        where: { channelId, modelName: { notIn: [...names] } },
+      });
+    }
   }
 
   async list(user: AuthUser, q: ChannelQuery = {}) {
@@ -100,11 +150,12 @@ export class ChannelsService {
     if (q.name) where.name = { contains: q.name, mode: 'insensitive' };
     if (q.provider) where.provider = q.provider;
     if (q.status) where.status = q.status;
-    if (q.model) where.models = { has: q.model };
+    if (q.model) where.modelPrices = { some: { modelName: q.model, enabled: true } };
 
     const [items, total] = await Promise.all([
       this.prisma.channel.findMany({
         where,
+        include: { modelPrices: true },
         orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -116,26 +167,35 @@ export class ChannelsService {
 
   /** 当前用户可调用的模型，按渠道分组（自有 BYOK + 平台），用于控制台展示。 */
   async availableModels(user: AuthUser) {
-    const channels = await this.prisma.channel.findMany({
+    const rows = await this.prisma.channelModel.findMany({
       where: {
-        status: ChannelStatus.ENABLED,
-        OR: [
-          { ownerType: ChannelOwnerType.USER, ownerUserId: user.id },
-          { ownerType: ChannelOwnerType.PLATFORM },
-        ],
+        enabled: true,
+        channel: {
+          status: ChannelStatus.ENABLED,
+          OR: [
+            { ownerType: ChannelOwnerType.USER, ownerUserId: user.id },
+            { ownerType: ChannelOwnerType.PLATFORM },
+          ],
+        },
       },
       select: {
-        id: true,
-        name: true,
-        ownerType: true,
-        provider: true,
-        models: true,
+        modelName: true,
+        channel: { select: { id: true, name: true, ownerType: true, provider: true } },
       },
-      orderBy: [{ ownerType: 'asc' }, { priority: 'desc' }],
+      orderBy: { modelName: 'asc' },
     });
     const flat = new Set<string>();
-    for (const c of channels) for (const m of c.models) flat.add(m);
-    return { channels, models: [...flat].sort() };
+    const byChannel = new Map<
+      string,
+      { id: string; name: string; ownerType: string; provider: string; models: string[] }
+    >();
+    for (const r of rows) {
+      flat.add(r.modelName);
+      const ch = byChannel.get(r.channel.id) ?? { ...r.channel, models: [] };
+      ch.models.push(r.modelName);
+      byChannel.set(r.channel.id, ch);
+    }
+    return { channels: [...byChannel.values()], models: [...flat].sort() };
   }
 
   async create(user: AuthUser, dto: CreateChannelDto) {
@@ -162,7 +222,12 @@ export class ChannelsService {
         priority: dto.priority ?? 0,
       },
     });
-    return this.view(channel);
+    await this.upsertChannelModels(channel.id, dto.models, dto.modelPrices, true);
+    const fresh = await this.prisma.channel.findUnique({
+      where: { id: channel.id },
+      include: { modelPrices: true },
+    });
+    return this.view(fresh!);
   }
 
   private async findAccessible(user: AuthUser, id: string): Promise<Channel> {
@@ -197,7 +262,19 @@ export class ChannelsService {
           : {}),
       },
     });
-    return this.view(channel);
+    if (dto.models !== undefined || dto.modelPrices !== undefined) {
+      await this.upsertChannelModels(
+        id,
+        dto.models ?? channel.models,
+        dto.modelPrices,
+        dto.models !== undefined,
+      );
+    }
+    const fresh = await this.prisma.channel.findUnique({
+      where: { id },
+      include: { modelPrices: true },
+    });
+    return this.view(fresh!);
   }
 
   async remove(user: AuthUser, id: string) {
