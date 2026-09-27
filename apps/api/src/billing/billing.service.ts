@@ -226,7 +226,11 @@ export class BillingService {
     return this.payCommissions(tx, userId, exists.username, cost, requestLogId);
   }
 
-  /** 沿 agent 链向上给各级代理按 rebateRate 发放返点，返回合计（USD）。 */
+  /**
+   * 沿 agent 链向上发放返点，返回合计（USD）。
+   * REBATE_MODE=stacked（默认）：各级各按自身 rebateRate 计算；
+   * REBATE_MODE=differential：级差，各级只拿与更靠近用户的下一级的差额。
+   */
   private async payCommissions(
     tx: Prisma.TransactionClient,
     userId: string,
@@ -234,7 +238,8 @@ export class BillingService {
     cost: number,
     requestLogId: string,
   ): Promise<number> {
-    let total = 0;
+    // 收集代理链（由近及远）
+    const chain: { id: string; rate: number }[] = [];
     let currentId = userId;
     const seen = new Set<string>([userId]);
     for (let depth = 0; depth < 5; depth++) {
@@ -250,29 +255,47 @@ export class BillingService {
         select: { id: true, rebateRate: true },
       });
       if (!agent) break;
-      const rate = agent.rebateRate != null ? Number(agent.rebateRate) : 0;
-      if (rate > 0) {
-        const commission = round6(cost * rate);
-        if (commission > 0) {
-          const upd = await tx.user.update({
-            where: { id: agent.id },
-            data: { balance: { increment: commission } },
-            select: { balance: true },
-          });
-          await tx.balanceTransaction.create({
-            data: {
-              userId: agent.id,
-              type: BalanceTxType.COMMISSION,
-              amount: commission,
-              balanceAfter: round6(Number(upd.balance)),
-              requestLogId,
-              description: `返点（来自 ${sourceName}）`,
-            },
-          });
-          total = round6(total + commission);
-        }
-      }
+      chain.push({
+        id: agent.id,
+        rate: agent.rebateRate != null ? Number(agent.rebateRate) : 0,
+      });
       currentId = agentId;
+    }
+    if (chain.length === 0) return 0;
+
+    const mode = (process.env.REBATE_MODE ?? 'stacked').toLowerCase();
+    let rates: number[];
+    if (mode === 'differential') {
+      let child = 0;
+      rates = chain.map((lvl) => {
+        const eff = Math.max(0, lvl.rate - child);
+        child = Math.max(child, lvl.rate);
+        return eff;
+      });
+    } else {
+      rates = chain.map((lvl) => Math.max(0, lvl.rate));
+    }
+
+    let total = 0;
+    for (let i = 0; i < chain.length; i++) {
+      const commission = round6(cost * rates[i]);
+      if (commission <= 0) continue;
+      const upd = await tx.user.update({
+        where: { id: chain[i].id },
+        data: { balance: { increment: commission } },
+        select: { balance: true },
+      });
+      await tx.balanceTransaction.create({
+        data: {
+          userId: chain[i].id,
+          type: BalanceTxType.COMMISSION,
+          amount: commission,
+          balanceAfter: round6(Number(upd.balance)),
+          requestLogId,
+          description: `返点（来自 ${sourceName}）`,
+        },
+      });
+      total = round6(total + commission);
     }
     return total;
   }
