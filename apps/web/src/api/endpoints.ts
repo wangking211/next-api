@@ -154,6 +154,8 @@ export const modelsApi = {
     provider: string;
     inputPrice?: number;
     outputPrice?: number;
+    cacheReadPrice?: number;
+    cacheWritePrice?: number;
     enabled?: boolean;
   }) {
     const { data } = await api.post<ModelInfo>('/models', body);

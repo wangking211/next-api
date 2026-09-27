@@ -70,6 +70,8 @@ export interface ModelInfo {
   provider: string;
   inputPrice: string;
   outputPrice: string;
+  cacheReadPrice: string;
+  cacheWritePrice: string;
   enabled: boolean;
   createdAt: string;
 }

@@ -28,6 +28,8 @@ export class ModelsService {
         provider: dto.provider,
         inputPrice: dto.inputPrice ?? 0,
         outputPrice: dto.outputPrice ?? 0,
+        cacheReadPrice: dto.cacheReadPrice ?? 0,
+        cacheWritePrice: dto.cacheWritePrice ?? 0,
         enabled: dto.enabled ?? true,
       },
     });

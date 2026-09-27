@@ -95,6 +95,7 @@ function usageOf(gem: any) {
     promptTokens: prompt,
     completionTokens: completion,
     totalTokens: u.totalTokenCount ?? prompt + completion,
+    cacheReadTokens: u.cachedContentTokenCount ?? 0,
   };
 }
 
@@ -208,6 +209,7 @@ export class GeminiProvider implements Provider {
         promptTokens: openai.usage.prompt_tokens,
         completionTokens: openai.usage.completion_tokens,
         totalTokens: openai.usage.total_tokens,
+        cacheReadTokens: usageOf(json)?.cacheReadTokens ?? 0,
       },
       rawText: JSON.stringify(openai),
     };

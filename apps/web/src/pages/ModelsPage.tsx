@@ -26,6 +26,7 @@ export default function ModelsPage() {
   const isAdmin = user?.role === 'ADMIN';
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<ModelInfo | null>(null);
   const [form] = Form.useForm();
 
   const { data: models = [], isLoading } = useQuery({
@@ -33,13 +34,15 @@ export default function ModelsPage() {
     queryFn: ({ signal }) => modelsApi.list(signal),
   });
 
-  const createMut = useMutation({
-    mutationFn: modelsApi.create,
+  const saveMut = useMutation({
+    mutationFn: (v: any) =>
+      editing ? modelsApi.update(editing.id, v) : modelsApi.create(v),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['models'] });
       setOpen(false);
+      setEditing(null);
       form.resetFields();
-      message.success('模型已创建');
+      message.success(editing ? '模型已更新' : '模型已创建');
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -53,12 +56,34 @@ export default function ModelsPage() {
     onError: (e) => message.error(errorMessage(e)),
   });
 
+  const openCreate = () => {
+    setEditing(null);
+    form.resetFields();
+    form.setFieldsValue({ enabled: true, inputPrice: 0, outputPrice: 0, cacheReadPrice: 0, cacheWritePrice: 0 });
+    setOpen(true);
+  };
+
+  const openEdit = (r: ModelInfo) => {
+    setEditing(r);
+    form.setFieldsValue({
+      name: r.name,
+      displayName: r.displayName,
+      provider: r.provider,
+      inputPrice: Number(r.inputPrice),
+      outputPrice: Number(r.outputPrice),
+      cacheReadPrice: Number(r.cacheReadPrice ?? 0),
+      cacheWritePrice: Number(r.cacheWritePrice ?? 0),
+      enabled: r.enabled,
+    });
+    setOpen(true);
+  };
+
   return (
     <Card
-      title="模型目录与定价"
+      title="模型目录与官方价"
       extra={
         isAdmin && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
             添加模型
           </Button>
         )
@@ -69,20 +94,30 @@ export default function ModelsPage() {
         loading={isLoading}
         dataSource={models}
         pagination={{ pageSize: 20 }}
-        scroll={{ x: 800 }}
+        scroll={{ x: 1000 }}
         columns={[
           { title: '模型名', dataIndex: 'name', render: (v: string) => <code>{v}</code> },
           { title: '显示名', dataIndex: 'displayName' },
           { title: '服务商', dataIndex: 'provider', render: (v: string) => <Tag>{v}</Tag> },
           {
-            title: '输入价 ($/1M)',
+            title: '输入官方价 ($/1M)',
             dataIndex: 'inputPrice',
             render: (v: string) => Number(v).toFixed(4),
           },
           {
-            title: '输出价 ($/1M)',
+            title: '输出官方价 ($/1M)',
             dataIndex: 'outputPrice',
             render: (v: string) => Number(v).toFixed(4),
+          },
+          {
+            title: '缓存读 ($/1M)',
+            dataIndex: 'cacheReadPrice',
+            render: (v: string) => Number(v ?? 0).toFixed(4),
+          },
+          {
+            title: '缓存写 ($/1M)',
+            dataIndex: 'cacheWritePrice',
+            render: (v: string) => Number(v ?? 0).toFixed(4),
           },
           {
             title: '启用',
@@ -94,13 +129,18 @@ export default function ModelsPage() {
                 {
                   title: '操作',
                   fixed: 'right' as const,
-                  width: 100,
+                  width: 150,
                   render: (_: unknown, r: ModelInfo) => (
-                    <Popconfirm title="确定删除该模型？" onConfirm={() => removeMut.mutate(r.id)}>
-                      <Button size="small" danger>
-                        删除
+                    <Space>
+                      <Button size="small" onClick={() => openEdit(r)}>
+                        编辑
                       </Button>
-                    </Popconfirm>
+                      <Popconfirm title="确定删除该模型？" onConfirm={() => removeMut.mutate(r.id)}>
+                        <Button size="small" danger>
+                          删除
+                        </Button>
+                      </Popconfirm>
+                    </Space>
                   ),
                 },
               ]
@@ -109,26 +149,28 @@ export default function ModelsPage() {
       />
 
       <Modal
-        title="添加模型"
+        title={editing ? `编辑模型：${editing.name}` : '添加模型'}
         open={open}
-        onCancel={() => setOpen(false)}
+        onCancel={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
         onOk={() => form.submit()}
-        confirmLoading={createMut.isPending}
+        confirmLoading={saveMut.isPending}
         destroyOnClose
       >
         <Form
           form={form}
           layout="vertical"
-          onFinish={(v) => createMut.mutate(v)}
+          onFinish={(v) => saveMut.mutate(v)}
           requiredMark={false}
-          initialValues={{ enabled: true, inputPrice: 0, outputPrice: 0 }}
         >
           <Form.Item
             name="name"
             label="模型名（上游实际名称）"
             rules={[{ required: true, message: '请输入模型名' }]}
           >
-            <Input placeholder="gpt-4o-mini" />
+            <Input placeholder="gpt-4o-mini" disabled={!!editing} />
           </Form.Item>
           <Form.Item name="displayName" label="显示名" rules={[{ required: true }]}>
             <Input placeholder="GPT-4o mini" />
@@ -136,11 +178,17 @@ export default function ModelsPage() {
           <Form.Item name="provider" label="服务商" rules={[{ required: true }]}>
             <Input placeholder="openai" />
           </Form.Item>
-          <Space size={16}>
-            <Form.Item name="inputPrice" label="输入价 ($/1M tokens)">
+          <Space size={16} wrap>
+            <Form.Item name="inputPrice" label="输入官方价 ($/1M)">
               <InputNumber min={0} step={0.01} />
             </Form.Item>
-            <Form.Item name="outputPrice" label="输出价 ($/1M tokens)">
+            <Form.Item name="outputPrice" label="输出官方价 ($/1M)">
+              <InputNumber min={0} step={0.01} />
+            </Form.Item>
+            <Form.Item name="cacheReadPrice" label="缓存读 ($/1M)">
+              <InputNumber min={0} step={0.01} />
+            </Form.Item>
+            <Form.Item name="cacheWritePrice" label="缓存写 ($/1M)">
               <InputNumber min={0} step={0.01} />
             </Form.Item>
           </Space>

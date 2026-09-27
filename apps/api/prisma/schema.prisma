@@ -239,6 +239,8 @@ model ModelCatalog {
   provider    String
   inputPrice  Decimal  @default(0) @db.Decimal(18, 6)
   outputPrice Decimal  @default(0) @db.Decimal(18, 6)
+  cacheReadPrice  Decimal @default(0) @db.Decimal(18, 6)
+  cacheWritePrice Decimal @default(0) @db.Decimal(18, 6)
   enabled     Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -256,6 +258,8 @@ model RequestLog {
   provider         String?
   promptTokens     Int      @default(0)
   completionTokens Int      @default(0)
+  cacheReadTokens  Int      @default(0)
+  cacheWriteTokens Int      @default(0)
   totalTokens      Int      @default(0)
   cost             Decimal  @default(0) @db.Decimal(18, 6)
   upstreamCost     Decimal  @default(0) @db.Decimal(18, 6)

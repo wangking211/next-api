@@ -35,6 +35,16 @@ export class CreateModelDto {
   outputPrice?: number;
 
   @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  cacheReadPrice?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  cacheWritePrice?: number;
+
+  @IsOptional()
   @IsBoolean()
   enabled?: boolean;
 }

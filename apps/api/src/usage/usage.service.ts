@@ -13,6 +13,8 @@ export interface UsageEntry {
   provider: string | null;
   promptTokens: number;
   completionTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   totalTokens: number;
   latencyMs: number;
   status: number;
@@ -63,24 +65,31 @@ export class UsageService {
     this.maxChars = Number(config.get<string>('LOG_CONTENT_MAX', '20000')) || 20000;
   }
 
-  /** 按渠道×模型定价计算费用；售价再乘用户/代理倍率（相对渠道价）。 */
+  /** 按渠道×模型定价计算费用；售价再乘用户/代理倍率（相对渠道价）。含缓存读写。 */
   async computeCosts(
     channelId: string | null,
     model: string,
     promptTokens: number,
     completionTokens: number,
     userId?: string,
+    cacheReadTokens = 0,
+    cacheWriteTokens = 0,
   ): Promise<{ cost: number; upstreamCost: number }> {
     const pricing = await this.billing.getChannelPricing(channelId, model);
     const multiplier = userId ? await this.billing.getUserMultiplier(userId) : 1;
+    const nonCached = Math.max(0, promptTokens - cacheReadTokens);
     const cost = round6(
-      ((promptTokens / 1_000_000) * pricing.priceInput +
-        (completionTokens / 1_000_000) * pricing.priceOutput) *
+      ((nonCached / 1_000_000) * pricing.priceInput +
+        (completionTokens / 1_000_000) * pricing.priceOutput +
+        (cacheReadTokens / 1_000_000) * pricing.cacheReadPrice +
+        (cacheWriteTokens / 1_000_000) * pricing.cacheWritePrice) *
         multiplier,
     );
     const upstreamCost = round6(
-      (promptTokens / 1_000_000) * pricing.costInput +
-        (completionTokens / 1_000_000) * pricing.costOutput,
+      (nonCached / 1_000_000) * pricing.costInput +
+        (completionTokens / 1_000_000) * pricing.costOutput +
+        (cacheReadTokens / 1_000_000) * pricing.cacheReadCost +
+        (cacheWriteTokens / 1_000_000) * pricing.cacheWriteCost,
     );
     return { cost, upstreamCost };
   }
@@ -93,6 +102,8 @@ export class UsageService {
       entry.promptTokens,
       entry.completionTokens,
       entry.userId,
+      entry.cacheReadTokens ?? 0,
+      entry.cacheWriteTokens ?? 0,
     );
     const date = utcDay();
 
@@ -107,6 +118,8 @@ export class UsageService {
             provider: entry.provider,
             promptTokens: entry.promptTokens,
             completionTokens: entry.completionTokens,
+            cacheReadTokens: entry.cacheReadTokens ?? 0,
+            cacheWriteTokens: entry.cacheWriteTokens ?? 0,
             totalTokens: entry.totalTokens,
             cost,
             upstreamCost,

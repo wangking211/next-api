@@ -65,7 +65,13 @@ describe('Anthropic conversion', () => {
     expect(res.object).toBe('chat.completion');
     expect(res.choices[0].message.content).toBe('Hello world');
     expect(res.choices[0].finish_reason).toBe('stop');
-    expect(res.usage).toEqual({ prompt_tokens: 9, completion_tokens: 5, total_tokens: 14 });
+    expect(res.usage).toEqual({
+      prompt_tokens: 9,
+      completion_tokens: 5,
+      total_tokens: 14,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    });
   });
 
   it('maps max_tokens stop reason to length', () => {

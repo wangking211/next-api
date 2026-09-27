@@ -15,6 +15,11 @@ export interface ChannelPricing {
   /** 上游成本 USD/1M tokens */
   costInput: number;
   costOutput: number;
+  /** 缓存读/写 售价与成本（USD/1M tokens） */
+  cacheReadPrice: number;
+  cacheWritePrice: number;
+  cacheReadCost: number;
+  cacheWriteCost: number;
   /** 是否来自渠道×模型显式定价（否则为目录默认价） */
   explicit: boolean;
 }
@@ -59,12 +64,19 @@ export class BillingService {
         : Promise.resolve(null),
       this.prisma.modelCatalog.findUnique({
         where: { name: model },
-        select: { inputPrice: true, outputPrice: true },
+        select: {
+          inputPrice: true,
+          outputPrice: true,
+          cacheReadPrice: true,
+          cacheWritePrice: true,
+        },
       }),
     ]);
 
     const officialIn = catalog ? Number(catalog.inputPrice) : 0;
     const officialOut = catalog ? Number(catalog.outputPrice) : 0;
+    const officialCacheRead = catalog ? Number(catalog.cacheReadPrice) : 0;
+    const officialCacheWrite = catalog ? Number(catalog.cacheWritePrice) : 0;
     // 兼容旧 discount：仅作为下游售价折扣
     const priceDisc =
       cm?.priceDiscount != null
@@ -88,6 +100,10 @@ export class BillingService {
       priceOutput,
       costInput,
       costOutput,
+      cacheReadPrice: officialCacheRead * priceDisc,
+      cacheWritePrice: officialCacheWrite * priceDisc,
+      cacheReadCost: officialCacheRead * costDisc,
+      cacheWriteCost: officialCacheWrite * costDisc,
       explicit:
         cm?.priceInput != null ||
         cm?.priceOutput != null ||

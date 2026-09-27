@@ -17,6 +17,7 @@ function extractUsage(json: any) {
     promptTokens: prompt,
     completionTokens: completion,
     totalTokens: u.total_tokens ?? prompt + completion,
+    cacheReadTokens: u.prompt_tokens_details?.cached_tokens ?? 0,
   };
 }
 

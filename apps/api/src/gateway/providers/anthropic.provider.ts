@@ -90,6 +90,8 @@ export function toOpenAiResponse(anth: any, model: string) {
     .join('');
   const prompt = anth.usage?.input_tokens ?? 0;
   const completion = anth.usage?.output_tokens ?? 0;
+  const cacheRead = anth.usage?.cache_read_input_tokens ?? 0;
+  const cacheWrite = anth.usage?.cache_creation_input_tokens ?? 0;
   return {
     id: anth.id ?? `chatcmpl-${Date.now()}`,
     object: 'chat.completion',
@@ -106,6 +108,8 @@ export function toOpenAiResponse(anth: any, model: string) {
       prompt_tokens: prompt,
       completion_tokens: completion,
       total_tokens: prompt + completion,
+      cache_read_tokens: cacheRead,
+      cache_write_tokens: cacheWrite,
     },
   };
 }
@@ -193,6 +197,8 @@ export class AnthropicProvider implements Provider {
         promptTokens: openai.usage.prompt_tokens,
         completionTokens: openai.usage.completion_tokens,
         totalTokens: openai.usage.total_tokens,
+        cacheReadTokens: (openai.usage as any).cache_read_tokens ?? 0,
+        cacheWriteTokens: (openai.usage as any).cache_write_tokens ?? 0,
       },
       rawText: JSON.stringify(openai),
     };
