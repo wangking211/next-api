@@ -30,6 +30,8 @@ export class ModelsService {
         outputPrice: dto.outputPrice ?? 0,
         cacheReadPrice: dto.cacheReadPrice ?? 0,
         cacheWritePrice: dto.cacheWritePrice ?? 0,
+        capabilities: dto.capabilities ?? [],
+        aliases: dto.aliases ?? [],
         enabled: dto.enabled ?? true,
       },
     });
