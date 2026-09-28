@@ -1,0 +1,3 @@
+-- ApiKey 增加 TPM 上限与模型白名单
+ALTER TABLE "ApiKey" ADD COLUMN "tpmLimit" INTEGER;
+ALTER TABLE "ApiKey" ADD COLUMN "models" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
