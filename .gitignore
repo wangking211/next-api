@@ -10,3 +10,13 @@ coverage/
 .vite/
 .hops-audit/
 .codegraph/
+
+# local agent tool artifacts
+.omo/
+apps/web/.agents/
+apps/web/.claude/
+apps/web/.openhands/
+apps/web/.trae/
+apps/web/.windsurf/
+apps/web/skills/
+apps/web/package-lock.json
