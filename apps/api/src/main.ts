@@ -3,6 +3,7 @@ import { ValidationPipe, Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { json, urlencoded } from 'express';
 import helmet from 'helmet';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { BootstrapService } from './auth/bootstrap.service';
 
@@ -32,11 +33,12 @@ async function bootstrap() {
   app.use(json({ limit: '25mb' }));
   app.use(urlencoded({ extended: true, limit: '25mb' }));
 
-  // 控制台 API 走 /api 前缀；OpenAI 兼容网关走 /v1
+  // 控制台 API 走 /api 前缀；OpenAI 兼容网关走 /v1；Anthropic 兼容网关走 /v1/messages
   app.setGlobalPrefix('api', {
     exclude: [
       { path: 'v1/chat/completions', method: RequestMethod.POST },
       { path: 'v1/models', method: RequestMethod.GET },
+      { path: 'v1/messages', method: RequestMethod.POST },
     ],
   });
 
@@ -66,6 +68,31 @@ async function bootstrap() {
   );
 
   await app.get(BootstrapService).ensureAdmin();
+
+  // Swagger 文档（/api/docs，自带 Try it out 交互式调用）
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('AI Gateway API')
+    .setDescription(
+      '控制台 API（/api/**，JWT Bearer）与 OpenAI 兼容网关（/v1/**，sk- API Key）。' +
+        '网关端点支持 Authorization: Bearer sk-... 与 x-api-key: sk-... 两种鉴权。',
+    )
+    .setVersion('1.0')
+    .addBearerAuth(
+      { type: 'http', scheme: 'bearer', description: 'JWT（控制台 API）或 sk- API Key（网关）' },
+      'bearer',
+    )
+    .build();
+  const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('api/docs', app, swaggerDocument, {
+    customSiteTitle: 'AI Gateway API Docs',
+    swaggerOptions: {
+      persistAuthorization: true,
+      deepLinking: true,
+      docExpansion: 'list',
+      tagsSorter: 'alpha',
+      operationsSorter: 'alpha',
+    },
+  });
 
   app.enableShutdownHooks();
 
