@@ -405,7 +405,9 @@ export class UsageService {
       ...this.scope(userId),
       ...(q.apiKeyId ? { apiKeyId: q.apiKeyId } : {}),
       ...(q.channelId ? { channelId: q.channelId } : {}),
-      ...(q.targetUserId ? { userId: q.targetUserId } : {}),
+      // 仅当调用方没有属主约束（管理员 scope=all / 指定 userId 由 controller 解析）时，
+      // 才允许按 userId 过滤；否则由本方法覆盖属主条件会造成跨租户越权。
+      ...(userId === null && q.targetUserId ? { userId: q.targetUserId } : {}),
       ...(q.model ? { model: { contains: q.model, mode: 'insensitive' } } : {}),
       ...(q.stream !== undefined ? { isStream: q.stream } : {}),
     };

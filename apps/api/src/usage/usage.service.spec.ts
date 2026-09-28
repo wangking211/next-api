@@ -20,6 +20,10 @@ function makeService() {
       create: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({}),
     },
+    requestLog: {
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+    },
   };
   const billing = {
     getChannelPricing: jest.fn().mockResolvedValue({
@@ -111,5 +115,51 @@ describe('UsageService 计费口径', () => {
     await service.record({ ...baseEntry });
 
     expect(billing.recordConsumption).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 越权回归：日志查询的 userId 过滤绝不能覆盖属主约束
+ * （曾因 controller 把 targetUserId 放进 query、service 展开在 scope 之后而可读他人日志）。
+ */
+describe('UsageService 日志查询属主约束', () => {
+  it('非管理员指定他人 userId 时仍按自己的 userId 过滤', async () => {
+    const { service, prisma } = makeService();
+
+    await service.logs('user1', { targetUserId: 'victim-user' });
+
+    const where = prisma.requestLog.findMany.mock.calls[0][0].where;
+    expect(where.userId).toBe('user1');
+    expect(prisma.requestLog.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({ userId: 'user1' }),
+    });
+  });
+
+  it('管理员（scope=all，userId 为 null）才可按 userId 过滤', async () => {
+    const { service, prisma } = makeService();
+
+    await service.logs(null, { targetUserId: 'user2' });
+
+    const where = prisma.requestLog.findMany.mock.calls[0][0].where;
+    expect(where.userId).toBe('user2');
+  });
+
+  it('管理员未指定 userId 时不加 userId 条件', async () => {
+    const { service, prisma } = makeService();
+
+    await service.logs(null, {});
+
+    const where = prisma.requestLog.findMany.mock.calls[0][0].where;
+    expect(where.userId).toBeUndefined();
+  });
+
+  it('关键词过滤与属主约束同时生效（内容推断也拿不到他人数据）', async () => {
+    const { service, prisma } = makeService();
+
+    await service.logs('user1', { targetUserId: 'victim-user', q: 'secret' });
+
+    const where = prisma.requestLog.findMany.mock.calls[0][0].where;
+    expect(where.userId).toBe('user1');
+    expect(where.OR).toHaveLength(3);
   });
 });

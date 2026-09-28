@@ -83,7 +83,6 @@ export class UsageController {
       pageSize: Math.min(toInt(pageSize, 20), 100),
       apiKeyId: apiKeyId || undefined,
       channelId: channelId || undefined,
-      targetUserId: targetUserId || undefined,
       model: model || undefined,
       status: status === 'success' || status === 'error' ? status : undefined,
       stream: stream === 'true' ? true : stream === 'false' ? false : undefined,
@@ -91,7 +90,9 @@ export class UsageController {
       from: from || undefined,
       to: to || undefined,
     };
-    return this.usage.logs(this.scope(user, scope), query);
+    // targetUserId 必须交由 scope() 解析（非管理员一律忽略），
+    // 不能塞进 query 覆盖属主过滤，否则会跨租户读取他人日志。
+    return this.usage.logs(this.scope(user, scope, targetUserId), query);
   }
 
   @Get('logs/export')
