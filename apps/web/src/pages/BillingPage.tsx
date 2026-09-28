@@ -21,7 +21,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { billingApi, paymentApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
-import { getCreditsPerCny, isPayEnabled } from '../api/config';
+import { getCreditsPerCny, getPayRate, isPayEnabled } from '../api/config';
 import { formatDateTime, toCredits } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
 import type {
@@ -75,6 +75,7 @@ export default function BillingPage() {
 
   const payEnabled = isPayEnabled();
   const creditsPerCny = getCreditsPerCny();
+  const payRate = getPayRate();
   const isMobile = useMemo(
     () => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent),
     [],
@@ -171,8 +172,8 @@ export default function BillingPage() {
             type="info"
             showIcon
             message={
-              payEnabled
-                ? `平台托管渠道按调用成本从余额扣费；BYOK（自带上游 Key）渠道不扣费。可通过在线充值（微信/支付宝）、兑换码充值。当前 1 元 = ${creditsPerCny} 积分。`
+              payEnabled && creditsPerCny
+                ? `平台托管渠道按调用成本从余额扣费；BYOK（自带上游 Key）渠道不扣费。可通过在线充值（微信/支付宝）、兑换码充值。当前 1 元 = ${creditsPerCny} 积分${payRate ? `（1 美元 = ${payRate} 元）` : ''}。`
                 : '平台托管渠道按调用成本从余额扣费；BYOK（自带上游 Key）渠道不扣费。可通过兑换码或联系管理员充值。'
             }
           />
@@ -182,44 +183,53 @@ export default function BillingPage() {
       {payEnabled && (
         <Col span={24}>
           <Card title="在线充值（微信 / 支付宝）">
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <Space wrap align="center">
-                <Segmented
-                  value={amountYuan}
-                  onChange={(v) => setAmountYuan(Number(v))}
-                  options={PRESET_AMOUNTS.map((a) => ({ label: `${a} 元`, value: a }))}
-                />
-                <InputNumber
-                  addonBefore="¥"
-                  min={1}
-                  max={5000}
-                  step={1}
-                  style={{ width: 160 }}
-                  value={amountYuan}
-                  onChange={(v) => setAmountYuan(Number(v) || 1)}
-                />
+            {!creditsPerCny ? (
+              <Alert
+                type="warning"
+                showIcon
+                message="实时汇率获取失败，暂时无法下单充值，请稍后重试（或联系管理员配置固定汇率）。"
+              />
+            ) : (
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <Space wrap align="center">
+                  <Segmented
+                    value={amountYuan}
+                    onChange={(v) => setAmountYuan(Number(v))}
+                    options={PRESET_AMOUNTS.map((a) => ({ label: `${a} 元`, value: a }))}
+                  />
+                  <InputNumber
+                    addonBefore="¥"
+                    min={1}
+                    max={5000}
+                    step={1}
+                    style={{ width: 160 }}
+                    value={amountYuan}
+                    onChange={(v) => setAmountYuan(Number(v) || 1)}
+                  />
+                </Space>
+                <Space wrap align="center">
+                  <Typography.Text type="secondary">支付方式</Typography.Text>
+                  <Segmented
+                    value={wayCode}
+                    onChange={(v) => setWayCode(String(v))}
+                    options={WAY_OPTIONS}
+                  />
+                </Space>
+                <Space wrap align="center">
+                  <Button
+                    type="primary"
+                    loading={createPayMut.isPending}
+                    onClick={() => createPayMut.mutate()}
+                  >
+                    立即充值 ¥{amountYuan}
+                  </Button>
+                  <Typography.Text type="secondary">
+                    预计到账 {creditsText(amountYuan * creditsPerCny)}（1 元 = {creditsPerCny} 积分
+                    {payRate ? `，实时汇率 1 美元 = ${payRate} 元` : ''}）
+                  </Typography.Text>
+                </Space>
               </Space>
-              <Space wrap align="center">
-                <Typography.Text type="secondary">支付方式</Typography.Text>
-                <Segmented
-                  value={wayCode}
-                  onChange={(v) => setWayCode(String(v))}
-                  options={WAY_OPTIONS}
-                />
-              </Space>
-              <Space wrap align="center">
-                <Button
-                  type="primary"
-                  loading={createPayMut.isPending}
-                  onClick={() => createPayMut.mutate()}
-                >
-                  立即充值 ¥{amountYuan}
-                </Button>
-                <Typography.Text type="secondary">
-                  预计到账 {creditsText(amountYuan * creditsPerCny)}（1 元 = {creditsPerCny} 积分）
-                </Typography.Text>
-              </Space>
-            </Space>
+            )}
           </Card>
         </Col>
       )}

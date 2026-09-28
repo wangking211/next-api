@@ -7,19 +7,27 @@ const SECRET = 'test-secret';
 const user = { id: 'u1', username: 'u', role: 'USER' } as any;
 
 function makeService(
-  opts: { env?: Record<string, string>; order?: any; claimCount?: number } = {},
+  opts: {
+    env?: Record<string, string>;
+    order?: any;
+    claimCount?: number;
+    rate?: number;
+  } = {},
 ) {
   const env: Record<string, string> = {
     JAIPAY_MCH_NO: 'M1',
     JAIPAY_APP_ID: 'APP1',
     JAIPAY_APP_SECRET: SECRET,
-    PAY_CNY_PER_USD: '7.1',
     CREDITS_PER_USD: '100',
     ...(opts.env ?? {}),
   };
   const config = {
     get: (k: string, d?: string) => env[k] ?? d,
   } as unknown as ConfigService;
+
+  const exchangeRate = {
+    getCnyPerUsd: jest.fn().mockResolvedValue(opts.rate ?? 7.1),
+  };
 
   const order: any = {
     id: 'o1',
@@ -57,8 +65,12 @@ function makeService(
     $transaction: (cb: any) => cb(tx),
   };
 
-  const service = new PaymentService(prisma as unknown as PrismaService, config);
-  return { service, prisma, tx, order };
+  const service = new PaymentService(
+    prisma as unknown as PrismaService,
+    config,
+    exchangeRate as any,
+  );
+  return { service, prisma, tx, order, exchangeRate };
 }
 
 function mockFetch(json: any, ok = true, status = 200) {
@@ -123,15 +135,35 @@ describe('PaymentService.createOrder', () => {
     });
   });
 
-  it('respects the RMB exchange rate and credit rate config', async () => {
-    // 若把积分改成人民币分口径（1 元 = 100 积分）：CREDITS_PER_USD=710
-    const { service, prisma } = makeService({ env: { CREDITS_PER_USD: '710' } });
+  it('uses the live exchange rate to convert RMB into credits', async () => {
+    const { service, prisma } = makeService({ rate: 7.25 });
+    mockFetch({ code: 0, data: { payData: 'x' } });
+    const res = await service.createOrder(user, 100); // 1 元
+    expect(prisma.paymentOrder.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        creditUsd: 0.137931, // 1 / 7.25
+        credits: 13.79, // × 100 积分/USD
+      }),
+    });
+    expect(res.credits).toBe(13.79);
+  });
+
+  it('honours the credits-per-USD config when converting', async () => {
+    const { service, prisma } = makeService({ env: { CREDITS_PER_USD: '50' } });
     mockFetch({ code: 0, data: { payData: 'x' } });
     const res = await service.createOrder(user, 100);
     expect(prisma.paymentOrder.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ credits: 100 }),
+      data: expect.objectContaining({ credits: 7.04 }), // 1/7.1 × 50
     });
-    expect(res.credits).toBe(100);
+    expect(res.credits).toBe(7.04);
+  });
+
+  it('quotes the rate and credits per RMB', async () => {
+    const { service } = makeService({ rate: 7.25 });
+    await expect(service.quote()).resolves.toEqual({
+      cnyPerUsd: 7.25,
+      creditsPerCny: 13.79,
+    });
   });
 
   it('rejects when JAIPay is not configured', async () => {

@@ -10,6 +10,7 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/interfaces/auth.interface';
 import { jaiPaySign, jaiPayVerify } from './jai-pay.sign';
+import { ExchangeRateService } from './exchange-rate.service';
 
 /** 允许的支付方式（JAIPay wayCode） */
 const ALLOWED_WAY_CODES = new Set([
@@ -44,7 +45,6 @@ type JaiPayConfig = {
   appSecret: string;
   notifyUrl: string;
   returnUrl: string;
-  cnyPerUsd: number;
   creditsPerUsd: number;
 };
 
@@ -59,6 +59,7 @@ export class PaymentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly exchangeRate: ExchangeRateService,
   ) {}
 
   /** 在线支付是否已配置（三项密钥齐全） */
@@ -70,23 +71,23 @@ export class PaymentService {
     );
   }
 
-  /** 每 1 元人民币可充入的积分（= CREDITS_PER_USD / PAY_CNY_PER_USD） */
-  creditsPerCny(): number {
-    const cfg = this.rawRate();
-    return round(cfg.creditsPerUsd / cfg.cnyPerUsd, 2);
+  /** 充值报价：当前汇率与「1 元可充入的积分」 */
+  async quote(): Promise<{ cnyPerUsd: number; creditsPerCny: number }> {
+    const creditsPerUsd = this.rawRate().creditsPerUsd;
+    const cnyPerUsd = await this.exchangeRate.getCnyPerUsd();
+    return { cnyPerUsd, creditsPerCny: round(creditsPerUsd / cnyPerUsd, 2) };
   }
 
   private rawRate() {
-    const cnyPerUsd = Number(this.config.get<string>('PAY_CNY_PER_USD', '7.1')) || 7.1;
     const creditsPerUsd = Number(this.config.get<string>('CREDITS_PER_USD', '100')) || 100;
-    return { cnyPerUsd, creditsPerUsd };
+    return { creditsPerUsd };
   }
 
   private jaiPayConfig(): JaiPayConfig {
     if (!this.isConfigured()) {
       throw new BadRequestException('在线支付未开通，请联系管理员或使用兑换码充值');
     }
-    const { cnyPerUsd, creditsPerUsd } = this.rawRate();
+    const { creditsPerUsd } = this.rawRate();
     return {
       baseUrl: (
         this.config.get<string>('JAIPAY_BASE_URL', 'https://pay.zxixing.com') || ''
@@ -98,7 +99,6 @@ export class PaymentService {
         this.config.get<string>('JAIPAY_NOTIFY_URL', '') ||
         'https://xiaopuyun.com/api/pay/jai/notify',
       returnUrl: this.config.get<string>('JAIPAY_RETURN_URL', '') || '',
-      cnyPerUsd,
       creditsPerUsd,
     };
   }
@@ -111,7 +111,8 @@ export class PaymentService {
       throw new BadRequestException('不支持的支付方式');
     }
 
-    const creditUsd = round(amountCents / 100 / cfg.cnyPerUsd, 6);
+    const cnyPerUsd = await this.exchangeRate.getCnyPerUsd();
+    const creditUsd = round(amountCents / 100 / cnyPerUsd, 6);
     const credits = round(creditUsd * cfg.creditsPerUsd, 2);
     const mchOrderNo = `PAY${Date.now()}${randomBytes(3).toString('hex').toUpperCase()}`;
 
