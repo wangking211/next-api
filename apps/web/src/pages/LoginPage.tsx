@@ -119,7 +119,7 @@ export default function LoginPage() {
     <div className="auth-page">
       {/* 品牌侧（窄屏隐藏） */}
       <aside className="auth-brand">
-        <Link to="/" className="lp-logo" style={{ color: '#fff' }}>
+        <Link to="/" className="lp-logo" style={{ color: 'var(--ink-text)' }}>
           <Logo size={26} onDark />
           <span>AI Gateway</span>
         </Link>
