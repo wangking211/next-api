@@ -54,6 +54,13 @@ loadConfig().finally(() => {
             },
             Menu: {
               darkItemBg: '#0a0c0f',
+              // 深色菜单项文字在 antd 里由 colorTextLightSolid 推导，而该种子为满足
+              // 主按钮「青底深字」被设成近黑 → 深侧栏上近乎不可读。此处按令牌显式改写：
+              // 常规项 = --ink-text（深色面上的正文），悬浮 = --brand-link，选中 = --brand
+              darkItemColor: '#eef2f5',
+              darkItemHoverColor: '#67e8f9',
+              darkItemSelectedColor: '#22d3ee',
+              darkItemDisabledColor: 'rgba(238, 242, 245, 0.25)',
               darkItemSelectedBg: 'rgba(34, 211, 238, 0.12)',
               darkItemHoverBg: 'rgba(34, 211, 238, 0.06)',
             },

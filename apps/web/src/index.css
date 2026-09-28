@@ -32,6 +32,12 @@
   --warn: #ffbc33;
   --err: #ff6363;
 
+  /* antd 桥接：Tooltip 文字色。
+     antd 用 var(--ant-tooltip-color, colorTextLightSolid) 渲染气泡文字，而
+     colorTextLightSolid 为满足主按钮「青底深字」被设成近黑 —— 落在深色气泡上不可读。
+     antd 官方留了这个 CSS 变量钩子，这里改回文本令牌。 */
+  --ant-tooltip-color: var(--text);
+
   /* 渐变与辉光（DESIGN.md §2 — 唯一允许的彩色渐变） */
   --grad-brand: linear-gradient(96deg, #22d3ee 0%, #38bdf8 55%, #818cf8 100%);
   --grad-bar: linear-gradient(180deg, #22d3ee, #38bdf8);
@@ -83,6 +89,20 @@ body {
 
 ::selection {
   background: rgba(34, 211, 238, 0.25);
+}
+
+/* ============================================================
+   antd 桥接
+   antd 把 colorTextLightSolid 当作「纯色底上的文字」色，而该种子为满足
+   DESIGN.md §8「主按钮青底深字」被设成近黑（见 main.tsx）。凡是从它推导、
+   且落在**深色底**上的用法都会掉到近黑文字 —— 有公开组件令牌的在 main.tsx
+   覆盖（Menu），没有令牌的在此按 DESIGN.md 令牌桥接。
+   ============================================================ */
+
+/* Avatar 图标/文字：头像底色是 colorTextQuaternary（≈12% 白），
+   近黑图标对比度仅 ≈1.4:1；特异性刻意写成 0,2,0 压过 antd 的 .ant-avatar(0,1,0) */
+.ant-avatar.ant-avatar {
+  color: var(--ink-text);
 }
 
 /* ============================================================
