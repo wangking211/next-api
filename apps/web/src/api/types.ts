@@ -27,6 +27,8 @@ export interface ApiKeyInfo {
   costUsed: string;
   rpmLimit: number | null;
   routingStrategy: RoutingStrategy | null;
+  tpmLimit: number | null;
+  models: string[];
   expiresAt: string | null;
   lastUsedAt: string | null;
   createdAt: string;

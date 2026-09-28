@@ -148,6 +148,27 @@ export default function KeysPage() {
               v ? <Tag color="blue">{STRATEGY_LABEL[v]}</Tag> : <Tag>默认</Tag>,
           },
           {
+            title: 'TPM',
+            dataIndex: 'tpmLimit',
+            render: (v: number | null) => (v ?? '∞'),
+          },
+          {
+            title: '模型白名单',
+            dataIndex: 'models',
+            width: 180,
+            render: (v: string[]) =>
+              v?.length ? (
+                <Space size={[0, 4]} wrap>
+                  {v.slice(0, 3).map((m) => (
+                    <Tag key={m}>{m}</Tag>
+                  ))}
+                  {v.length > 3 ? <Tag>+{v.length - 3}</Tag> : null}
+                </Space>
+              ) : (
+                '不限'
+              ),
+          },
+          {
             title: '最近使用',
             dataIndex: 'lastUsedAt',
             render: (v: string | null) => (v ? formatDateTime(v) : '从未'),
@@ -216,6 +237,22 @@ export default function KeysPage() {
             tooltip="按价格、响应速度、稳定性、回答质量综合打分选渠道"
           >
             <Select allowClear placeholder="均衡 BALANCED" options={STRATEGY_OPTIONS} />
+          </Form.Item>
+          <Form.Item name="tpmLimit" label="每分钟 Token 上限 TPM（留空不限）">
+            <InputNumber min={1} style={{ width: '100%' }} placeholder="例如 100000" />
+          </Form.Item>
+          <Form.Item
+            name="models"
+            label="模型白名单（留空不限，可输入任意模型名后回车）"
+            normalize={(v: unknown) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : v)}
+          >
+            <Select
+              mode="tags"
+              tokenSeparators={[',', ' ']}
+              placeholder="例如 gpt-4o-mini，回车添加"
+              open={false}
+              suffixIcon={null}
+            />
           </Form.Item>
         </Form>
       </Modal>
