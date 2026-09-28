@@ -20,5 +20,8 @@
     "prisma:studio": "pnpm --filter @ai-gateway/api prisma:studio",
     "seed": "pnpm --filter @ai-gateway/api prisma:seed",
     "cleanup": "pnpm --filter @ai-gateway/api prisma:cleanup"
+  },
+  "devDependencies": {
+    "react-doctor": "^0.9.14"
   }
 }
