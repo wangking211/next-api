@@ -1,94 +1,14 @@
 import { useState } from 'react';
-import { Alert, Button, Card, Col, Empty, Row, Statistic, Switch, Table, Tag, Typography, Space } from 'antd';
+import { Alert, Button, Card, Col, Row, Switch, Table, Tag, Space } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { usageApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
 import { toCredits } from '../utils/format';
-import type { UsageDailyRow, RequestLogRow } from '../api/types';
-
-const { Text } = Typography;
-
-function DailyBars({ rows }: { rows: UsageDailyRow[] }) {
-  if (!rows.length) return <Empty description="暂无用量数据" />;
-  const max = Math.max(...rows.map((r) => r.totalTokens), 1);
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 200, paddingTop: 8 }}>
-      {rows.map((r) => {
-        const h = Math.max((r.totalTokens / max) * 170, 4);
-        return (
-          <div
-            key={r.date}
-            title={`${r.date}\nTokens: ${r.totalTokens}\n请求: ${r.requests}\n费用: ${toCredits(r.cost).toFixed(2)} 积分`}
-            style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}
-          >
-            <div
-              style={{
-                width: '100%',
-                height: h,
-                background: 'linear-gradient(180deg,#1677ff,#69b1ff)',
-                borderRadius: 4,
-              }}
-            />
-            <Text style={{ fontSize: 10, whiteSpace: 'nowrap' }} type="secondary">
-              {r.date.slice(5)}
-            </Text>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-interface BarItem {
-  key: string;
-  label: string;
-  value: number;
-  sub?: string;
-}
-
-function BarList({ title, items }: { title: string; items: BarItem[] }) {
-  const max = Math.max(...items.map((i) => i.value), 1);
-  return (
-    <Card title={title} size="small" style={{ height: '100%' }}>
-      {items.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据" />
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {items.map((it) => (
-            <div key={it.key}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                <span
-                  style={{
-                    maxWidth: '58%',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                  title={it.label}
-                >
-                  {it.label}
-                </span>
-                <span style={{ color: '#888' }}>
-                  {it.value.toLocaleString()} {it.sub}
-                </span>
-              </div>
-              <div style={{ height: 6, background: '#f0f0f0', borderRadius: 3, marginTop: 4 }}>
-                <div
-                  style={{
-                    height: 6,
-                    width: `${(it.value / max) * 100}%`,
-                    background: '#1677ff',
-                    borderRadius: 3,
-                  }}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
-  );
-}
+import type { RequestLogRow } from '../api/types';
+import { StatCard } from './dashboard/StatCard';
+import { RankList } from './dashboard/RankBar';
+import { DailyBars } from './dashboard/DailyBars';
+import { PageHeader } from './dashboard/PageHeader';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -117,6 +37,7 @@ export default function DashboardPage() {
     summary && summary.requests > 0
       ? ((summary.successRequests / summary.requests) * 100).toFixed(1)
       : '—';
+  const margin = analytics?.totals?.margin ?? 0;
 
   return (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
@@ -133,54 +54,38 @@ export default function DashboardPage() {
           }
         />
       )}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          总览（近 30 天）
-        </Typography.Title>
-        {isAdmin && (
-          <span>
-            查看全部用户 <Switch checked={all} onChange={setAll} />
-          </span>
-        )}
-      </div>
+      <PageHeader
+        title="总览（近 30 天）"
+        extra={
+          isAdmin && (
+            <span style={{ color: 'var(--text-2)' }}>
+              查看全部用户 <Switch checked={all} onChange={setAll} />
+            </span>
+          )
+        }
+      />
 
       <Row gutter={16}>
         <Col xs={12} md={6}>
-          <Card>
-            <Statistic title="请求数" value={summary?.requests ?? 0} />
-          </Card>
+          <StatCard label="请求数" value={summary?.requests ?? 0} />
         </Col>
         <Col xs={12} md={6}>
-          <Card>
-            <Statistic title="成功率" value={successRate} suffix="%" />
-          </Card>
+          <StatCard label="成功率" value={successRate} suffix="%" />
         </Col>
         <Col xs={12} md={6}>
-          <Card>
-            <Statistic title="Token 总量" value={summary?.totalTokens ?? 0} />
-          </Card>
+          <StatCard label="Token 总量" value={summary?.totalTokens ?? 0} />
         </Col>
         <Col xs={12} md={6}>
-          <Card>
-            <Statistic
-              title="费用"
-              value={toCredits(summary?.cost).toFixed(2)}
-              suffix="积分"
-            />
-          </Card>
+          <StatCard label="费用" value={toCredits(summary?.cost).toFixed(2)} suffix="积分" />
         </Col>
         {isAdmin && (
           <Col xs={12} md={6}>
-            <Card>
-              <Statistic
-                title="毛利"
-                value={toCredits(analytics?.totals?.margin).toFixed(2)}
-                suffix="积分"
-                valueStyle={{
-                  color: (analytics?.totals?.margin ?? 0) >= 0 ? '#3f8600' : '#cf1322',
-                }}
-              />
-            </Card>
+            <StatCard
+              label="毛利"
+              value={toCredits(margin).toFixed(2)}
+              suffix="积分"
+              valueColor={margin >= 0 ? 'var(--ok)' : 'var(--err)'}
+            />
           </Col>
         )}
       </Row>
@@ -191,7 +96,7 @@ export default function DashboardPage() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} md={8}>
-          <BarList
+          <RankList
             title="模型用量（tokens）"
             items={(analytics?.byModel ?? []).map((m) => ({
               key: m.model,
@@ -202,7 +107,7 @@ export default function DashboardPage() {
           />
         </Col>
         <Col xs={24} md={8}>
-          <BarList
+          <RankList
             title="渠道用量（tokens）"
             items={(analytics?.byChannel ?? []).map((c) => ({
               key: c.channelId ?? c.name,
@@ -214,7 +119,7 @@ export default function DashboardPage() {
         </Col>
         {(analytics?.byUser?.length ?? 0) > 0 && (
           <Col xs={24} md={8}>
-            <BarList
+            <RankList
               title="用户用量（tokens）"
               items={(analytics?.byUser ?? []).map((u) => ({
                 key: u.userId,
