@@ -202,6 +202,15 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile full u
 
 宿主机 nginx 站点配置已纳入版本管理，见 [`ops/nginx/`](ops/nginx/README.md)。
 
+> **`deploy.sh` 不碰宿主机 nginx**，它只负责拉代码、构建镜像、重建容器和健康检查。改了 `ops/nginx/*.conf` 后需单独生效：
+>
+> ```bash
+> scp ops/nginx/xiaopuyun.com.conf root@<服务器>:/etc/nginx/conf.d/aigateway.conf
+> ssh root@<服务器> 'nginx -t && systemctl reload nginx'   # -t 不通过则不会 reload，线上不中断
+> ```
+>
+> 生效后核对两者一致：`diff ops/nginx/xiaopuyun.com.conf root@<服务器>:/etc/nginx/conf.d/aigateway.conf`。同机若还跑着别的 nginx 站点（其他 `conf.d/*.conf`），只替换本项目的 `aigateway.conf`，不要动别人的配置。
+
 ### 自动部署（GitHub Actions）
 
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) 会在 `main` 分支 **CI 成功后自动** SSH 到服务器执行 `./deploy.sh`，也可在 Actions 页面手动触发。

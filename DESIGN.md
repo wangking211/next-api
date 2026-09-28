@@ -164,6 +164,18 @@
 - 表格：表头 `--surface-2` + overline 字样；行 hover `--brand-softer`；选中行 `--brand-soft` 左侧 2px `--brand` 边。
 - Tag/徽标：`--surface-2` 底 + `--text-2` 字；语义 Tag 用状态色的 soft 底 + 本色字。
 
+#### antd 桥接（`colorTextLightSolid` 陷阱，勿删）
+
+为让主按钮「青底深字」（上面第一条），种子令牌 `colorTextLightSolid` 被设为近黑 `#061016`（`apps/web/src/main.tsx`）。antd 把它当作**深底上的文字色**，用在深色组件上就会变成近黑压近黑 —— 曾导致侧栏菜单整体「隐身」。当前桥接三处：
+
+| 组件 | 覆盖方式 | 位置 |
+|------|----------|------|
+| Menu（深色项） | 组件令牌 `darkItemColor=--ink-text` / `darkItemHoverColor=--brand-link` / `darkItemSelectedColor=--brand` | `main.tsx` |
+| Tooltip / Popconfirm 气泡 | antd 自带钩子 `--ant-tooltip-color: var(--text)`（规则原文是 `var(--ant-tooltip-color, #061016)`） | `index.css` |
+| Avatar 图标 | 无公开令牌 → `.ant-avatar.ant-avatar { color: var(--ink-text) }`（特异性 0,2,0 压过 antd 的 0,1,0） | `index.css` |
+
+**新增 antd 深色组件时**：先 `grep colorTextLightSolid` 确认它是否给深色底供字（Menu/Tooltip/Avatar/Image 预览/折叠触发器等都中过招）；青底深字的组件（Button、实色 Tag、Switch/Checkbox 标记、DatePicker 选中格）保持现状即可。
+
 ## 6. Motion & Interaction
 
 | Type | Duration | Easing | Usage |
