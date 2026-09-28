@@ -272,6 +272,39 @@ export interface BalanceTransaction {
   createdAt: string;
 }
 
+export type PaymentOrderStatus = 'PENDING' | 'PAID' | 'CLOSED' | 'FAILED';
+
+/** 在线充值订单（微信/支付宝） */
+export interface PaymentOrder {
+  id: string;
+  mchOrderNo: string;
+  wayCode: string;
+  channel: string | null;
+  channelOrderNo: string | null;
+  /** 人民币分 */
+  amountCents: number;
+  /** 入账额度（USD） */
+  creditUsd: number;
+  /** 入账积分 */
+  credits: number;
+  status: PaymentOrderStatus;
+  paidAt: string | null;
+  createdAt: string;
+}
+
+/** 下单响应：payDataType + payData（二维码内容 / 收银台链接 / 图片地址） */
+export interface PaymentOrderCreated {
+  id: string;
+  mchOrderNo: string;
+  amountCents: number;
+  creditUsd: number;
+  credits: number;
+  wayCode: string;
+  payDataType: string | null;
+  payData: string | null;
+  status: PaymentOrderStatus;
+}
+
 export interface AdminUser {
   id: string;
   email: string;

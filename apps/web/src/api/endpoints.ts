@@ -15,6 +15,8 @@ import {
   LogFilters,
   ModelInfo,
   Paginated,
+  PaymentOrder,
+  PaymentOrderCreated,
   PublicModelsResponse,
   PublicStats,
   RedeemCode,
@@ -272,6 +274,25 @@ export const billingApi = {
       '/billing/redeem',
       { code },
     );
+    return data;
+  },
+};
+
+/** 在线充值（微信/支付宝，JAIPay） */
+export const paymentApi = {
+  async createOrder(body: { amountCents: number; wayCode?: string }) {
+    const { data } = await api.post<PaymentOrderCreated>('/billing/pay/orders', body);
+    return data;
+  },
+  async orders(limit = 10, signal?: AbortSignal) {
+    const { data } = await api.get<{ items: PaymentOrder[] }>('/billing/pay/orders', {
+      params: { limit },
+      signal,
+    });
+    return data;
+  },
+  async order(id: string, signal?: AbortSignal) {
+    const { data } = await api.get<PaymentOrder>(`/billing/pay/orders/${id}`, { signal });
     return data;
   },
 };
