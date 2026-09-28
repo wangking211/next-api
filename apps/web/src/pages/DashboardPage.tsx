@@ -38,6 +38,9 @@ export default function DashboardPage() {
       ? ((summary.successRequests / summary.requests) * 100).toFixed(1)
       : '—';
   const margin = analytics?.totals?.margin ?? 0;
+  /** 折算总额与实扣的差额即 BYOK（自带密钥）未计费的部分 */
+  const byokNote = (cost: number, billed: number) =>
+    cost - billed > 0.0000005 ? ` · BYOK 折算 ${toCredits(cost - billed).toFixed(2)}` : '';
 
   return (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
@@ -76,7 +79,11 @@ export default function DashboardPage() {
           <StatCard label="Token 总量" value={summary?.totalTokens ?? 0} />
         </Col>
         <Col xs={12} md={6}>
-          <StatCard label="费用" value={toCredits(summary?.cost).toFixed(2)} suffix="积分" />
+          <StatCard
+            label="费用（实扣）"
+            value={toCredits(summary?.billedCost ?? 0).toFixed(2)}
+            suffix="积分"
+          />
         </Col>
         {isAdmin && (
           <Col xs={12} md={6}>
@@ -102,7 +109,7 @@ export default function DashboardPage() {
               key: m.model,
               label: m.model,
               value: m.tokens,
-              sub: `· ${toCredits(m.cost).toFixed(2)} 积分${isAdmin ? ` · 毛利 ${toCredits(m.margin).toFixed(2)}` : ''} · 失败 ${m.errors}`,
+              sub: `· ${toCredits(m.billedCost).toFixed(2)} 积分${byokNote(m.cost, m.billedCost)}${isAdmin ? ` · 毛利 ${toCredits(m.margin).toFixed(2)}` : ''} · 失败 ${m.errors}`,
             }))}
           />
         </Col>
@@ -113,7 +120,7 @@ export default function DashboardPage() {
               key: c.channelId ?? c.name,
               label: `${c.name}${c.provider ? ` (${c.provider})` : ''}`,
               value: c.tokens,
-              sub: `· ${toCredits(c.cost).toFixed(2)} 积分${isAdmin ? ` · 毛利 ${toCredits(c.margin).toFixed(2)}` : ''}`,
+              sub: `· ${toCredits(c.billedCost).toFixed(2)} 积分${byokNote(c.cost, c.billedCost)}${isAdmin ? ` · 毛利 ${toCredits(c.margin).toFixed(2)}` : ''}`,
             }))}
           />
         </Col>
@@ -125,7 +132,7 @@ export default function DashboardPage() {
                 key: u.userId,
                 label: u.name,
                 value: u.tokens,
-                sub: `· ${toCredits(u.cost).toFixed(2)} 积分${isAdmin ? ` · 毛利 ${toCredits(u.margin).toFixed(2)}` : ''}`,
+                sub: `· ${toCredits(u.billedCost).toFixed(2)} 积分${byokNote(u.cost, u.billedCost)}${isAdmin ? ` · 毛利 ${toCredits(u.margin).toFixed(2)}` : ''}`,
               }))}
             />
           </Col>

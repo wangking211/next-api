@@ -112,6 +112,7 @@ export class KeysService {
               completionTokens: { increment: r.completionTokens },
               totalTokens: { increment: r.totalTokens },
               cost: { increment: r.cost },
+              billedCost: { increment: r.billedCost },
             },
           });
           await tx.usageDaily.delete({ where: { id: r.id } });

@@ -103,7 +103,11 @@ export default function KeysPage() {
             render: (_, r) => (r.quotaLimit ? `${r.quotaUsed} / ${r.quotaLimit}` : `${r.quotaUsed} / ∞`),
           },
           {
-            title: '费用用量',
+            title: (
+              <Tooltip title="仅累计实际扣费的调用；BYOK 自带密钥的调用不消耗费用额度">
+                费用用量
+              </Tooltip>
+            ),
             render: (_, r) =>
               r.costLimit
                 ? `${formatCredits(r.costUsed)} / ${formatCredits(r.costLimit)}`
@@ -168,7 +172,10 @@ export default function KeysPage() {
           <Form.Item name="quotaLimit" label="Token 额度（留空不限）">
             <InputNumber min={1} style={{ width: '100%' }} placeholder="例如 1000000" />
           </Form.Item>
-          <Form.Item name="costLimit" label="费用额度 USD（留空不限）">
+          <Form.Item
+            name="costLimit"
+            label="费用额度 USD（留空不限，仅计实际扣费，BYOK 不占用）"
+          >
             <InputNumber min={0} step={0.1} style={{ width: '100%' }} placeholder="例如 10" />
           </Form.Item>
           <Form.Item name="rpmLimit" label="每分钟请求上限 RPM（留空不限）">

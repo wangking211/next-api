@@ -263,6 +263,8 @@ model RequestLog {
   totalTokens      Int      @default(0)
   cost             Decimal  @default(0) @db.Decimal(18, 6)
   upstreamCost     Decimal  @default(0) @db.Decimal(18, 6)
+  /// 本次调用是否实际扣费：平台渠道 true；用户自有 BYOK 渠道 false（此时 cost 仅为折算金额，不进余额）
+  chargeable       Boolean  @default(true)
   /// 本次调用支付给各级代理的返点合计（USD）
   commission       Decimal  @default(0) @db.Decimal(18, 6)
   latencyMs        Int?
@@ -291,7 +293,10 @@ model UsageDaily {
   promptTokens     Int      @default(0)
   completionTokens Int      @default(0)
   totalTokens      Int      @default(0)
+  /// 折算总额（含 BYOK 未计费的调用），用于毛利/用量分析
   cost             Decimal  @default(0) @db.Decimal(18, 6)
+  /// 实际扣费金额（仅 chargeable 的调用），与余额扣款同口径
+  billedCost       Decimal  @default(0) @db.Decimal(18, 6)
 
   @@unique([userId, apiKeyId, date])
   @@index([userId, date])

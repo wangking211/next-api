@@ -210,6 +210,7 @@ export class GatewayController {
             latencyMs: Date.now() - startedAt,
             status: e.status || 502,
             errorMessage: e.message,
+            chargeable: channel.ownerType === ChannelOwnerType.PLATFORM,
             isStream,
             requestPreview,
           });

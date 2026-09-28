@@ -13,10 +13,15 @@ export function DailyBars({ rows }: { rows: UsageDailyRow[] }) {
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 200, paddingTop: 8 }}>
       {rows.map((r) => {
         const h = Math.max((r.totalTokens / max) * 170, 4);
+        const byok = r.cost - r.billedCost;
         return (
           <div
             key={r.date}
-            title={`${r.date}\nTokens: ${r.totalTokens}\n请求: ${r.requests}\n费用: ${toCredits(r.cost).toFixed(2)} 积分`}
+            title={`${r.date}\nTokens: ${r.totalTokens}\n请求: ${r.requests}\n费用(实扣): ${toCredits(
+              r.billedCost,
+            ).toFixed(2)} 积分${
+              byok > 0.0000005 ? `\nBYOK 折算(不扣费): ${toCredits(byok).toFixed(2)} 积分` : ''
+            }`}
             style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}
           >
             <div

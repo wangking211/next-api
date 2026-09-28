@@ -220,7 +220,19 @@ export default function LogsPage() {
               </Tooltip>
             ),
           },
-          { title: '费用', dataIndex: 'cost', render: (v: string) => formatCredits(v) },
+          {
+            title: '费用',
+            dataIndex: 'cost',
+            width: 130,
+            render: (v: string, r) =>
+              r.chargeable ? (
+                formatCredits(v)
+              ) : (
+                <Tooltip title={`BYOK 自带密钥，不扣积分；折算 ${formatCredits(v)}`}>
+                  <Tag>未计费</Tag>
+                </Tooltip>
+              ),
+          },
           { title: '延迟', dataIndex: 'latencyMs', render: (v: number | null) => (v != null ? `${v}ms` : '-') },
           {
             title: '状态',
@@ -268,7 +280,13 @@ export default function LogsPage() {
               </Descriptions.Item>
               <Descriptions.Item label="总 Tokens">{detail.totalTokens}</Descriptions.Item>
               <Descriptions.Item label="费用">
-                {formatCredits(detail.cost)}
+                {detail.chargeable ? (
+                  formatCredits(detail.cost)
+                ) : (
+                  <Tooltip title={`BYOK 自带密钥，不扣积分；折算 ${formatCredits(detail.cost)}`}>
+                    <Tag>未计费</Tag>
+                  </Tooltip>
+                )}
               </Descriptions.Item>
               <Descriptions.Item label="延迟">
                 {detail.latencyMs != null ? `${detail.latencyMs}ms` : '-'}

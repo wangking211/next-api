@@ -245,6 +245,19 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 - **未配置 `DEPLOY_HOST` / `DEPLOY_SSH_KEY` 时，Deploy 会以明确报错失败（属预期）**，配置 secrets 后重跑该任务即可；
 - 部署脚本自身会校验容器健康与 `/api/health`，失败会在日志中体现。
 
+## 计费口径（BYOK 与平台渠道）
+
+| 场景 | 扣余额 | 日志 / 统计 | Key 费用额度 `costLimit` |
+| --- | --- | --- | --- |
+| 平台渠道（`Channel.ownerType=PLATFORM`） | ✅ 渠道售价 × 用户倍率 | 计入「费用（实扣）」 | 累计 |
+| 用户自有 BYOK 渠道（`USER`） | ❌ 上游费用由用户自己付 | 只记折算金额，界面标注「未计费 / BYOK 折算」 | 不累计 |
+
+- 口径字段：`RequestLog.chargeable`（该次是否实扣）、`UsageDaily.billedCost`（按日实扣）、`RequestLog.cost`（折算总额，供用量与毛利分析）。三者由迁移 `20260928090000_chargeable_billed_cost` 按渠道归属回填历史数据（含 `ApiKey.costUsed`）。
+- 展示：总览与使用统计的「费用（实扣）」与余额扣款同口径，`BYOK 折算` 单列显示；调用日志对未计费行显示 `未计费` 标签；CSV 导出含「折算费用 / 实际扣费」两列。
+- 管理员毛利 = 实收 − 上游实付（`billedCost - billedUpstreamCost`）；BYOK 两条腿都是 0，不产生幻影毛利。
+- 故障转移：BYOK 上游 5xx/429 会回落到平台渠道，回落成功的那一次按平台口径扣费（`gateway.controller.ts`）。
+- API Key 额度分工：`quotaLimit` 按 token 管用量（BYOK 也计），`costLimit` 只管真实花费。
+
 ## 安全说明
 
 - 平台 key：仅存 SHA-256 哈希，明文只在创建时返回一次。

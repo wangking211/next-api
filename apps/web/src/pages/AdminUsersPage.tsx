@@ -272,7 +272,7 @@ export default function AdminUsersPage() {
               <Statistic title="Token" value={uSummary.totalTokens} />
             </Col>
             <Col span={6}>
-              <Statistic title="费用" value={formatCredits(uSummary.cost)} />
+              <Statistic title="费用（实扣）" value={formatCredits(uSummary.billedCost ?? 0)} />
             </Col>
             <Col span={6}>
               <Statistic
@@ -296,8 +296,8 @@ export default function AdminUsersPage() {
             { title: '请求', dataIndex: 'requests', width: 80 },
             { title: 'Token', dataIndex: 'tokens', width: 110 },
             {
-              title: '费用',
-              dataIndex: 'cost',
+              title: '费用（实扣）',
+              dataIndex: 'billedCost',
               width: 130,
               render: (v: number) => formatCredits(v),
             },

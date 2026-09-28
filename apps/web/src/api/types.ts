@@ -110,7 +110,10 @@ export interface UsageSummary {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  /** 折算总额（含 BYOK 未计费的调用） */
   cost: string;
+  /** 实际扣费（与余额扣款同口径），BYOK 调用为 0 */
+  billedCost: string | number;
 }
 
 export interface UsageDailyRow {
@@ -119,7 +122,10 @@ export interface UsageDailyRow {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  /** 折算总额 */
   cost: number;
+  /** 实际扣费（BYOK 调用为 0） */
+  billedCost: number;
 }
 
 export interface RequestLogRow {
@@ -131,6 +137,8 @@ export interface RequestLogRow {
   completionTokens: number;
   totalTokens: number;
   cost: string;
+  /** false = BYOK 自带密钥，未从余额扣费 */
+  chargeable: boolean;
   latencyMs: number | null;
   status: number;
   errorMessage: string | null;
@@ -165,7 +173,9 @@ export interface UsageAnalytics {
     success: number;
     tokens: number;
     cost: number;
+    billedCost: number;
     upstreamCost: number;
+    billedUpstreamCost: number;
     margin: number;
   };
   byModel: {
@@ -173,7 +183,9 @@ export interface UsageAnalytics {
     requests: number;
     tokens: number;
     cost: number;
+    billedCost: number;
     upstreamCost: number;
+    billedUpstreamCost: number;
     margin: number;
     errors: number;
   }[];
@@ -184,7 +196,9 @@ export interface UsageAnalytics {
     requests: number;
     tokens: number;
     cost: number;
+    billedCost: number;
     upstreamCost: number;
+    billedUpstreamCost: number;
     margin: number;
   }[];
   byUser: {
@@ -193,7 +207,9 @@ export interface UsageAnalytics {
     requests: number;
     tokens: number;
     cost: number;
+    billedCost: number;
     upstreamCost: number;
+    billedUpstreamCost: number;
     margin: number;
   }[];
   byApiKey: {
@@ -203,7 +219,9 @@ export interface UsageAnalytics {
     requests: number;
     tokens: number;
     cost: number;
+    billedCost: number;
     upstreamCost: number;
+    billedUpstreamCost: number;
     margin: number;
   }[];
 }

@@ -54,10 +54,14 @@ export default function UsageStatsPage() {
         { label: '前缀', value: (r) => r.keyPrefix },
         { label: '请求', value: (r) => r.requests },
         { label: 'Token', value: (r) => r.tokens },
-        { label: '费用(积分)', value: (r) => (r.cost * 100).toFixed(2) },
+        { label: '费用-实扣(积分)', value: (r) => (r.billedCost * 100).toFixed(2) },
+        { label: 'BYOK折算-不扣费(积分)', value: (r) => ((r.cost - r.billedCost) * 100).toFixed(2) },
         ...(isAdmin
           ? [
-              { label: '成本(积分)', value: (r: KeyRow) => (r.upstreamCost * 100).toFixed(2) },
+              {
+                label: '成本-实付(积分)',
+                value: (r: KeyRow) => (r.billedUpstreamCost * 100).toFixed(2),
+              },
               { label: '毛利(积分)', value: (r: KeyRow) => (r.margin * 100).toFixed(2) },
             ]
           : []),
@@ -96,6 +100,7 @@ export default function UsageStatsPage() {
       >
         <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
           不选时间段默认统计近 30 天。按 API Key 汇总每个 Key 的累计请求、Token 与费用。
+          「费用（实扣）」与余额扣款同口径；BYOK 自带密钥的调用不扣积分，其折算金额单列显示。
         </Typography.Paragraph>
         <Row gutter={16}>
           <Col xs={12} md={4}>
@@ -108,12 +113,19 @@ export default function UsageStatsPage() {
             <Statistic title="Token" value={t?.tokens ?? 0} />
           </Col>
           <Col xs={12} md={4}>
-            <Statistic title="费用" value={formatCredits(t?.cost ?? 0)} />
+            <Statistic title="费用（实扣）" value={formatCredits(t?.billedCost ?? 0)} />
+          </Col>
+          <Col xs={12} md={4}>
+            <Statistic
+              title="BYOK 折算（不扣费）"
+              value={formatCredits((t?.cost ?? 0) - (t?.billedCost ?? 0))}
+              valueStyle={{ color: 'var(--text-3)' }}
+            />
           </Col>
           {isAdmin && (
             <>
               <Col xs={12} md={4}>
-                <Statistic title="成本" value={formatCredits(t?.upstreamCost ?? 0)} />
+                <Statistic title="成本（实付）" value={formatCredits(t?.billedUpstreamCost ?? 0)} />
               </Col>
               <Col xs={12} md={4}>
                 <Statistic
@@ -147,9 +159,9 @@ export default function UsageStatsPage() {
             },
             { title: '请求', dataIndex: 'requests', width: 90 },
             { title: 'Token', dataIndex: 'tokens', width: 130 },
-            costCol('费用', 'cost'),
+                        costCol('费用（实扣）', 'billedCost'),
             ...(isAdmin
-              ? [costCol('成本', 'upstreamCost'), costCol('毛利', 'margin')]
+              ? [costCol('成本（实付）', 'billedUpstreamCost'), costCol('毛利', 'margin')]
               : []),
           ]}
         />
@@ -169,7 +181,7 @@ export default function UsageStatsPage() {
                 { title: '模型', dataIndex: 'model', ellipsis: true },
                 { title: '请求', dataIndex: 'requests', width: 80 },
                 { title: 'Token', dataIndex: 'tokens', width: 120 },
-                costCol('费用', 'cost'),
+                            costCol('费用（实扣）', 'billedCost'),
                 ...(isAdmin ? [costCol('毛利', 'margin')] : []),
               ]}
             />
@@ -188,7 +200,7 @@ export default function UsageStatsPage() {
                 { title: '渠道', dataIndex: 'name', ellipsis: true },
                 { title: '请求', dataIndex: 'requests', width: 80 },
                 { title: 'Token', dataIndex: 'tokens', width: 120 },
-                costCol('费用', 'cost'),
+                            costCol('费用（实扣）', 'billedCost'),
                 ...(isAdmin ? [costCol('毛利', 'margin')] : []),
               ]}
             />

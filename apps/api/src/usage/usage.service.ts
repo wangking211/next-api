@@ -123,6 +123,7 @@ export class UsageService {
             totalTokens: entry.totalTokens,
             cost,
             upstreamCost,
+            chargeable: entry.chargeable === true,
             latencyMs: entry.latencyMs,
             status: entry.status,
             errorMessage: entry.errorMessage ?? null,
@@ -141,7 +142,8 @@ export class UsageService {
             where: { id: entry.apiKeyId },
             data: {
               quotaUsed: { increment: entry.totalTokens },
-              costUsed: { increment: cost },
+              // 费用额度只被真实扣费消耗；BYOK 调用不占用 costLimit
+              costUsed: { increment: entry.chargeable ? cost : 0 },
               lastUsedAt: new Date(),
             },
           });
@@ -184,12 +186,14 @@ export class UsageService {
   /** 按天聚合：先查后写，命中唯一约束时回退为原子自增 */
   private async aggregateDaily(entry: UsageEntry, cost: number, date: Date): Promise<void> {
     const where = { userId: entry.userId, apiKeyId: entry.apiKeyId, date };
+    const billed = entry.chargeable ? cost : 0;
     const inc = {
       requests: { increment: 1 },
       promptTokens: { increment: entry.promptTokens },
       completionTokens: { increment: entry.completionTokens },
       totalTokens: { increment: entry.totalTokens },
       cost: { increment: cost },
+      billedCost: { increment: billed },
     };
 
     const existing = await this.prisma.usageDaily.findFirst({ where });
@@ -208,6 +212,7 @@ export class UsageService {
           completionTokens: entry.completionTokens,
           totalTokens: entry.totalTokens,
           cost,
+          billedCost: billed,
         },
       });
     } catch (e) {
@@ -239,6 +244,7 @@ export class UsageService {
         completionTokens: true,
         totalTokens: true,
         cost: true,
+        chargeable: true,
         commission: true,
         latencyMs: true,
         status: true,
@@ -262,7 +268,8 @@ export class UsageService {
       '输入tokens',
       '输出tokens',
       '总tokens',
-      '费用(USD)',
+      '折算费用(USD)',
+      '实际扣费(USD)',
       '返点(USD)',
       '延迟ms',
       '状态',
@@ -282,6 +289,7 @@ export class UsageService {
           r.completionTokens,
           r.totalTokens,
           Number(r.cost),
+          r.chargeable ? Number(r.cost) : 0,
           Number(r.commission),
           r.latencyMs ?? '',
           r.status,
@@ -296,16 +304,23 @@ export class UsageService {
 
   async summary(userId: string | null, days = 30) {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const agg = await this.prisma.requestLog.aggregate({
-      where: { ...this.scope(userId), createdAt: { gte: since } },
-      _count: { _all: true },
-      _sum: {
-        promptTokens: true,
-        completionTokens: true,
-        totalTokens: true,
-        cost: true,
-      },
-    });
+    const [agg, billed] = await Promise.all([
+      this.prisma.requestLog.aggregate({
+        where: { ...this.scope(userId), createdAt: { gte: since } },
+        _count: { _all: true },
+        _sum: {
+          promptTokens: true,
+          completionTokens: true,
+          totalTokens: true,
+          cost: true,
+        },
+      }),
+      // 实际扣费部分（BYOK 调用不计入），与余额扣款同口径
+      this.prisma.requestLog.aggregate({
+        where: { ...this.scope(userId), createdAt: { gte: since }, chargeable: true },
+        _sum: { cost: true },
+      }),
+    ]);
     const successCount = await this.prisma.requestLog.count({
       where: { ...this.scope(userId), createdAt: { gte: since }, status: { lt: 400 } },
     });
@@ -318,6 +333,7 @@ export class UsageService {
       completionTokens: agg._sum.completionTokens ?? 0,
       totalTokens: agg._sum.totalTokens ?? 0,
       cost: agg._sum.cost ?? 0,
+      billedCost: billed._sum.cost ?? 0,
     };
   }
 
@@ -337,12 +353,14 @@ export class UsageService {
         completionTokens: 0,
         totalTokens: 0,
         cost: 0,
+        billedCost: 0,
       };
       agg.requests += r.requests;
       agg.promptTokens += r.promptTokens;
       agg.completionTokens += r.completionTokens;
       agg.totalTokens += r.totalTokens;
       agg.cost += Number(r.cost);
+      agg.billedCost += Number(r.billedCost);
       byDate.set(key, agg);
     }
     return [...byDate.values()];
@@ -368,6 +386,7 @@ export class UsageService {
           completionTokens: true,
           totalTokens: true,
           cost: true,
+          chargeable: true,
           latencyMs: true,
           status: true,
           errorMessage: true,
@@ -468,6 +487,55 @@ export class UsageService {
 
     const errByModel = new Map(byModelErr.map((r) => [r.model, r._count._all]));
 
+    // 实际扣费部分：同维度再聚合一次（仅 chargeable 的调用），用于「费用(已扣)」口径
+    const billedBase: Prisma.RequestLogWhereInput = { ...base, chargeable: true };
+    const billedAgg = { cost: true, upstreamCost: true } as const;
+    const [billedByModel, billedByChannel, billedByUser, billedByApiKey, billedTotals] =
+      await Promise.all([
+        this.prisma.requestLog.groupBy({
+          by: ['model'],
+          where: billedBase,
+          _sum: billedAgg,
+        }),
+        this.prisma.requestLog.groupBy({
+          by: ['channelId'],
+          where: billedBase,
+          _sum: billedAgg,
+        }),
+        userId
+          ? Promise.resolve([] as any[])
+          : this.prisma.requestLog.groupBy({
+              by: ['userId'],
+              where: billedBase,
+              _sum: billedAgg,
+            }),
+        this.prisma.requestLog.groupBy({
+          by: ['apiKeyId'],
+          where: billedBase,
+          _sum: billedAgg,
+        }),
+        this.prisma.requestLog.aggregate({
+          where: billedBase,
+          _sum: billedAgg,
+        }),
+      ]);
+
+    /** 平台口径：实收（billedCost）与实付上游成本（billedUpstreamCost），BYOK 两者皆为 0 */
+    const billedMap = (rows: any[], key: string) =>
+      new Map(
+        rows.map((r) => [
+          r[key],
+          {
+            cost: Number(r._sum?.cost ?? 0),
+            upstreamCost: Number(r._sum?.upstreamCost ?? 0),
+          },
+        ]),
+      );
+    const billedModel = billedMap(billedByModel, 'model');
+    const billedChannel = billedMap(billedByChannel, 'channelId');
+    const billedUser = billedMap(billedByUser, 'userId');
+    const billedApiKey = billedMap(billedByApiKey, 'apiKeyId');
+
     // 渠道/用户/Key 名称
     const channelIds = byChannel.map((c) => c.channelId).filter(Boolean) as string[];
     const userIds = byUser.map((u) => u.userId).filter(Boolean) as string[];
@@ -496,15 +564,19 @@ export class UsageService {
     const uMap = new Map(users.map((u: any) => [u.id, u]));
     const kMap = new Map(apiKeys.map((k: any) => [k.id, k]));
 
-    const mapAgg = (r: any) => {
+    const mapAgg = (r: any, billed?: { cost: number; upstreamCost: number }) => {
       const revenue = Number(r._sum?.cost ?? 0);
       const upstreamCost = Number(r._sum?.upstreamCost ?? 0);
+      const billedCost = billed?.cost ?? 0;
       return {
         requests: r._count._all,
         tokens: r._sum?.totalTokens ?? 0,
         cost: revenue,
+        billedCost,
         upstreamCost,
-        margin: revenue - upstreamCost,
+        billedUpstreamCost: billed?.upstreamCost ?? 0,
+        // 毛利按平台实收 - 平台实付：BYOK 两条腿都是 0，不产生幻影毛利
+        margin: billedCost - (billed?.upstreamCost ?? 0),
       };
     };
 
@@ -518,14 +590,17 @@ export class UsageService {
         success: totals._count._all - totalErr,
         tokens: totals._sum.totalTokens ?? 0,
         cost: Number(totals._sum.cost ?? 0),
+        billedCost: Number(billedTotals._sum.cost ?? 0),
         upstreamCost: Number(totals._sum.upstreamCost ?? 0),
+        billedUpstreamCost: Number(billedTotals._sum.upstreamCost ?? 0),
         margin:
-          Number(totals._sum.cost ?? 0) - Number(totals._sum.upstreamCost ?? 0),
+          Number(billedTotals._sum.cost ?? 0) -
+          Number(billedTotals._sum.upstreamCost ?? 0),
       },
       byModel: byModel
         .map((r) => ({
           model: r.model,
-          ...mapAgg(r),
+          ...mapAgg(r, billedModel.get(r.model)),
           errors: errByModel.get(r.model) ?? 0,
         }))
         .sort((a, b) => b.tokens - a.tokens)
@@ -535,7 +610,7 @@ export class UsageService {
           channelId: r.channelId,
           name: chMap.get(r.channelId ?? '')?.name ?? '(已删除)',
           provider: chMap.get(r.channelId ?? '')?.provider ?? '',
-          ...mapAgg(r),
+          ...mapAgg(r, billedChannel.get(r.channelId)),
         }))
         .sort((a, b) => b.tokens - a.tokens)
         .slice(0, 20),
@@ -543,7 +618,7 @@ export class UsageService {
         .map((r) => ({
           userId: r.userId,
           name: uMap.get(r.userId)?.username ?? '(已删除)',
-          ...mapAgg(r),
+          ...mapAgg(r, billedUser.get(r.userId)),
         }))
         .sort((a, b) => b.tokens - a.tokens)
         .slice(0, 20),
@@ -552,7 +627,7 @@ export class UsageService {
           apiKeyId: r.apiKeyId,
           name: kMap.get(r.apiKeyId ?? '')?.name ?? '(已删除)',
           keyPrefix: kMap.get(r.apiKeyId ?? '')?.keyPrefix ?? '',
-          ...mapAgg(r),
+          ...mapAgg(r, billedApiKey.get(r.apiKeyId)),
         }))
         .sort((a, b) => b.tokens - a.tokens)
         .slice(0, 50),

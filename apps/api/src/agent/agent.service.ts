@@ -36,13 +36,20 @@ export class AgentService {
     ]);
 
     const ids = members.map((m) => m.id);
-    const usage = ids.length
-      ? await this.prisma.requestLog.aggregate({
-          where: { userId: { in: ids }, createdAt: { gte: since } },
-          _count: { _all: true },
-          _sum: { totalTokens: true, cost: true },
-        })
-      : null;
+    // 请求/token 计全部调用（BYOK 也是真实用量），消费只计实际扣费
+    const [usage, billed] = ids.length
+      ? await Promise.all([
+          this.prisma.requestLog.aggregate({
+            where: { userId: { in: ids }, createdAt: { gte: since } },
+            _count: { _all: true },
+            _sum: { totalTokens: true },
+          }),
+          this.prisma.requestLog.aggregate({
+            where: { userId: { in: ids }, createdAt: { gte: since }, chargeable: true },
+            _sum: { cost: true },
+          }),
+        ])
+      : [null, null];
 
     return {
       balance: user ? Number(user.balance) : 0,
@@ -56,7 +63,7 @@ export class AgentService {
       membersUsage30d: {
         requests: usage?._count._all ?? 0,
         tokens: usage?._sum.totalTokens ?? 0,
-        cost: usage?._sum.cost ? Number(usage._sum.cost) : 0,
+        cost: billed?._sum.cost ? Number(billed._sum.cost) : 0,
       },
     };
   }
@@ -78,15 +85,24 @@ export class AgentService {
       },
     });
     const ids = members.map((m) => m.id);
-    const usage = ids.length
-      ? await this.prisma.requestLog.groupBy({
-          by: ['userId'],
-          where: { userId: { in: ids }, createdAt: { gte: since } },
-          _count: { _all: true },
-          _sum: { totalTokens: true, cost: true },
-        })
-      : [];
+    const [usage, billed] = ids.length
+      ? await Promise.all([
+          this.prisma.requestLog.groupBy({
+            by: ['userId'],
+            where: { userId: { in: ids }, createdAt: { gte: since } },
+            _count: { _all: true },
+            _sum: { totalTokens: true },
+          }),
+          // 消费只计实际扣费（BYOK 调用不进余额）
+          this.prisma.requestLog.groupBy({
+            by: ['userId'],
+            where: { userId: { in: ids }, createdAt: { gte: since }, chargeable: true },
+            _sum: { cost: true },
+          }),
+        ])
+      : [[], []];
     const map = new Map(usage.map((u) => [u.userId, u]));
+    const billedMap = new Map(billed.map((u: any) => [u.userId, Number(u._sum.cost ?? 0)]));
 
     return members.map((m) => {
       const u = map.get(m.id);
@@ -102,7 +118,7 @@ export class AgentService {
         usage30d: {
           requests: u?._count._all ?? 0,
           tokens: u?._sum?.totalTokens ?? 0,
-          cost: u?._sum?.cost ? Number(u._sum.cost) : 0,
+          cost: billedMap.get(m.id) ?? 0,
         },
       };
     });
