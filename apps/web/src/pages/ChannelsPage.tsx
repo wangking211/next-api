@@ -48,7 +48,16 @@ export default function ChannelsPage() {
   const [priceChannel, setPriceChannel] = useState<ChannelInfo | null>(null);
   const [testPick, setTestPick] = useState<ChannelInfo | null>(null);
   const [pickModels, setPickModels] = useState<string[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
   const selectedModels: string[] = Form.useWatch('models', form) ?? [];
+  const ownerTypeValue = Form.useWatch('ownerType', form);
+
+  // 归属=我的（BYOK）：上游费用用户自付、平台不扣费，隐藏「逐模型定价」（仅影响折算展示，无计费作用）
+  const isByok = editing
+    ? editing.ownerType === 'USER'
+    : isAdmin
+      ? ownerTypeValue !== 'PLATFORM'
+      : true;
 
   const setP = (model: string, key: keyof PriceRow, value: number | null) =>
     setPricing((p) => ({ ...p, [model]: { ...p[model], [key]: value ?? undefined } }));
@@ -180,6 +189,33 @@ export default function ChannelsPage() {
       message.error(errorMessage(e));
     } finally {
       setModalTesting(false);
+    }
+  };
+
+  /** 调上游 /models 拉取全部可用模型，填入「支持的模型」；编辑态复用已存 Key */
+  const fetchUpstreamModels = async () => {
+    let v: any;
+    try {
+      v = await form.validateFields(
+        editing ? ['provider', 'baseUrl'] : ['provider', 'baseUrl', 'apiKey'],
+      );
+    } catch {
+      return; // 必填提示由表单展示
+    }
+    setFetchingModels(true);
+    try {
+      const r = await channelsApi.fetchModels({
+        provider: v.provider,
+        baseUrl: v.baseUrl,
+        apiKey: v.apiKey || undefined,
+        channelId: editing?.id,
+      });
+      form.setFieldValue('models', r.models);
+      message.success(`上游返回 ${r.models.length} 个模型，已填入`);
+    } catch (e) {
+      message.error(errorMessage(e));
+    } finally {
+      setFetchingModels(false);
     }
   };
 
@@ -390,6 +426,14 @@ export default function ChannelsPage() {
               </Typography.Text>
               <Button
                 size="small"
+                loading={fetchingModels}
+                onClick={fetchUpstreamModels}
+                title="调用上游 /models 接口拉取全部可用模型"
+              >
+                获取上游模型
+              </Button>
+              <Button
+                size="small"
                 onClick={() =>
                   form.setFieldValue('models', providerModelNames(form.getFieldValue('provider')))
                 }
@@ -405,7 +449,7 @@ export default function ChannelsPage() {
             </Space>
           </div>
 
-          {selectedModels.length > 0 && (
+          {selectedModels.length > 0 && !isByok && (
             <div style={{ marginBottom: 12 }}>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 逐模型定价（可选，USD/1M tokens；留空则用模型目录默认价 × 折扣）

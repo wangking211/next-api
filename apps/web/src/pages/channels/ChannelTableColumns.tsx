@@ -99,9 +99,12 @@ export function buildChannelColumns({
           >
             测试
           </Button>
-          <Button size="small" onClick={() => onPricing(r)}>
-            定价
-          </Button>
+          {/* BYOK 不由平台扣费，无定价意义 → 隐藏入口 */}
+          {r.ownerType !== 'USER' && (
+            <Button size="small" onClick={() => onPricing(r)}>
+              定价
+            </Button>
+          )}
           <Button size="small" onClick={() => onEdit(r)}>
             编辑
           </Button>

@@ -134,6 +134,18 @@ export const channelsApi = {
     const { data } = await api.post<ChannelTestResult>('/channels/test-connection', body);
     return data;
   },
+  async fetchModels(body: {
+    provider: string;
+    baseUrl?: string;
+    apiKey?: string;
+    channelId?: string;
+  }) {
+    const { data } = await api.post<{ models: string[]; total: number }>(
+      '/channels/fetch-models',
+      body,
+    );
+    return data;
+  },
   async create(body: {
     name: string;
     provider: string;

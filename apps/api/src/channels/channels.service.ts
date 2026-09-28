@@ -11,6 +11,7 @@ import { AuthUser } from '../common/interfaces/auth.interface';
 import { ProviderRegistry } from '../gateway/providers/provider.registry';
 import { UpstreamError } from '../gateway/types';
 import { assertPublicHttpUrl, UnsafeUrlError } from '../common/url-safety';
+import { joinUrl } from '../gateway/providers/stream.util';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
 import { ChannelModelPriceDto } from './dto/channel-model-price.dto';
@@ -52,6 +53,31 @@ function safeStringify(value: any): string | null {
   } catch {
     return null;
   }
+}
+
+/** 解析上游模型列表响应：兼容 OpenAI 风格 data[].id 与 Gemini 风格 models[].name */
+function extractModelIds(json: any): string[] {
+  const raw: string[] = [];
+  if (Array.isArray(json?.data)) {
+    for (const it of json.data) {
+      if (typeof it === 'string') raw.push(it);
+      else if (typeof it?.id === 'string') raw.push(it.id);
+      else if (typeof it?.name === 'string') raw.push(it.name);
+    }
+  }
+  if (Array.isArray(json?.models)) {
+    for (const it of json.models) {
+      const name = typeof it === 'string' ? it : it?.name;
+      if (typeof name === 'string') raw.push(name);
+    }
+  }
+  const ids = raw
+    .map((s) => s.trim())
+    .filter((s) => s && !s.startsWith('tunedModels/'))
+    .map((s) => s.replace(/^models\//, ''));
+  return [...new Set(ids)]
+    .sort((a, b) => a.localeCompare(b))
+    .slice(0, 1000);
 }
 
 @Injectable()
@@ -437,6 +463,100 @@ export class ChannelsService {
       { provider: dto.provider, baseUrl: dto.baseUrl, apiKey },
       models,
     );
+  }
+
+  /**
+   * 拉取上游可用模型列表（OpenAI/Anthropic/Gemini 协议的模型列表接口），
+   * 供渠道表单「获取上游模型」一键填充。baseUrl/apiKey 缺省时复用已保存渠道配置。
+   */
+  async fetchUpstreamModels(
+    user: AuthUser,
+    dto: { provider: string; baseUrl?: string; apiKey?: string; channelId?: string },
+  ): Promise<{ models: string[]; total: number }> {
+    let baseUrl = dto.baseUrl?.trim() ?? '';
+    let apiKey = dto.apiKey?.trim() ?? '';
+    if (dto.channelId && (!baseUrl || !apiKey)) {
+      const channel = await this.findAccessible(user, dto.channelId);
+      if (!baseUrl) baseUrl = channel.baseUrl;
+      if (!apiKey) {
+        try {
+          apiKey = this.crypto.decrypt(channel.apiKeyEnc);
+        } catch {
+          throw new BadRequestException('已存密钥无法解密，请重新填写');
+        }
+      }
+    }
+    if (!baseUrl) throw new BadRequestException('请填写 Base URL');
+    if (!apiKey) throw new BadRequestException('请提供上游 API Key');
+    await this.assertSafeBaseUrl(baseUrl);
+    const models = await this.listUpstreamModels(dto.provider, baseUrl, apiKey);
+    return { models, total: models.length };
+  }
+
+  /** 请求上游模型列表：优先 {base}/models，404 且 Base URL 未带版本前缀时回退补 /v1（Gemini 补 /v1beta）。 */
+  private async listUpstreamModels(
+    provider: string,
+    baseUrl: string,
+    apiKey: string,
+  ): Promise<string[]> {
+    const base = baseUrl.replace(/\/+$/, '');
+    const urls = /\/v\d+(beta)?$/i.test(base)
+      ? [joinUrl(base, 'models')]
+      : [
+          joinUrl(base, 'models'),
+          joinUrl(base, provider === 'gemini' ? 'v1beta/models' : 'v1/models'),
+        ];
+    const headers = this.modelsListHeaders(provider, apiKey);
+    let res: Awaited<ReturnType<typeof fetch>> | undefined;
+    for (const url of urls) {
+      const target =
+        provider === 'gemini'
+          ? `${url}?pageSize=1000&key=${encodeURIComponent(apiKey)}`
+          : url;
+      try {
+        res = await fetch(target, { headers, signal: AbortSignal.timeout(15000) });
+      } catch (e) {
+        throw new BadRequestException(
+          `无法连接上游: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+      if (res.status !== 404 || url === urls[urls.length - 1]) break;
+    }
+    if (!res) throw new BadRequestException('模型列表请求失败');
+    if (res.status === 404) {
+      throw new BadRequestException('上游没有模型列表接口（404），请检查 Base URL');
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      let body: unknown = null;
+      try {
+        body = JSON.parse(text);
+      } catch {
+        /* 非 JSON 响应，用原文提示 */
+      }
+      throw new BadRequestException(
+        `上游返回 ${res.status}: ${extractUpstreamError(body, text.slice(0, 300) || res.statusText)}`,
+      );
+    }
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch {
+      throw new BadRequestException('上游模型列表不是有效 JSON');
+    }
+    const models = extractModelIds(json);
+    if (!models.length) {
+      throw new BadRequestException('上游未返回任何模型，请检查 Key 与 Base URL');
+    }
+    return models;
+  }
+
+  private modelsListHeaders(provider: string, apiKey: string): Record<string, string> {
+    if (provider === 'anthropic') {
+      return { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
+    }
+    if (provider === 'gemini') return {}; // key 走 URL 查询参数
+    return { Authorization: `Bearer ${apiKey}` };
   }
 
   private resolveTestModels(

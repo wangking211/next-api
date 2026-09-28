@@ -140,3 +140,123 @@ describe('ChannelsService.testConnection', () => {
     ).rejects.toThrow(/模型名/);
   });
 });
+
+describe('ChannelsService.fetchUpstreamModels', () => {
+  const resp = (status: number, json?: unknown, textBody?: string) =>
+    ({
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: 'ST',
+      json: async () => json,
+      text: async () => textBody ?? (json != null ? JSON.stringify(json) : ''),
+    }) as unknown as ReturnType<typeof fetch>;
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('lists openai-compatible models with Bearer auth, deduped and sorted', async () => {
+    const { service } = makeService({});
+    const spy = jest.spyOn(global, 'fetch').mockResolvedValue(
+      resp(200, { data: [{ id: 'gpt-b' }, { id: 'gpt-a' }, { id: 'gpt-a' }] }),
+    );
+    const res = await service.fetchUpstreamModels(user, {
+      provider: 'openai',
+      baseUrl: 'https://x/v1',
+      apiKey: 'sk-1',
+    });
+    expect(res.models).toEqual(['gpt-a', 'gpt-b']);
+    expect(res.total).toBe(2);
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe('https://x/v1/models');
+    expect((init as RequestInit).headers).toMatchObject({
+      Authorization: 'Bearer sk-1',
+    });
+  });
+
+  it('reuses stored baseUrl and key when only channelId given', async () => {
+    const { service } = makeService({});
+    const spy = jest.spyOn(global, 'fetch').mockResolvedValue(
+      resp(200, { data: [{ id: 'm1' }] }),
+    );
+    const res = await service.fetchUpstreamModels(user, {
+      provider: 'openai',
+      channelId: 'c1',
+    });
+    expect(res.models).toEqual(['m1']);
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe('https://x/v1/models'); // 渠道已存 baseUrl
+    expect((init as RequestInit).headers).toMatchObject({
+      Authorization: 'Bearer upstream-key', // 解密后的已存密钥
+    });
+  });
+
+  it('falls back to /v1/models when unversioned base returns 404', async () => {
+    const { service } = makeService({});
+    const spy = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(resp(404, { error: 'not found' }))
+      .mockResolvedValueOnce(resp(200, { data: [{ id: 'm1' }] }));
+    const res = await service.fetchUpstreamModels(user, {
+      provider: 'openai',
+      baseUrl: 'https://x',
+      apiKey: 'k',
+    });
+    expect(res.models).toEqual(['m1']);
+    expect(spy.mock.calls[0][0]).toBe('https://x/models');
+    expect(spy.mock.calls[1][0]).toBe('https://x/v1/models');
+  });
+
+  it('parses gemini models[].name with key in query, drops tuned models', async () => {
+    const { service } = makeService({});
+    const spy = jest.spyOn(global, 'fetch').mockResolvedValue(
+      resp(200, {
+        models: [
+          { name: 'models/gemini-2.0-flash' },
+          { name: 'tunedModels/ft-1' },
+          { name: 'models/gemini-1.5-pro' },
+        ],
+      }),
+    );
+    const res = await service.fetchUpstreamModels(user, {
+      provider: 'gemini',
+      baseUrl: 'https://g/v1beta',
+      apiKey: 'gk',
+    });
+    expect(res.models).toEqual(['gemini-1.5-pro', 'gemini-2.0-flash']);
+    const [url, init] = spy.mock.calls[0];
+    expect(String(url)).toContain('https://g/v1beta/models?pageSize=1000&key=gk');
+    expect((init as RequestInit).headers).toEqual({});
+  });
+
+  it('surfaces upstream error message on non-2xx', async () => {
+    const { service } = makeService({});
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      resp(401, null, '{"error":{"message":"Invalid or inactive API key"}}'),
+    );
+    await expect(
+      service.fetchUpstreamModels(user, {
+        provider: 'openai',
+        baseUrl: 'https://x/v1',
+        apiKey: 'bad',
+      }),
+    ).rejects.toThrow(/上游返回 401: Invalid or inactive API key/);
+  });
+
+  it('rejects when upstream returns no models', async () => {
+    const { service } = makeService({});
+    jest.spyOn(global, 'fetch').mockResolvedValue(resp(200, { data: [] }));
+    await expect(
+      service.fetchUpstreamModels(user, {
+        provider: 'openai',
+        baseUrl: 'https://x/v1',
+        apiKey: 'k',
+      }),
+    ).rejects.toThrow(/未返回任何模型/);
+  });
+
+  it('requires apiKey when no channelId given', async () => {
+    const { service } = makeService({});
+    await expect(
+      service.fetchUpstreamModels(user, { provider: 'openai', baseUrl: 'https://x/v1' }),
+    ).rejects.toThrow(/API Key/);
+  });
+});

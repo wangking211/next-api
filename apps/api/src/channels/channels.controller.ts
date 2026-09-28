@@ -15,6 +15,7 @@ import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
 import { TestChannelDto } from './dto/test-channel.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
+import { FetchModelsDto } from './dto/fetch-models.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthUser } from '../common/interfaces/auth.interface';
@@ -56,6 +57,11 @@ export class ChannelsController {
     @Body() dto: TestConnectionDto,
   ) {
     return this.channels.testConnection(user, dto);
+  }
+
+  @Post('fetch-models')
+  fetchModels(@CurrentUser() user: AuthUser, @Body() dto: FetchModelsDto) {
+    return this.channels.fetchUpstreamModels(user, dto);
   }
 
   @Post(':id/test')
