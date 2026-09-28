@@ -10,6 +10,7 @@ import {
   Modal,
   Popconfirm,
   Segmented,
+  Select,
   Table,
   Tag,
   Typography,
@@ -28,6 +29,42 @@ const STATUS_META: Record<RedeemCodeStatus, { color: string; label: string }> = 
   DISABLED: { color: 'red', label: '已作废' },
 };
 
+/** 有效期快速选择：常用时长一键生成，免去每次手选日期 */
+const EXPIRY_PRESETS = [
+  { label: '永久有效', value: 'forever' },
+  { label: '7 天', value: '7d' },
+  { label: '1 个月', value: '1m' },
+  { label: '3 个月', value: '3m' },
+  { label: '6 个月', value: '6m' },
+  { label: '1 年', value: '1y' },
+  { label: '自定义时间', value: 'custom' },
+];
+
+/** 按快捷时长计算截止时间（ISO）；forever 返回 undefined，custom 由日期选择器提供 */
+function expiryFromPreset(preset: string): string | undefined {
+  const d = new Date();
+  switch (preset) {
+    case '7d':
+      d.setDate(d.getDate() + 7);
+      break;
+    case '1m':
+      d.setMonth(d.getMonth() + 1);
+      break;
+    case '3m':
+      d.setMonth(d.getMonth() + 3);
+      break;
+    case '6m':
+      d.setMonth(d.getMonth() + 6);
+      break;
+    case '1y':
+      d.setFullYear(d.getFullYear() + 1);
+      break;
+    default:
+      return undefined;
+  }
+  return d.toISOString();
+}
+
 export default function AdminRedeemPage() {
   const { message } = App.useApp();
   const qc = useQueryClient();
@@ -37,6 +74,7 @@ export default function AdminRedeemPage() {
   const [status, setStatus] = useState<RedeemCodeStatus | 'ALL'>('ALL');
   const [generated, setGenerated] = useState<string[] | null>(null);
   const [form] = Form.useForm();
+  const expiryPreset = Form.useWatch('expiryPreset', form) ?? 'forever';
 
   const { data, isLoading } = useQuery({
     queryKey: ['redeem-codes', page, pageSize, status],
@@ -51,13 +89,17 @@ export default function AdminRedeemPage() {
       amount: number;
       quantity: number;
       note?: string;
+      expiryPreset: string;
       expiresAt?: { toISOString: () => string };
     }) =>
       redeemCodesApi.generate({
         amount: fromCredits(values.amount),
         quantity: values.quantity,
         note: values.note,
-        expiresAt: values.expiresAt ? values.expiresAt.toISOString() : undefined,
+        expiresAt:
+          values.expiryPreset === 'custom'
+            ? values.expiresAt?.toISOString()
+            : expiryFromPreset(values.expiryPreset),
       }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['redeem-codes'] });
@@ -180,7 +222,7 @@ export default function AdminRedeemPage() {
           layout="vertical"
           onFinish={(v) => generateMut.mutate(v)}
           requiredMark={false}
-          initialValues={{ quantity: 10 }}
+          initialValues={{ quantity: 10, expiryPreset: 'forever' }}
         >
           <Form.Item name="amount" label="单个面值（积分）" rules={[{ required: true, message: '请输入面值' }]}>
             <InputNumber min={1} step={100} style={{ width: '100%' }} placeholder="例如 1000" />
@@ -191,9 +233,18 @@ export default function AdminRedeemPage() {
           <Form.Item name="note" label="备注（批次说明）">
             <Input placeholder="例如：双十一活动" />
           </Form.Item>
-          <Form.Item name="expiresAt" label="过期时间（留空永久有效）">
-            <DatePicker showTime style={{ width: '100%' }} />
+          <Form.Item name="expiryPreset" label="有效期">
+            <Select options={EXPIRY_PRESETS} />
           </Form.Item>
+          {expiryPreset === 'custom' && (
+            <Form.Item
+              name="expiresAt"
+              label="自定义截止时间"
+              rules={[{ required: true, message: '请选择截止时间' }]}
+            >
+              <DatePicker showTime style={{ width: '100%' }} />
+            </Form.Item>
+          )}
         </Form>
       </Modal>
 
