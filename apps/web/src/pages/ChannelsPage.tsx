@@ -235,7 +235,7 @@ export default function ChannelsPage() {
 
   return (
     <Card
-      title="上游渠道"
+      title={isAdmin ? '上游渠道' : '我的渠道（BYOK）'}
       extra={
         <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
           添加渠道

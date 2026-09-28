@@ -45,6 +45,8 @@ export default function AppLayout() {
   const location = useLocation();
   const { user, logout } = useAuth();
 
+  const isAdmin = user?.role === 'ADMIN';
+
   const selectedKey = useMemo(() => {
     const match = ['/keys', '/channels', '/available-models', '/models', '/logs', '/usage-stats', '/billing', '/agent', '/users', '/redeem-codes', '/audit-logs', '/withdrawals'].find((p) =>
       location.pathname.startsWith(p),
@@ -53,14 +55,18 @@ export default function AppLayout() {
   }, [location.pathname]);
 
   useEffect(() => {
-    const title = PAGE_TITLES[selectedKey] ?? '控制台';
+    const title =
+      (selectedKey === '/channels' && !isAdmin
+        ? '我的渠道'
+        : PAGE_TITLES[selectedKey]) ?? '控制台';
     document.title = `${title} · AI Gateway`;
-  }, [selectedKey]);
+  }, [selectedKey, isAdmin]);
 
   const items = [
     { key: '/dashboard', icon: <DashboardOutlined />, label: '总览' },
     { key: '/keys', icon: <KeyOutlined />, label: 'API Key' },
-    { key: '/channels', icon: <ApiOutlined />, label: '渠道' },
+    // 普通用户只看得到自己的 BYOK 渠道，改名避免误认为平台管理后台
+    { key: '/channels', icon: <ApiOutlined />, label: isAdmin ? '渠道' : '我的渠道' },
     { key: '/available-models', icon: <TagsOutlined />, label: '可用模型' },
     { key: '/models', icon: <AppstoreOutlined />, label: '模型' },
     { key: '/logs', icon: <FileTextOutlined />, label: '调用日志' },
