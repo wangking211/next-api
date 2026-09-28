@@ -15,7 +15,14 @@ import { ChannelResolverService } from './channel-resolver.service';
 import { ProviderRegistry } from './providers/provider.registry';
 import { ChannelHealthService } from './channel-health.service';
 import { RoutingMetricsService } from './routing-metrics.service';
-import { GatewayRequest, UpstreamError, openaiError } from './types';
+import { GatewayAuthContext, GatewayRequest, UpstreamError, openaiError } from './types';
+import { detectRequiredCapabilities } from './capabilities';
+import {
+  AnthropicStreamTranslator,
+  anthropicToOpenAiRequest,
+  openAiToAnthropicResponse,
+  toAnthropicErrorBody,
+} from './anthropic-format';
 import { UsageService } from '../usage/usage.service';
 import { BillingService } from '../billing/billing.service';
 import { SseUsageCollector } from '../usage/sse-usage.collector';
@@ -86,17 +93,36 @@ export class GatewayController {
 
   @Get('models')
   async listModels(@Req() req: GatewayRequest, @Res() res: Response) {
-    const { user } = req.gateway;
-    const models = await this.resolver.availableModels(user.id);
-    res.json({
-      object: 'list',
-      data: models.map((id) => ({
+    const { user, apiKey } = req.gateway;
+    let names = await this.resolver.availableModels(user.id);
+    // Key 模型白名单：仅展示允许的模型（空数组表示不限制）
+    const allowed = await this.resolver.allowedModelSet(apiKey.models);
+    if (allowed) names = names.filter((n) => allowed.has(n));
+    const catalog = await this.resolver.catalogFor(names);
+    const created = Math.floor(Date.now() / 1000);
+    const seen = new Set<string>();
+    const data: Record<string, unknown>[] = [];
+    const emit = (id: string, canonical: string | null) => {
+      if (seen.has(id)) return;
+      seen.add(id);
+      const row = canonical ? catalog.get(canonical) : catalog.get(id);
+      data.push({
         id,
         object: 'model',
-        created: Math.floor(Date.now() / 1000),
-        owned_by: 'ai-gateway',
-      })),
-    });
+        created,
+        owned_by: row?.provider ?? 'ai-gateway',
+        capabilities: row?.capabilities ?? [],
+        ...(canonical ? { canonical_id: canonical } : {}),
+      });
+    };
+    for (const name of names) {
+      const row = catalog.get(name);
+      emit(name, null);
+      // latest 别名与目录显式别名同样可被调用（resolveAlias 会在路由前解析回规范名）
+      emit(`${name}:latest`, name);
+      for (const alias of row?.aliases ?? []) emit(alias, name);
+    }
+    res.json({ object: 'list', data });
   }
 
   @Post('chat/completions')
@@ -106,12 +132,70 @@ export class GatewayController {
     @Res() res: Response,
     @Body() body: Record<string, any>,
   ) {
-    const { user, apiKey } = req.gateway;
-    const model: string | undefined = body?.model;
-    if (!model) {
+    return this.executeChat(req, res, body, 'openai');
+  }
+
+  /** Anthropic Messages API：入站转换为内部 OpenAI 协议，出站（响应/SSE/错误）再翻译回 Anthropic */
+  @Post('messages')
+  @HttpCode(200)
+  async messages(
+    @Req() req: GatewayRequest,
+    @Res() res: Response,
+    @Body() body: Record<string, any>,
+  ) {
+    if (!body?.model) {
       return res
         .status(400)
-        .json(openaiError('Missing required field: model', 'invalid_request_error'));
+        .json(toAnthropicErrorBody('model: field required', 'invalid_request_error'));
+    }
+    if (body.max_tokens == null) {
+      return res
+        .status(400)
+        .json(toAnthropicErrorBody('max_tokens: field required', 'invalid_request_error'));
+    }
+    return this.executeChat(req, res, anthropicToOpenAiRequest(body), 'anthropic');
+  }
+
+  private async executeChat(
+    req: GatewayRequest,
+    res: Response,
+    body: Record<string, any>,
+    apiFormat: 'openai' | 'anthropic',
+  ) {
+    /** 按客户端协议返回错误体 */
+    const err = (
+      message: string,
+      type = 'invalid_request_error',
+      code: string | null = null,
+    ) =>
+      apiFormat === 'anthropic'
+        ? toAnthropicErrorBody(message, type)
+        : openaiError(message, type, code);
+    const { user, apiKey } = req.gateway;
+    const requested: string | undefined = body?.model;
+    if (!requested) {
+      return res.status(400).json(err('Missing required field: model'));
+    }
+    // 别名解析（含 :latest）到规范名后再路由/计费/记日志
+    const model = await this.resolver.resolveAlias(requested);
+
+    // 能力校验：目录声明了 capabilities 时，请求所需能力必须被覆盖（未声明则放行）
+    const requiredCaps = detectRequiredCapabilities(body);
+    if (requiredCaps.length) {
+      const cat = await this.resolver.catalogFor([model]);
+      const declared = cat.get(model)?.capabilities ?? [];
+      if (declared.length) {
+        const missing = requiredCaps.filter((c) => !declared.includes(c));
+        if (missing.length) {
+          return res.status(400).json(
+            err(
+              `Model "${model}" does not support: ${missing.join(', ')}. ` +
+                `Declared capabilities: ${declared.join(', ')}.`,
+              'invalid_request_error',
+            ),
+          );
+        }
+      }
     }
 
     const channels = await this.resolver.resolve(user.id, model, {
@@ -122,7 +206,7 @@ export class GatewayController {
       return res
         .status(404)
         .json(
-          openaiError(
+          err(
             `No available channel for model "${model}". Configure a channel that serves this model.`,
             'model_not_found',
             'model_not_found',
@@ -201,6 +285,8 @@ export class GatewayController {
             abort: upstreamAbort,
             idleMs: this.streamIdleMs,
             isClientClosed: () => clientClosed,
+            apiFormat,
+            tpm: req.gateway.tpm,
           });
         }
 
@@ -210,6 +296,8 @@ export class GatewayController {
           signal: upstreamAbort.signal,
         });
         const usage = result.usage ?? this.estimateUsage(body, result.json);
+        // TPM 回填：结算在 guard 的 finish 监听里按 实际−预估 校正
+        if (req.gateway.tpm) req.gateway.tpm.actual = usage.totalTokens;
         await this.usage.record({
           userId: user.id,
           apiKeyId: apiKey.id,
@@ -231,7 +319,13 @@ export class GatewayController {
           totalTokens: usage.totalTokens,
           status: result.status,
         });
-        return res.status(result.status).json(result.json);
+        return res
+          .status(result.status)
+          .json(
+            apiFormat === 'anthropic'
+              ? openAiToAnthropicResponse(result.json, model)
+              : result.json,
+          );
       } catch (e) {
         if (e instanceof UpstreamError) {
           lastError = e;
@@ -286,7 +380,7 @@ export class GatewayController {
           });
           return res
             .status(e.status || 502)
-            .json(openaiError(upstreamErrorMessage(e), 'upstream_error'));
+            .json(err(upstreamErrorMessage(e), 'upstream_error'));
         }
         throw e;
       }
@@ -296,7 +390,7 @@ export class GatewayController {
       return res
         .status(403)
         .json(
-          openaiError(
+          err(
             'Insufficient balance. Please top up or configure a BYOK channel.',
             'insufficient_quota',
             'insufficient_balance',
@@ -307,7 +401,7 @@ export class GatewayController {
     return res
       .status(lastError?.status ?? 502)
       .json(
-        openaiError(
+        err(
           lastError ? upstreamErrorMessage(lastError) : 'All channels failed',
           'upstream_error',
         ),
@@ -363,6 +457,9 @@ export class GatewayController {
       abort?: AbortController;
       idleMs?: number;
       isClientClosed?: () => boolean;
+      apiFormat?: 'openai' | 'anthropic';
+      /** TPM 预扣上下文（guard 注入；流结束后回填实际用量） */
+      tpm?: GatewayAuthContext['tpm'];
     },
   ): Promise<void> {
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -375,6 +472,14 @@ export class GatewayController {
     res.flushHeaders?.();
 
     const collector = new SseUsageCollector();
+    // Anthropic 客户端：用量仍从原始 OpenAI 分片收集，但写出的内容翻译为 Anthropic 流事件
+    const translator =
+      meta.apiFormat === 'anthropic'
+        ? new AnthropicStreamTranslator(meta.model, meta.promptFallback)
+        : null;
+    if (translator) {
+      for (const ev of translator.begin()) res.write(ev);
+    }
     let errorMessage: string | null = null;
     let idleTimer: NodeJS.Timeout | null = null;
     const idleMs = meta.idleMs ?? 0;
@@ -392,22 +497,34 @@ export class GatewayController {
       }
     };
 
+    const clientClosed = meta.isClientClosed?.() ?? false;
     try {
       armIdle();
       for await (const chunk of result.chunks) {
         armIdle();
         collector.push(chunk);
-        res.write(chunk);
+        if (translator) {
+          for (const ev of translator.push(chunk)) res.write(ev);
+        } else {
+          res.write(chunk);
+        }
       }
     } catch (e: any) {
       errorMessage = e?.message ?? 'stream interrupted';
     } finally {
       clearIdle();
+      if (translator) {
+        for (const ev of translator.flush(
+          clientClosed ? undefined : (errorMessage ?? undefined),
+        ))
+          res.write(ev);
+      }
     }
 
-    const clientClosed = meta.isClientClosed?.() ?? false;
     const status = clientClosed ? 499 : errorMessage ? 500 : 200;
     const usage = collector.result(meta.promptFallback);
+    // TPM 回填（结算由 guard 的 finish 监听触发）
+    if (meta.tpm) meta.tpm.actual = usage.totalTokens;
     await this.usage.record({
       userId: meta.userId,
       apiKeyId: meta.apiKeyId,
