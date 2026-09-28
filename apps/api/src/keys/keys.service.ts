@@ -31,6 +31,8 @@ export class KeysService {
     costUsed: unknown;
     rpmLimit: number | null;
     routingStrategy: RoutingStrategy | null;
+    tpmLimit: number | null;
+    models: string[];
     expiresAt: Date | null;
     lastUsedAt: Date | null;
     createdAt: Date;
@@ -46,6 +48,8 @@ export class KeysService {
       costUsed: k.costUsed,
       rpmLimit: k.rpmLimit,
       routingStrategy: k.routingStrategy,
+      tpmLimit: k.tpmLimit,
+      models: k.models,
       expiresAt: k.expiresAt,
       lastUsedAt: k.lastUsedAt,
       createdAt: k.createdAt,
@@ -64,6 +68,8 @@ export class KeysService {
         costLimit: dto.costLimit ?? null,
         rpmLimit: dto.rpmLimit ?? null,
         routingStrategy: dto.routingStrategy ?? null,
+        tpmLimit: dto.tpmLimit ?? null,
+        models: dto.models ?? [],
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
       },
     });
@@ -90,6 +96,8 @@ export class KeysService {
     if (dto.costLimit !== undefined) data.costLimit = dto.costLimit;
     if (dto.rpmLimit !== undefined) data.rpmLimit = dto.rpmLimit;
     if (dto.routingStrategy !== undefined) data.routingStrategy = dto.routingStrategy;
+    if (dto.tpmLimit !== undefined) data.tpmLimit = dto.tpmLimit;
+    if (dto.models !== undefined) data.models = dto.models ?? [];
     if (dto.expiresAt !== undefined) {
       data.expiresAt = dto.expiresAt ? new Date(dto.expiresAt) : null;
     }

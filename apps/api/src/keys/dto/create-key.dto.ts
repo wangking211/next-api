@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsEnum,
   IsInt,
   IsISO8601,
@@ -31,6 +33,20 @@ export class CreateKeyDto {
   @IsInt()
   @Min(1)
   rpmLimit?: number;
+
+  /** TPM 上限（每分钟 token 数），不设/0 表示不限制 */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  tpmLimit?: number;
+
+  /** 模型白名单，空/缺省表示不限制 */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(128, { each: true })
+  @ArrayMaxSize(200)
+  models?: string[];
 
   @IsOptional()
   @IsISO8601()

@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsEnum,
   IsInt,
   IsISO8601,
@@ -36,6 +38,20 @@ export class UpdateKeyDto {
   @IsInt()
   @Min(1)
   rpmLimit?: number | null;
+
+  /** TPM 上限（每分钟 token 数），null 清除（不限制） */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  tpmLimit?: number | null;
+
+  /** 模型白名单，null/[] 清空（不限制） */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(128, { each: true })
+  @ArrayMaxSize(200)
+  models?: string[] | null;
 
   @IsOptional()
   @IsISO8601()
