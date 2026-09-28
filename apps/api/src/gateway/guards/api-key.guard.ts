@@ -2,6 +2,7 @@ import {
   CanActivate,
   ExecutionContext,
   ForbiddenException,
+  HttpException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -9,6 +10,10 @@ import { ApiKeyStatus, UserStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CryptoService } from '../../common/crypto.service';
 import { RateLimiterService } from '../rate-limiter.service';
+import { ChannelResolverService } from '../channel-resolver.service';
+import { toAnthropicErrorBody } from '../anthropic-format';
+import { openaiError } from '../types';
+import { estimatePromptTokens } from '../../usage/token.util';
 
 @Injectable()
 export class ApiKeyGuard implements CanActivate {
@@ -16,10 +21,17 @@ export class ApiKeyGuard implements CanActivate {
     private readonly prisma: PrismaService,
     private readonly crypto: CryptoService,
     private readonly rateLimiter: RateLimiterService,
+    private readonly resolver: ChannelResolverService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest();
+    const res = context.switchToHttp().getResponse();
+    const apiFormat: 'openai' | 'anthropic' = String(req.path ?? '').includes(
+      '/v1/messages',
+    )
+      ? 'anthropic'
+      : 'openai';
     const token = this.extractToken(req);
     if (!token) {
       throw new UnauthorizedException(
@@ -74,8 +86,53 @@ export class ApiKeyGuard implements CanActivate {
       throw new ForbiddenException('API key cost quota exhausted');
     }
 
+    // 模型白名单：仅当 Key 配置了 models 且请求带 model 时校验（字面命中 0 查询）
+    const requested = typeof req.body?.model === 'string' ? req.body.model : '';
+    if (apiKey.models.length > 0 && requested) {
+      const allowed = await this.resolver.isModelAllowed(requested, apiKey.models);
+      if (!allowed) {
+        throw new HttpException(
+          apiFormat === 'anthropic'
+            ? toAnthropicErrorBody(
+                `Model "${requested}" is not allowed for this API key`,
+                'permission_error',
+              )
+            : openaiError(
+                `Model "${requested}" is not allowed for this API key`,
+                'permission_error',
+                'model_not_allowed',
+              ),
+          403,
+        );
+      }
+    }
+
     req.gateway = { user: apiKey.user, apiKey };
-    await this.rateLimiter.check(apiKey.id, apiKey.rpmLimit);
+    await this.rateLimiter.check(apiKey.id, apiKey.rpmLimit, apiFormat);
+
+    // TPM 预扣：按预估 token 数先占额度，响应结束时按实际用量多退少补
+    if (apiKey.tpmLimit != null && apiKey.tpmLimit > 0) {
+      const estimate = estimatePromptTokens(req.body ?? {});
+      const bucket = await this.rateLimiter.checkTpm(
+        apiKey.id,
+        apiKey.tpmLimit,
+        estimate,
+        apiFormat,
+      );
+      if (bucket != null) {
+        req.gateway.tpm = { bucket, estimate, actual: 0 };
+        const settle = () => {
+          const tpm = req.gateway?.tpm;
+          if (!tpm || tpm.settled) return;
+          tpm.settled = true;
+          const delta = (tpm.actual ?? 0) - tpm.estimate;
+          if (delta !== 0) void this.rateLimiter.adjustTpm(apiKey.id, tpm.bucket, delta);
+        };
+        // 只听 finish：中止/异常路径未回填 actual → 按 0 结算全额回滚预估，TTL 兜底
+        res.once('finish', settle);
+        res.once('close', settle);
+      }
+    }
     return true;
   }
 
