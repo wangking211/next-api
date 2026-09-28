@@ -279,7 +279,7 @@ export default function AdminUsersPage() {
                 title="毛利"
                 value={formatCredits(uAnalytics?.totals?.margin ?? 0)}
                 valueStyle={{
-                  color: (uAnalytics?.totals?.margin ?? 0) >= 0 ? '#3f8600' : '#cf1322',
+                  color: (uAnalytics?.totals?.margin ?? 0) >= 0 ? 'var(--ok)' : 'var(--err)',
                 }}
               />
             </Col>

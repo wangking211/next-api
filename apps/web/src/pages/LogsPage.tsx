@@ -34,8 +34,9 @@ function TextBlock({ title, text }: { title: string; text: string | null }) {
       <pre
         style={{
           marginTop: 6,
-          background: '#fafafa',
-          border: '1px solid #f0f0f0',
+          background: 'var(--ink)',
+          border: '1px solid var(--ink-border)',
+          color: 'var(--ink-text)',
           borderRadius: 6,
           padding: 12,
           whiteSpace: 'pre-wrap',

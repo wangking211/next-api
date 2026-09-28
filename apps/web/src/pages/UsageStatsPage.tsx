@@ -119,7 +119,7 @@ export default function UsageStatsPage() {
                 <Statistic
                   title="毛利"
                   value={formatCredits(t?.margin ?? 0)}
-                  valueStyle={{ color: (t?.margin ?? 0) >= 0 ? '#3f8600' : '#cf1322' }}
+                  valueStyle={{ color: (t?.margin ?? 0) >= 0 ? 'var(--ok)' : 'var(--err)' }}
                 />
               </Col>
             </>
