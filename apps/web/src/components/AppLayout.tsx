@@ -80,21 +80,10 @@ export default function AppLayout() {
   ];
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout className="app-shell">
       <Sider breakpoint="lg" collapsedWidth="0" theme="dark">
-        <div
-          style={{
-            height: 56,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            color: '#fff',
-            fontWeight: 600,
-            fontSize: 16,
-          }}
-        >
-          <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#fff' }}>
+        <div className="app-brand">
+          <Link to="/" className="app-brand-link">
             <Logo size={22} onDark />
             <span>AI Gateway</span>
           </Link>
@@ -108,16 +97,7 @@ export default function AppLayout() {
         />
       </Sider>
       <Layout>
-        <Header
-          style={{
-            background: '#fff',
-            display: 'flex',
-            justifyContent: 'flex-end',
-            alignItems: 'center',
-            paddingInline: 24,
-            borderBottom: '1px solid #f0f0f0',
-          }}
-        >
+        <Header className="app-header">
           <Dropdown
             menu={{
               items: [
@@ -133,14 +113,14 @@ export default function AppLayout() {
               ],
             }}
           >
-            <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="app-user">
               <Avatar size="small" icon={<UserOutlined />} />
               <Text>{user?.username}</Text>
               {user?.role === 'ADMIN' && <Tag color="gold">管理员</Tag>}
             </div>
           </Dropdown>
         </Header>
-        <Content style={{ margin: 16 }}>
+        <Content className="app-content">
           <Outlet />
         </Content>
       </Layout>
