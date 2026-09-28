@@ -4,6 +4,17 @@ import { Request } from 'express';
 export interface GatewayAuthContext {
   user: User;
   apiKey: ApiKey;
+  /** TPM 预扣上下文（仅在 Key 配置了 TPM 上限且已预扣时存在） */
+  tpm?: {
+    /** 命中的固定窗口桶号（校正时定位同一桶） */
+    bucket: number;
+    /** 预估（预扣）的 token 数 */
+    estimate: number;
+    /** 实际用量（控制器回填；未回填视为 0，结算时全额回滚预估） */
+    actual?: number;
+    /** 是否已结算（防重复） */
+    settled?: boolean;
+  };
 }
 
 export interface GatewayRequest extends Request {
