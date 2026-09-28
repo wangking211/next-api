@@ -59,6 +59,7 @@ export default function ChannelsPage() {
       const entry: Record<string, unknown> = { model: m };
       if (r.costDiscount != null) entry.costDiscount = r.costDiscount;
       if (r.priceDiscount != null) entry.priceDiscount = r.priceDiscount;
+      if (r.qualityScore != null) entry.qualityScore = r.qualityScore;
       return entry;
     });
 
@@ -137,12 +138,15 @@ export default function ChannelsPage() {
       models: r.models,
       weight: r.weight,
       priority: r.priority,
+      dailyRequestLimit: r.dailyRequestLimit ?? undefined,
+      dailyTokenLimit: r.dailyTokenLimit ?? undefined,
     });
     const p: Record<string, PriceRow> = {};
     for (const mp of r.modelPrices ?? []) {
       p[mp.model] = {
         costDiscount: mp.costDiscount ?? undefined,
         priceDiscount: mp.priceDiscount ?? mp.discount ?? undefined,
+        qualityScore: mp.qualityScore ?? undefined,
       };
     }
     setPricing(p);
@@ -204,6 +208,7 @@ export default function ChannelsPage() {
       p[mp.model] = {
         costDiscount: mp.costDiscount ?? undefined,
         priceDiscount: mp.priceDiscount ?? mp.discount ?? undefined,
+        qualityScore: mp.qualityScore ?? undefined,
       };
     }
     setPricing(p);
@@ -316,7 +321,15 @@ export default function ChannelsPage() {
         <Form
           form={form}
           layout="vertical"
-          onFinish={(v) => saveMut.mutate({ ...v, modelPrices: buildModelPrices(v.models ?? []) })}
+          onFinish={(v) =>
+            saveMut.mutate({
+              ...v,
+              // 清空输入框 = 清除限额（发 null，undefined 会被后端视为不修改）
+              dailyRequestLimit: v.dailyRequestLimit ?? null,
+              dailyTokenLimit: v.dailyTokenLimit ?? null,
+              modelPrices: buildModelPrices(v.models ?? []),
+            })
+          }
           requiredMark={false}
           initialValues={{ provider: 'openai', weight: 1, priority: 0, ownerType: 'USER' }}
         >
@@ -400,12 +413,26 @@ export default function ChannelsPage() {
               <PricingTable models={selectedModels} pricing={pricing} setP={setP} catalog={catalog} />
             </div>
           )}
-          <Space size={16}>
+          <Space size={16} wrap>
             <Form.Item name="priority" label="优先级（越大越优先）">
               <InputNumber min={0} />
             </Form.Item>
             <Form.Item name="weight" label="权重（同级负载）">
               <InputNumber min={1} />
+            </Form.Item>
+            <Form.Item
+              name="dailyRequestLimit"
+              label="每日调用限额"
+              tooltip="按自然日（UTC+8）计数，超限后智能路由自动排除该渠道；留空不限"
+            >
+              <InputNumber min={0} placeholder="不限" style={{ width: 130 }} />
+            </Form.Item>
+            <Form.Item
+              name="dailyTokenLimit"
+              label="每日 Token 限额"
+              tooltip="prompt+completion 累计，超限后排除该渠道；留空不限"
+            >
+              <InputNumber min={0} placeholder="不限" style={{ width: 150 }} />
             </Form.Item>
           </Space>
         </Form>

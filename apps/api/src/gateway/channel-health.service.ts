@@ -62,6 +62,20 @@ export class ChannelHealthService {
     }
   }
 
+  /** 上游限流（429）：只记录错误现场，不累计 failureCount —— 连续限流不应直接打死渠道，
+   *  抑制由路由层的 (渠道,模型) 冷却承担（且冷却会指数退避）。 */
+  async recordRateLimited(channelId: string, message: string): Promise<void> {
+    try {
+      await this.prisma.channel.updateMany({
+        where: { id: channelId },
+        data: { lastErrorAt: new Date(), lastErrorMsg: message.slice(0, 500) },
+      });
+      this.logger.warn(`渠道 ${channelId} 触发上游限流(429): ${message.slice(0, 200)}`);
+    } catch {
+      /* ignore */
+    }
+  }
+
   private async sendAlert(channel: any, message: string): Promise<void> {
     if (!this.webhook) return;
     try {

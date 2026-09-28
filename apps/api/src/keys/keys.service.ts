@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { ApiKeyStatus } from '@prisma/client';
+import { ApiKeyStatus, RoutingStrategy } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
 import { CreateKeyDto } from './dto/create-key.dto';
@@ -30,6 +30,7 @@ export class KeysService {
     costLimit: unknown;
     costUsed: unknown;
     rpmLimit: number | null;
+    routingStrategy: RoutingStrategy | null;
     expiresAt: Date | null;
     lastUsedAt: Date | null;
     createdAt: Date;
@@ -44,6 +45,7 @@ export class KeysService {
       costLimit: k.costLimit,
       costUsed: k.costUsed,
       rpmLimit: k.rpmLimit,
+      routingStrategy: k.routingStrategy,
       expiresAt: k.expiresAt,
       lastUsedAt: k.lastUsedAt,
       createdAt: k.createdAt,
@@ -61,6 +63,7 @@ export class KeysService {
         quotaLimit: dto.quotaLimit ?? null,
         costLimit: dto.costLimit ?? null,
         rpmLimit: dto.rpmLimit ?? null,
+        routingStrategy: dto.routingStrategy ?? null,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
       },
     });
@@ -86,6 +89,7 @@ export class KeysService {
     if (dto.quotaLimit !== undefined) data.quotaLimit = dto.quotaLimit;
     if (dto.costLimit !== undefined) data.costLimit = dto.costLimit;
     if (dto.rpmLimit !== undefined) data.rpmLimit = dto.rpmLimit;
+    if (dto.routingStrategy !== undefined) data.routingStrategy = dto.routingStrategy;
     if (dto.expiresAt !== undefined) {
       data.expiresAt = dto.expiresAt ? new Date(dto.expiresAt) : null;
     }

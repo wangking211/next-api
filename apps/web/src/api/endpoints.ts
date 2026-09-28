@@ -72,6 +72,8 @@ export const keysApi = {
     costLimit?: number;
     rpmLimit?: number;
     expiresAt?: string;
+    /** 智能路由策略；留空跟随全局默认 */
+    routingStrategy?: string;
   }) {
     const { data } = await api.post<ApiKeyCreated>('/keys', body);
     return data;
@@ -84,6 +86,7 @@ export const keysApi = {
       quotaLimit: number | null;
       costLimit: number | null;
       rpmLimit: number | null;
+      routingStrategy: string | null;
     }>,
   ) {
     const { data } = await api.patch<ApiKeyInfo>(`/keys/${id}`, body);

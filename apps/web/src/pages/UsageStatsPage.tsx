@@ -195,11 +195,24 @@ export default function UsageStatsPage() {
               loading={isLoading}
               dataSource={data?.byChannel ?? []}
               pagination={false}
-              scroll={{ x: 560 }}
+              scroll={{ x: 740 }}
               columns={[
                 { title: '渠道', dataIndex: 'name', ellipsis: true },
                 { title: '请求', dataIndex: 'requests', width: 80 },
                 { title: 'Token', dataIndex: 'tokens', width: 120 },
+                {
+                  title: '错误',
+                  dataIndex: 'errors',
+                  width: 70,
+                  render: (v: number) =>
+                    v > 0 ? <span style={{ color: '#cf1322' }}>{v}</span> : v,
+                },
+                {
+                  title: '平均延迟',
+                  dataIndex: 'avgLatency',
+                  width: 95,
+                  render: (v: number) => `${v}ms`,
+                },
                             costCol('费用（实扣）', 'billedCost'),
                 ...(isAdmin ? [costCol('毛利', 'margin')] : []),
               ]}

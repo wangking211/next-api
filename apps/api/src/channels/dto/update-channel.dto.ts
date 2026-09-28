@@ -55,6 +55,18 @@ export class UpdateChannelDto {
   @Min(0)
   priority?: number;
 
+  /** 每日调用限额（自然日，null = 清除限制） */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  dailyRequestLimit?: number | null;
+
+  /** 每日 token 限额（prompt+completion，null = 清除限制） */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  dailyTokenLimit?: number | null;
+
   @IsOptional()
   @IsEnum(ChannelStatus)
   status?: ChannelStatus;

@@ -1,4 +1,5 @@
 import {
+  IsEnum,
   IsInt,
   IsISO8601,
   IsNumber,
@@ -8,6 +9,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { RoutingStrategy } from '@prisma/client';
 
 export class CreateKeyDto {
   @IsString()
@@ -33,4 +35,9 @@ export class CreateKeyDto {
   @IsOptional()
   @IsISO8601()
   expiresAt?: string;
+
+  /** 智能路由策略（留空 = 全局默认 ROUTING_STRATEGY） */
+  @IsOptional()
+  @IsEnum(RoutingStrategy)
+  routingStrategy?: RoutingStrategy;
 }

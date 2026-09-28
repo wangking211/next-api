@@ -1,6 +1,8 @@
 export type PriceRow = {
   costDiscount?: number;
   priceDiscount?: number;
+  /** L1 人工质量分 0~2（1=正常） */
+  qualityScore?: number;
 };
 
 export type SetPrice = (model: string, key: keyof PriceRow, value: number | null) => void;

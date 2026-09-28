@@ -444,25 +444,39 @@ export class UsageService {
     };
     const base: Prisma.RequestLogWhereInput = { ...this.scope(userId), createdAt: created };
 
-    const [byModel, byModelErr, byChannel, byUser, byApiKey, totals, totalErr] =
-      await Promise.all([
-        this.prisma.requestLog.groupBy({
-          by: ['model'],
-          where: base,
-          _count: { _all: true },
-          _sum: { totalTokens: true, cost: true, upstreamCost: true },
-        }),
-        this.prisma.requestLog.groupBy({
-          by: ['model'],
-          where: { ...base, status: { gte: 400 } },
-          _count: { _all: true },
-        }),
-        this.prisma.requestLog.groupBy({
-          by: ['channelId'],
-          where: base,
-          _count: { _all: true },
-          _sum: { totalTokens: true, cost: true, upstreamCost: true },
-        }),
+    const [
+      byModel,
+      byModelErr,
+      byChannel,
+      byChannelErr,
+      byUser,
+      byApiKey,
+      totals,
+      totalErr,
+    ] = await Promise.all([
+      this.prisma.requestLog.groupBy({
+        by: ['model'],
+        where: base,
+        _count: { _all: true },
+        _sum: { totalTokens: true, cost: true, upstreamCost: true },
+      }),
+      this.prisma.requestLog.groupBy({
+        by: ['model'],
+        where: { ...base, status: { gte: 400 } },
+        _count: { _all: true },
+      }),
+      this.prisma.requestLog.groupBy({
+        by: ['channelId'],
+        where: base,
+        _count: { _all: true },
+        _sum: { totalTokens: true, cost: true, upstreamCost: true },
+        _avg: { latencyMs: true },
+      }),
+      this.prisma.requestLog.groupBy({
+        by: ['channelId'],
+        where: { ...base, status: { gte: 400 } },
+        _count: { _all: true },
+      }),
         userId
           ? Promise.resolve([] as any[])
           : this.prisma.requestLog.groupBy({
@@ -486,6 +500,9 @@ export class UsageService {
       ]);
 
     const errByModel = new Map(byModelErr.map((r) => [r.model, r._count._all]));
+    const errByChannel = new Map(
+      byChannelErr.map((r) => [r.channelId, r._count._all]),
+    );
 
     // 实际扣费部分：同维度再聚合一次（仅 chargeable 的调用），用于「费用(已扣)」口径
     const billedBase: Prisma.RequestLogWhereInput = { ...base, chargeable: true };
@@ -611,6 +628,9 @@ export class UsageService {
           name: chMap.get(r.channelId ?? '')?.name ?? '(已删除)',
           provider: chMap.get(r.channelId ?? '')?.provider ?? '',
           ...mapAgg(r, billedChannel.get(r.channelId)),
+          // 渠道健康度视角：错误数与平均耗时（对应智能路由的稳定性/延迟维度）
+          errors: errByChannel.get(r.channelId) ?? 0,
+          avgLatency: Math.round(r._avg?.latencyMs ?? 0),
         }))
         .sort((a, b) => b.tokens - a.tokens)
         .slice(0, 20),

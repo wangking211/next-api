@@ -140,6 +140,15 @@ enum ApiKeyStatus {
   REVOKED
 }
 
+/// 智能路由策略（评分权重预设，留空则回退 ROUTING_STRATEGY 环境变量）
+enum RoutingStrategy {
+  BALANCED
+  CHEAPEST
+  FASTEST
+  STABLE
+  QUALITY_FIRST
+}
+
 model ApiKey {
   id        String       @id @default(uuid())
   userId    String
@@ -154,6 +163,8 @@ model ApiKey {
   costLimit  Decimal? @db.Decimal(18, 6)
   costUsed   Decimal  @default(0) @db.Decimal(18, 6)
   rpmLimit   Int?
+  /// 该 Key 的智能路由策略；为空用全局默认（ROUTING_STRATEGY）
+  routingStrategy RoutingStrategy?
 
   expiresAt  DateTime?
   lastUsedAt DateTime?
@@ -193,6 +204,10 @@ model Channel {
   autoDisabled Boolean         @default(false)
   lastErrorAt  DateTime?
   lastErrorMsg String?
+  /// 每日调用限额（自然日，默认 UTC+8）；null/0 = 不限。超限后智能路由排除该渠道
+  dailyRequestLimit Int?
+  /// 每日 token 限额（prompt+completion）；null/0 = 不限
+  dailyTokenLimit    Int?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
@@ -225,6 +240,8 @@ model ChannelModel {
   /// 覆盖渠道优先级/权重（可选）
   priority    Int?
   weight      Int?
+  /// L1 人工质量分 0~2（1=正常）。官方直连 1.0、可用中转 0.85、疑似降智/蒸馏 0.6 等；参与智能路由评分
+  qualityScore Decimal @default(1) @db.Decimal(4, 2)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

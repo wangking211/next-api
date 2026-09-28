@@ -65,6 +65,18 @@ describe('ChannelHealthService', () => {
     expect(prisma.channel.update).toHaveBeenCalledTimes(1);
   });
 
+  it('rate limited only records the error scene, never increments failure count', async () => {
+    const { service, prisma } = makeService(3);
+    await service.recordRateLimited('c1', 'upstream 429: rate limit exceeded');
+    // 不做 update（不 increment failureCount）→ 不可能触发自动禁用
+    expect(prisma.channel.update).not.toHaveBeenCalled();
+    expect(prisma.channel.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.channel.updateMany).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: { lastErrorAt: expect.any(Date), lastErrorMsg: 'upstream 429: rate limit exceeded' },
+    });
+  });
+
   it('sends webhook alert when configured', async () => {
     const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({} as any);
     const { service, prisma } = makeService(2, 'https://alert.example/hook');

@@ -8,6 +8,14 @@ export interface UserInfo {
 
 export type ApiKeyStatus = 'ACTIVE' | 'DISABLED' | 'REVOKED';
 
+/** 智能路由策略（评分权重预设），null = 跟随全局默认 */
+export type RoutingStrategy =
+  | 'BALANCED'
+  | 'CHEAPEST'
+  | 'FASTEST'
+  | 'STABLE'
+  | 'QUALITY_FIRST';
+
 export interface ApiKeyInfo {
   id: string;
   name: string;
@@ -18,6 +26,7 @@ export interface ApiKeyInfo {
   costLimit: string | null;
   costUsed: string;
   rpmLimit: number | null;
+  routingStrategy: RoutingStrategy | null;
   expiresAt: string | null;
   lastUsedAt: string | null;
   createdAt: string;
@@ -40,6 +49,8 @@ export interface ChannelModelPrice {
   enabled: boolean;
   priority: number | null;
   weight: number | null;
+  /** L1 人工质量分 0~2（1=正常），参与智能路由评分 */
+  qualityScore: number | null;
 }
 
 export interface ChannelInfo {
@@ -59,6 +70,10 @@ export interface ChannelInfo {
   autoDisabled: boolean;
   lastErrorAt: string | null;
   lastErrorMsg: string | null;
+  /** 每日调用限额，null/0 = 不限；超限后智能路由排除该渠道 */
+  dailyRequestLimit: number | null;
+  /** 每日 token 限额，null/0 = 不限 */
+  dailyTokenLimit: number | null;
   createdAt: string;
   modelPrices?: ChannelModelPrice[];
 }
@@ -200,6 +215,10 @@ export interface UsageAnalytics {
     upstreamCost: number;
     billedUpstreamCost: number;
     margin: number;
+    /** status >= 400 的请求数 */
+    errors: number;
+    /** 平均耗时(ms) */
+    avgLatency: number;
   }[];
   byUser: {
     userId: string;

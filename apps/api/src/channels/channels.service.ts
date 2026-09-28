@@ -99,6 +99,7 @@ export class ChannelsService {
         enabled: m.enabled,
         priority: m.priority,
         weight: m.weight,
+        qualityScore: m.qualityScore != null ? Number(m.qualityScore) : 1,
       })),
     };
   }
@@ -112,23 +113,32 @@ export class ChannelsService {
   ): Promise<void> {
     const priceMap = new Map((modelPrices ?? []).map((p) => [p.model, p]));
     const names = new Set<string>([...models, ...priceMap.keys()]);
+    // 只覆盖客户端显式给出的字段：未传的字段（qualityScore / 绝对成本 / weight / enabled 等）
+    // 保持原值，避免「只改折扣」的保存把其它配置重置为默认
+    const OPTIONAL_FIELDS = [
+      'costInput',
+      'costOutput',
+      'priceInput',
+      'priceOutput',
+      'discount',
+      'costDiscount',
+      'priceDiscount',
+      'priority',
+      'weight',
+      'qualityScore',
+    ] as const;
     for (const model of names) {
       const p = priceMap.get(model);
-      const pricing = {
-        costInput: p?.costInput ?? null,
-        costOutput: p?.costOutput ?? null,
-        priceInput: p?.priceInput ?? null,
-        priceOutput: p?.priceOutput ?? null,
-        discount: p?.discount ?? null,
-        costDiscount: p?.costDiscount ?? null,
-        priceDiscount: p?.priceDiscount ?? null,
-        priority: p?.priority ?? null,
-        weight: p?.weight ?? null,
-        enabled: p?.enabled ?? true,
-      };
+      const pricing: Record<string, unknown> = {};
+      if (p) {
+        for (const k of OPTIONAL_FIELDS) {
+          if (p[k] !== undefined) pricing[k] = p[k];
+        }
+        if (p.enabled !== undefined) pricing.enabled = p.enabled;
+      }
       await this.prisma.channelModel.upsert({
         where: { channelId_modelName: { channelId, modelName: model } },
-        create: { channelId, modelName: model, ...pricing },
+        create: { channelId, modelName: model, enabled: true, ...pricing },
         update: pricing,
       });
     }
@@ -224,6 +234,8 @@ export class ChannelsService {
         models: dto.models,
         weight: dto.weight ?? 1,
         priority: dto.priority ?? 0,
+        dailyRequestLimit: dto.dailyRequestLimit ?? null,
+        dailyTokenLimit: dto.dailyTokenLimit ?? null,
       },
     });
     await this.upsertChannelModels(channel.id, dto.models, dto.modelPrices, true);
@@ -260,6 +272,9 @@ export class ChannelsService {
         weight: dto.weight,
         priority: dto.priority,
         status: dto.status,
+        // undefined = 不修改；null = 清除限额
+        dailyRequestLimit: dto.dailyRequestLimit,
+        dailyTokenLimit: dto.dailyTokenLimit,
         ...(dto.apiKey ? { apiKeyEnc: this.crypto.encrypt(dto.apiKey) } : {}),
         ...(dto.status === ChannelStatus.ENABLED
           ? { failureCount: 0, autoDisabled: false, lastErrorMsg: null }

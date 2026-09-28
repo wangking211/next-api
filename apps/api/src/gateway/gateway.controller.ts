@@ -14,6 +14,7 @@ import { ApiKeyGuard } from './guards/api-key.guard';
 import { ChannelResolverService } from './channel-resolver.service';
 import { ProviderRegistry } from './providers/provider.registry';
 import { ChannelHealthService } from './channel-health.service';
+import { RoutingMetricsService } from './routing-metrics.service';
 import { GatewayRequest, UpstreamError, openaiError } from './types';
 import { UsageService } from '../usage/usage.service';
 import { BillingService } from '../billing/billing.service';
@@ -32,6 +33,36 @@ function upstreamErrorMessage(e: UpstreamError): string {
   return String(msg).slice(0, 500);
 }
 
+/** 上游错误的可判定文本：message + code + type（UpstreamError.message 只有 "Upstream error 429"，语义在 body 里） */
+function upstreamErrorSignal(e: UpstreamError): string {
+  const body = e.body;
+  const parts = [
+    typeof body?.error?.message === 'string' ? body.error.message : '',
+    typeof body?.error?.code === 'string' ? body.error.code : '',
+    typeof body?.error?.type === 'string' ? body.error.type : '',
+    typeof body?.message === 'string' ? body.message : '',
+  ];
+  return parts.filter(Boolean).join(' ');
+}
+
+/** 配额/限流特征：429，或 4xx 错误文本命中限额语义（订阅号日限额常见 400/403 + quota 文案） */
+const QUOTA_RE =
+  /(insufficient[_\s-]?quota|rate[_\s-]?limit|too many requests|quota|usage.{0,15}(limit|exceed)|daily.{0,15}(limit|quota)|limit.{0,20}(exceed|exhaust|reach|hit)|exceeded.{0,15}(limit|quota)|请求过于频繁|超出.{0,8}(限额|限制|配额)|限流|配额)/i;
+
+function isRateLimited(e: UpstreamError): boolean {
+  if (e.status === 429) return true;
+  if (e.status < 400 || e.status >= 500) return false;
+  return QUOTA_RE.test(upstreamErrorSignal(e));
+}
+
+/** 拒答/内容过滤特征：用户内容被安全策略拒绝，只降质量分，不伤稳定性也不熔断 */
+const REFUSAL_RE =
+  /(content[_\s-]?filter|content_policy|safety|refusal|refused|内容安全|敏感内容)/i;
+
+function isRefusal(e: UpstreamError): boolean {
+  return REFUSAL_RE.test(upstreamErrorSignal(e));
+}
+
 @UseGuards(ApiKeyGuard)
 @Controller('v1')
 export class GatewayController {
@@ -44,6 +75,7 @@ export class GatewayController {
     private readonly usage: UsageService,
     private readonly billing: BillingService,
     private readonly health: ChannelHealthService,
+    private readonly metrics: RoutingMetricsService,
     config: ConfigService,
   ) {
     this.streamIdleMs =
@@ -82,7 +114,10 @@ export class GatewayController {
         .json(openaiError('Missing required field: model', 'invalid_request_error'));
     }
 
-    const channels = await this.resolver.resolve(user.id, model);
+    const channels = await this.resolver.resolve(user.id, model, {
+      strategy: apiKey.routingStrategy,
+      stickyKey: this.buildStickyKey(req, user.id, body),
+    });
     if (channels.length === 0) {
       return res
         .status(404)
@@ -144,6 +179,7 @@ export class GatewayController {
         }
       }
       const provider = this.providers.resolve(channel.provider);
+      const attemptStart = Date.now();
       try {
         if (isStream) {
           const result = await provider.chatStream(channel, upstreamKey, {
@@ -158,6 +194,7 @@ export class GatewayController {
             channel,
             model,
             startedAt,
+            attemptStart,
             promptFallback,
             requestPreview,
             chargeable: channel.ownerType === ChannelOwnerType.PLATFORM,
@@ -188,16 +225,49 @@ export class GatewayController {
           responsePreview: extractAssistantText(result.json),
         });
         await this.health.recordSuccess(channel.id);
+        await this.metrics.record(channel.id, model, 'ok', {
+          latencyMs: Date.now() - attemptStart,
+          completionTokens: usage.completionTokens,
+          totalTokens: usage.totalTokens,
+          status: result.status,
+        });
         return res.status(result.status).json(result.json);
       } catch (e) {
         if (e instanceof UpstreamError) {
           lastError = e;
-          // 仅将上游/网络类故障（5xx/429/连接失败）计入渠道健康度；客户端 4xx 不计数，防止被恶意请求自动禁用渠道
-          if (e.retryable) {
+          const latencyMs = Date.now() - attemptStart;
+          const signal = upstreamErrorSignal(e) || e.message;
+          // 错误分类（客户端 4xx 不计健康度，防止被恶意请求自动禁用渠道）：
+          //  限流/超限 → 冷却退避且不累计失败；5xx/连接故障 → 健康度失败计数；
+          //  上游鉴权失败(401) → 只降路由质量分；拒答/内容过滤 → 只降质量分
+          const limited = isRateLimited(e);
+          const transient = e.retryable && !limited;
+          const authFault = !limited && e.status === 401;
+          const refusal = !limited && !transient && !authFault && isRefusal(e);
+          if (limited) {
+            await this.health.recordRateLimited(channel.id, signal);
+            await this.metrics.record(channel.id, model, 'rate_limited', {
+              latencyMs,
+              status: e.status,
+              errorMessage: signal,
+            });
+          } else if (transient) {
             await this.health.recordFailure(channel.id, e.message);
+            await this.metrics.record(channel.id, model, 'error', {
+              latencyMs,
+              status: e.status,
+              errorMessage: signal,
+            });
+          } else if (authFault || refusal) {
+            await this.metrics.record(channel.id, model, authFault ? 'error' : 'refused', {
+              latencyMs,
+              status: e.status,
+              errorMessage: signal,
+            });
           }
           const hasMore = i < channels.length - 1;
-          if (e.retryable && hasMore) continue; // 故障转移
+          // 故障转移：上游故障、限流/超限、鉴权失效都要换下一家试
+          if ((transient || limited || authFault) && hasMore) continue;
           await this.usage.record({
             userId: user.id,
             apiKeyId: apiKey.id,
@@ -244,6 +314,26 @@ export class GatewayController {
       );
   }
 
+  /**
+   * 会话粘性键：显式 x-session-id 优先（前端可传会话 ID），否则用 用户 + prompt 前缀。
+   * 同键请求倾向落同一渠道，保住上游 prompt cache；跨会话/跨请求则自然分散。
+   */
+  private buildStickyKey(
+    req: GatewayRequest,
+    userId: string,
+    body: Record<string, any>,
+  ): string {
+    const sid = req.headers['x-session-id'];
+    if (typeof sid === 'string' && sid.trim()) return sid.trim().slice(0, 128);
+    try {
+      const msgs = Array.isArray(body?.messages) ? body.messages.slice(0, 2) : [];
+      const prefix = msgs.length ? JSON.stringify(msgs).slice(0, 256) : '';
+      return `${userId}:${prefix}`;
+    } catch {
+      return userId;
+    }
+  }
+
   private estimateUsage(body: Record<string, any>, json: any) {
     const promptTokens = estimatePromptTokens(body);
     const text = json?.choices?.[0]?.message?.content;
@@ -265,6 +355,8 @@ export class GatewayController {
       channel: Channel;
       model: string;
       startedAt: number;
+      /** 本次候选尝试的开始时刻（路由延迟指标用，不含此前候选的耗时） */
+      attemptStart: number;
       promptFallback: number;
       requestPreview: string;
       chargeable: boolean;
@@ -334,10 +426,23 @@ export class GatewayController {
 
     // 客户端主动断开不计入渠道健康度
     if (!clientClosed) {
+      const latencyMs = Date.now() - meta.attemptStart;
       if (errorMessage) {
         await this.health.recordFailure(meta.channel.id, errorMessage);
+        await this.metrics.record(meta.channel.id, meta.model, 'error', {
+          latencyMs,
+          status: 500,
+          totalTokens: usage.totalTokens,
+          errorMessage,
+        });
       } else {
         await this.health.recordSuccess(meta.channel.id);
+        await this.metrics.record(meta.channel.id, meta.model, 'ok', {
+          latencyMs,
+          status: 200,
+          completionTokens: usage.completionTokens,
+          totalTokens: usage.totalTokens,
+        });
       }
     }
 

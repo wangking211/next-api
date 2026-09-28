@@ -9,7 +9,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { ApiKeyStatus } from '@prisma/client';
+import { ApiKeyStatus, RoutingStrategy } from '@prisma/client';
 
 export class UpdateKeyDto {
   @IsOptional()
@@ -40,4 +40,9 @@ export class UpdateKeyDto {
   @IsOptional()
   @IsISO8601()
   expiresAt?: string | null;
+
+  /** 智能路由策略（null = 清除，回退全局默认） */
+  @IsOptional()
+  @IsEnum(RoutingStrategy)
+  routingStrategy?: RoutingStrategy | null;
 }

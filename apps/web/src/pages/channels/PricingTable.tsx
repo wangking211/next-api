@@ -1,4 +1,4 @@
-import { InputNumber, Table, Typography } from 'antd';
+import { InputNumber, Table, Tooltip, Typography } from 'antd';
 import { getCreditsPerUsd } from '../../utils/format';
 import type { ModelInfo } from '../../api/types';
 import type { PriceRow, SetPrice } from './constants';
@@ -39,13 +39,33 @@ export function PricingTable({
       size="small"
       rowKey="model"
       pagination={false}
-      scroll={{ y: 260, x: 620 }}
+      scroll={{ y: 260, x: 720 }}
       style={{ marginTop: 6 }}
       dataSource={models.map((m) => ({ model: m }))}
       columns={[
         { title: '模型', dataIndex: 'model', width: 150, ellipsis: true },
         { title: '上游折扣', width: 100, render: (_: unknown, r: { model: string }) => num(r.model, 'costDiscount') },
         { title: '下游折扣', width: 100, render: (_: unknown, r: { model: string }) => num(r.model, 'priceDiscount') },
+        {
+          title: (
+            <Tooltip title="人工质量分 0~2（1=正常）：官方直连 1.0、可用中转 0.85、疑似降智/蒸馏 0.6；参与智能路由评分">
+              质量分
+            </Tooltip>
+          ),
+          width: 90,
+          render: (_: unknown, r: { model: string }) => (
+            <InputNumber
+              size="small"
+              min={0}
+              max={2}
+              step={0.05}
+              style={{ width: 84 }}
+              value={pricing[r.model]?.qualityScore}
+              placeholder="1"
+              onChange={(v) => setP(r.model, 'qualityScore', v as number)}
+            />
+          ),
+        },
         {
           title: '成本(积分/1M)',
           width: 150,

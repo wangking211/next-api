@@ -8,6 +8,7 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
+  Select,
   Space,
   Table,
   Tag,
@@ -19,7 +20,24 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { keysApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { formatDateTime, formatCredits } from '../utils/format';
-import type { ApiKeyCreated, ApiKeyInfo } from '../api/types';
+import type { ApiKeyCreated, ApiKeyInfo, RoutingStrategy } from '../api/types';
+
+/** 智能路由策略选项：评分权重预设（价格/速度/稳定性/质量/分流噪声） */
+const STRATEGY_OPTIONS: { value: RoutingStrategy; label: string }[] = [
+  { value: 'BALANCED', label: '均衡 BALANCED' },
+  { value: 'CHEAPEST', label: '最省 CHEAPEST' },
+  { value: 'FASTEST', label: '最快 FASTEST' },
+  { value: 'STABLE', label: '最稳 STABLE' },
+  { value: 'QUALITY_FIRST', label: '质量优先 QUALITY_FIRST' },
+];
+
+const STRATEGY_LABEL: Record<RoutingStrategy, string> = {
+  BALANCED: '均衡',
+  CHEAPEST: '最省',
+  FASTEST: '最快',
+  STABLE: '最稳',
+  QUALITY_FIRST: '质量优先',
+};
 
 export default function KeysPage() {
   const { message } = App.useApp();
@@ -119,6 +137,17 @@ export default function KeysPage() {
             render: (v: number | null) => (v ?? '∞'),
           },
           {
+            title: (
+              <Tooltip title="同一模型多渠道时的评分偏好：价格 / 速度 / 稳定性 / 质量加权；留空跟随全局默认">
+                路由策略
+              </Tooltip>
+            ),
+            dataIndex: 'routingStrategy',
+            width: 100,
+            render: (v: RoutingStrategy | null) =>
+              v ? <Tag color="blue">{STRATEGY_LABEL[v]}</Tag> : <Tag>默认</Tag>,
+          },
+          {
             title: '最近使用',
             dataIndex: 'lastUsedAt',
             render: (v: string | null) => (v ? formatDateTime(v) : '从未'),
@@ -180,6 +209,13 @@ export default function KeysPage() {
           </Form.Item>
           <Form.Item name="rpmLimit" label="每分钟请求上限 RPM（留空不限）">
             <InputNumber min={1} style={{ width: '100%' }} placeholder="例如 60" />
+          </Form.Item>
+          <Form.Item
+            name="routingStrategy"
+            label="路由策略（留空 = 全局默认）"
+            tooltip="按价格、响应速度、稳定性、回答质量综合打分选渠道"
+          >
+            <Select allowClear placeholder="均衡 BALANCED" options={STRATEGY_OPTIONS} />
           </Form.Item>
         </Form>
       </Modal>

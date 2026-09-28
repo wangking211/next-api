@@ -1,33 +1,104 @@
-import { Injectable } from '@nestjs/common';
-import { ChannelOwnerType, ChannelStatus } from '@prisma/client';
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Channel, ChannelOwnerType, ChannelStatus, RoutingStrategy } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
 import { ResolvedChannel } from './types';
+import { RoutingMetricsService } from './routing-metrics.service';
+import {
+  DEFAULT_STRATEGY,
+  applySticky,
+  isRoutingStrategy,
+  scoreCandidates,
+} from './routing-score';
+
+export interface RouteOptions {
+  /** Key 级路由策略；缺省回退 ROUTING_STRATEGY 环境变量 */
+  strategy?: RoutingStrategy | null;
+  /** 会话粘性键：x-session-id，或 userId + prompt 前缀 */
+  stickyKey?: string | null;
+}
+
+interface Candidate {
+  id: string;
+  c: ResolvedChannel;
+  tier: number;
+  priority: number;
+  cost: number;
+  weight: number;
+  qualityScore: number;
+}
 
 @Injectable()
 export class ChannelResolverService {
+  private readonly logger = new Logger(ChannelResolverService.name);
+  private readonly defaultStrategy: RoutingStrategy;
+  private readonly stickyEnabled: boolean;
+  private readonly stickyRatio: number;
+  private readonly autoReenableMs: number;
+  private readonly failureThreshold: number;
+  private readonly debug: boolean;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly crypto: CryptoService,
-  ) {}
+    private readonly metrics: RoutingMetricsService,
+    config: ConfigService,
+  ) {
+    const s = config.get<string>('ROUTING_STRATEGY', DEFAULT_STRATEGY);
+    this.defaultStrategy = isRoutingStrategy(s) ? s : DEFAULT_STRATEGY;
+    this.stickyEnabled = config.get<string>('ROUTING_STICKY', 'true') !== 'false';
+    const r = Number(config.get<string>('ROUTING_STICKY_RATIO', '0.8'));
+    this.stickyRatio = Number.isFinite(r) && r > 0 && r <= 1 ? r : 0.8;
+    this.autoReenableMs =
+      Number(config.get<string>('CHANNEL_AUTO_REENABLE_MS', '900000')) || 900000;
+    this.failureThreshold =
+      Number(config.get<string>('CHANNEL_FAILURE_THRESHOLD', '5')) || 5;
+    this.debug = config.get<string>('ROUTING_DEBUG') === 'true';
+  }
+
+  /** 半开恢复的冷却截止时刻（早于该时刻的自动禁用渠道重新进入候选） */
+  private reenableCutoff(): Date {
+    return new Date(Date.now() - this.autoReenableMs);
+  }
+
+  /** 渠道可用性条件：启用，或自动禁用已过冷却期（半开探测，进入候选后再触发恢复） */
+  private availabilityWhere(cutoff: Date) {
+    return {
+      OR: [
+        { status: ChannelStatus.ENABLED },
+        {
+          status: ChannelStatus.DISABLED,
+          autoDisabled: true,
+          lastErrorAt: { lt: cutoff },
+        },
+      ],
+    };
+  }
 
   /**
    * 为指定用户 + 模型选择候选渠道。
-   * 排序：用户自有 BYOK 优先于平台；同级按 priority 降序、上游成本升序（利润最大）、weight 加权随机。
-   * 可用性以 ChannelModel 为准（同一模型可由多渠道提供）。
+   *
+   * 排序 = 硬分层 + 评分：tier（BYOK 优先）→ priority（人工指定）→ 五维评分降序。
+   * 评分维度：价格 / 速度·性能 / 稳定性 / 质量（L1 人工分 + L2 被动信号）/ 分流噪声；
+   * 无指标时各维度中性回退，整体退化为「成本升序 + 加权随机」，与旧排序兼容。
    */
-  async resolve(userId: string, model: string): Promise<ResolvedChannel[]> {
+  async resolve(
+    userId: string,
+    model: string,
+    opts: RouteOptions = {},
+  ): Promise<ResolvedChannel[]> {
     const [rows, catalog] = await Promise.all([
       this.prisma.channelModel.findMany({
         where: {
           modelName: model,
           enabled: true,
           channel: {
-            status: ChannelStatus.ENABLED,
             OR: [
               { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
               { ownerType: ChannelOwnerType.PLATFORM },
             ],
+            AND: [this.availabilityWhere(this.reenableCutoff())],
           },
         },
         include: { channel: true },
@@ -39,14 +110,8 @@ export class ChannelResolverService {
     ]);
     const officialIn = catalog ? Number(catalog.inputPrice) : 0;
 
-    const ranked: {
-      c: ResolvedChannel;
-      tier: number;
-      priority: number;
-      cost: number;
-      race: number;
-    }[] = [];
-
+    const candidates: Candidate[] = [];
+    const recoveries: Promise<void>[] = [];
     for (const cm of rows) {
       let apiKey: string;
       try {
@@ -55,31 +120,113 @@ export class ChannelResolverService {
         continue; // 解密失败的渠道跳过
       }
       if (!apiKey) continue;
-      const weight = Math.max(cm.weight ?? cm.channel.weight, 1);
+      if (cm.channel.status !== ChannelStatus.ENABLED) {
+        recoveries.push(this.recoverChannel(cm.channel));
+      }
       // 路由成本 = 绝对成本 > 官方价 × 上游折扣；无有效成本则排最后
       const rawCost =
         cm.costInput != null
           ? Number(cm.costInput)
           : officialIn * (cm.costDiscount != null ? Number(cm.costDiscount) : 1);
-      ranked.push({
+      candidates.push({
+        id: cm.channel.id,
         c: { channel: cm.channel, apiKey },
         tier: cm.channel.ownerType === ChannelOwnerType.USER ? 0 : 1,
         priority: cm.priority ?? cm.channel.priority,
         cost: rawCost > 0 ? rawCost : Number.POSITIVE_INFINITY,
-        // 指数竞速实现加权随机：weight 越大越可能排前
-        race: -Math.log(Math.random() || 1e-9) / weight,
+        weight: Math.max(cm.weight ?? cm.channel.weight, 1),
+        qualityScore: Number(cm.qualityScore ?? 1) || 1,
       });
     }
+    if (recoveries.length) await Promise.all(recoveries);
+    if (!candidates.length) return [];
 
-    ranked.sort(
+    const metricsMap = await this.metrics.snapshot(
+      model,
+      candidates.map((c) => c.id),
+    );
+
+    // 排除 ①模型级冷却中（近期 429/连续失败）②已达每日限额的渠道；
+    // 全部被排除时兜底放行——宁可试探拿上游明确报错，也不直接对用户 502
+    const overDailyLimit = (c: Candidate): boolean => {
+      const m = metricsMap.get(c.id);
+      if (!m) return false;
+      const rl = c.c.channel.dailyRequestLimit;
+      const tl = c.c.channel.dailyTokenLimit;
+      return (!!rl && m.dayReq >= rl) || (!!tl && m.dayTok >= tl);
+    };
+    let eligible = candidates.filter(
+      (c) => !metricsMap.get(c.id)?.open && !overDailyLimit(c),
+    );
+    if (!eligible.length) eligible = candidates;
+
+    const strategy = opts.strategy ?? this.defaultStrategy;
+    const scores = scoreCandidates(
+      eligible.map((c) => {
+        const m = metricsMap.get(c.id);
+        return {
+          id: c.id,
+          cost: c.cost,
+          weight: c.weight,
+          qualityScore: c.qualityScore,
+          metrics: m,
+          penalized: !!m && (m.open || m.halfOpen) || overDailyLimit(c),
+        };
+      }),
+      strategy,
+    );
+
+    const ranked = [...eligible].sort(
       (a, b) =>
         a.tier - b.tier ||
         b.priority - a.priority ||
-        a.cost - b.cost ||
-        a.race - b.race,
+        (scores.get(b.id)?.score ?? 0) - (scores.get(a.id)?.score ?? 0),
     );
 
+    const stickyHit =
+      this.stickyEnabled && opts.stickyKey
+        ? applySticky(ranked, scores, opts.stickyKey, this.stickyRatio)
+        : null;
+
+    if (this.debug) {
+      this.logger.log(
+        `[route] model=${model} strategy=${strategy} → ` +
+          ranked
+            .map((c) => {
+              const m = metricsMap.get(c.id);
+              const flag = m?.open ? '!' : overDailyLimit(c) ? '#' : m?.halfOpen ? '~' : '';
+              return `${c.id}${flag}(${(scores.get(c.id)?.score ?? 0).toFixed(3)})`;
+            })
+            .join(' > ') +
+          (stickyHit ? ` | sticky=${stickyHit.id}` : ''),
+      );
+    }
+
     return ranked.map((r) => r.c);
+  }
+
+  /**
+   * 自动禁用渠道的半开恢复：冷却期满后重新放行，
+   * 失败计数置为阈值-1（下一次失败即再次禁用），成功则由 recordSuccess 彻底复位。
+   */
+  private async recoverChannel(channel: Channel): Promise<void> {
+    try {
+      const r = await this.prisma.channel.updateMany({
+        where: { id: channel.id, status: ChannelStatus.DISABLED, autoDisabled: true },
+        data: {
+          status: ChannelStatus.ENABLED,
+          autoDisabled: false,
+          failureCount: Math.max(this.failureThreshold - 1, 0),
+        },
+      });
+      if (r.count === 1) {
+        this.logger.warn(
+          `渠道 "${channel.name}" 自动禁用已满冷却期，半开恢复（阈值 ${this.failureThreshold}，仅允许 1 次失败）`,
+        );
+      }
+    } catch (e) {
+      this.logger.warn(`渠道半开恢复失败: ${(e as Error)?.message}`);
+    }
   }
 
   supportsAnyModel(userId: string, model: string): Promise<unknown> {
@@ -88,11 +235,11 @@ export class ChannelResolverService {
         modelName: model,
         enabled: true,
         channel: {
-          status: ChannelStatus.ENABLED,
           OR: [
             { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
             { ownerType: ChannelOwnerType.PLATFORM },
           ],
+          AND: [this.availabilityWhere(this.reenableCutoff())],
         },
       },
     });
@@ -104,11 +251,11 @@ export class ChannelResolverService {
       where: {
         enabled: true,
         channel: {
-          status: ChannelStatus.ENABLED,
           OR: [
             { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
             { ownerType: ChannelOwnerType.PLATFORM },
           ],
+          AND: [this.availabilityWhere(this.reenableCutoff())],
         },
       },
       distinct: ['modelName'],

@@ -71,6 +71,7 @@ pnpm cleanup             # 执行清理
 - [x] **P9** Gemini 适配器：Google AI 原生协议双向转换（含流式与图片），同时支持 `\r\n` SSE 分隔
 - [x] **P10** 渠道异常与操作审计：连续失败阈值自动禁用 + 告警 webhook、全局审计拦截器、管理员审计查询
 - [x] **P11** 官网首页与登录页：公开落地页（Hero/数据条/特性/四步上手/模型定价表）、分栏品牌登录页、设计令牌与 SEO 元数据、登录后 `?redirect=` 回跳、404 页面
+- [x] **P12** 智能路由（评分制）：五维评分（价格/速度/稳定性/质量/分流噪声）+ 策略权重、模型级熔断冷却与半开恢复、429/配额特征识别与指数退避、渠道每日限额排除、会话粘性、L1 质量分与 L2 被动信号（详见「智能路由」章节）
 
 ## API 一览（当前）
 
@@ -151,7 +152,7 @@ curl http://localhost:3000/v1/chat/completions \
 ## 测试
 
 ```bash
-# 单元测试（crypto / token 估算 / SSE 用量收集 / Anthropic+Gemini 转换 / 渠道排序 / 计费 / 兑换码）
+# 单元测试（crypto / token 估算 / SSE 用量收集 / Anthropic+Gemini 转换 / 渠道排序与智能路由评分 / 路由指标 / 渠道健康 / 计费 / 兑换码）
 pnpm test
 
 # 端到端测试：自动拉起 mock 上游 + API，依次跑全部用例（P1-P4、P7-P10）
@@ -257,6 +258,54 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 - 管理员毛利 = 实收 − 上游实付（`billedCost - billedUpstreamCost`）；BYOK 两条腿都是 0，不产生幻影毛利。
 - 故障转移：BYOK 上游 5xx/429 会回落到平台渠道，回落成功的那一次按平台口径扣费（`gateway.controller.ts`）。
 - API Key 额度分工：`quotaLimit` 按 token 管用量（BYOK 也计），`costLimit` 只管真实花费。
+
+## 智能路由（评分排序 / 熔断 / 每日限额）
+
+同一模型有多个可用渠道时，网关按「硬分层 + 五维评分」选渠道，而不是单纯按优先级：
+
+1. **硬分层（不参与评分）**：`tier`（用户 BYOK 优先于平台渠道）→ `priority`（渠道/模型人工指定，越大越优先）；
+2. **层内评分**：`score = Σ 权重 × 归一化维度`，各维 min-max 归一化到 [0,1]，无数据回退 0.5（中性）。
+   全无指标时退化为「成本升序 + 分流噪声」，与旧的 `cost asc` 排序兼容。
+
+| 维度 | 含义 | 计算 |
+| --- | --- | --- |
+| price 价格 | 越便宜越优 | 路由成本 = 绝对成本 > 官方价 × 上游折扣；未知成本排末位 |
+| speed 速度 | 低时延 | 0.6×平均时延 + 0.2×慢请求(≥3s)占比 + 0.2×吞吐(tokens/s) |
+| stability 稳定性 | 滑窗成功率 | 拉普拉斯平滑 `(ok+1)/(ok+fail+2)`，无数据恰为 0.5 |
+| quality 质量 | L1 人工分 + L2 被动信号 | `0.5×qualityScore + 0.5×(0.6×有效回复率 + 0.4×平均输出长度)` |
+| noise 分流噪声 | 让渠道 `weight` 真正生效 | gumbel 竞速 `-ln(U)/weight`，权重越大越占优 |
+
+**策略权重（Σ=1）**，Key 级 `ApiKey.routingStrategy` 优先，缺省用 `ROUTING_STRATEGY`：
+
+| 策略 | price | speed | stability | quality | noise |
+| --- | --- | --- | --- | --- | --- |
+| `BALANCED` 均衡（默认） | .30 | .20 | .25 | .20 | .05 |
+| `CHEAPEST` 最省 | .65 | .05 | .15 | .10 | .05 |
+| `FASTEST` 最快 | .10 | .55 | .25 | .05 | .05 |
+| `STABLE` 最稳 | .10 | .15 | .60 | .10 | .05 |
+| `QUALITY_FIRST` 质量优先 | .10 | .10 | .20 | .55 | .05 |
+
+- **设置入口**：控制台「密钥」创建弹窗可选路由策略（留空 = 全局默认）；渠道「逐模型定价」表可填 **质量分** `qualityScore`（0~2，1=正常：官方直连 1.0、可用中转 0.85、疑似降智 0.6）。
+- **故障熔断（模型级）**：Redis 记录 (渠道,模型) 连续失败数 `cf`，达 `CHANNEL_MODEL_FAILURE_THRESHOLD` 进入冷却 `CHANNEL_MODEL_COOLDOWN_MS`（开放期剔除候选，全部冷却则兜底放行）；冷却过期且失败未清 → **半开**（评分 ×0.1 仅作兜底探测），成功即复位。
+- **限流/超限识别**：HTTP 429，或 4xx 错误体命中配额特征（`insufficient_quota` / `quota exceeded` / 日限额文案等）→ 记为「限流」：立即冷却并按连续次数指数退避（`CHANNEL_RATE_LIMIT_BASE_MS` ×2ⁿ，封顶 `CHANNEL_MODEL_COOLDOWN_MAX_MS`），**不累计**渠道 `failureCount`（不会因限流自动禁用），且故障转移到下一家。
+- **每日限额**：渠道可配 `每日调用限额` / `每日 Token 限额`（渠道编辑表单，留空不限；自然日按 UTC+8，可用 `CHANNEL_LIMIT_DAY_OFFSET_HOURS` 调整）。Redis 按 `route:d:<渠道>:<自然日>` 计数，评分前剔除已超限渠道；全部超限时兜底放行。
+- **半开恢复（渠道级）**：`autoDisabled` 渠道满 `CHANNEL_AUTO_REENABLE_MS` 冷却后懒式恢复（`failureCount` 置阈值-1，下一次失败即再禁用），无需定时任务。
+- **会话粘性**：请求头 `x-session-id`（缺省用 `userId + 前 2 条 messages 前缀`）映射到与榜首同 `(tier, priority)` 组内候选，且 `score(偏好) ≥ ROUTING_STICKY_RATIO × score(榜首)` 才前置 —— 保住上游 prompt cache 但不为缓存死抱劣质渠道；`ROUTING_STICKY=false` 关闭。
+- **错误分类**（`gateway.controller.ts`）：5xx/连接失败 → 计渠道失败数 + 指标；限流/超限 → 冷却不计失败；上游 401 → 只降路由分；拒答/内容过滤 → 只降质量分（不伤稳定性、不熔断）；其余客户端 4xx 不做任何渠道判罚。
+- **观测**：`ROUTING_DEBUG=true` 时每次路由打印候选打分与标记（`!` 冷却、`#` 超限、`~` 半开）；控制台「使用统计 → 按渠道」含请求数/错误数/平均延迟/费用，「调用日志」支持按渠道过滤与 CSV 导出。
+
+### 相关环境变量
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `ROUTING_STRATEGY` | `BALANCED` | 全局默认路由策略 |
+| `ROUTING_STICKY` / `ROUTING_STICKY_RATIO` | `true` / `0.8` | 会话粘性开关 / 前置得分比阈值 |
+| `ROUTING_METRICS_WINDOW_MS` / `TTL_MS` / `RETRY_MS` | `600000` / `5000` / `10000` | 指标滑窗 / 快照缓存 / Redis 故障退避 |
+| `ROUTING_DEBUG` | — | 打印评分日志 |
+| `CHANNEL_MODEL_FAILURE_THRESHOLD` / `COOLDOWN_MS` / `COOLDOWN_MAX_MS` | `3` / `60000` / `600000` | 模型级熔断阈值与冷却（上限用于 429 退避封顶） |
+| `CHANNEL_RATE_LIMIT_BASE_MS` | `30000` | 429 首次冷却时长（指数退避基数） |
+| `CHANNEL_FAILURE_THRESHOLD` / `CHANNEL_AUTO_REENABLE_MS` | `5` / `900000` | 渠道级失败禁用阈值 / 自动禁用冷却 |
+| `CHANNEL_LIMIT_DAY_OFFSET_HOURS` | `8` | 每日限额的自然日分界（UTC+8） |
 
 ## 安全说明
 

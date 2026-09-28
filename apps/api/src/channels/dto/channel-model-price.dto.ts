@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
   MinLength,
@@ -70,6 +71,13 @@ export class ChannelModelPriceDto {
   @IsInt()
   @Min(1)
   weight?: number;
+
+  /** L1 人工质量分 0~2（1=正常）：官方直连 1.0、可用中转 0.85、疑似降智 0.6，参与智能路由评分 */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(2)
+  qualityScore?: number;
 }
 
 export class ModelPricesField {

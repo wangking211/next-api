@@ -55,6 +55,18 @@ export class CreateChannelDto {
   @Min(0)
   priority?: number;
 
+  /** 每日调用限额（自然日，0/留空 = 不限）；超限后智能路由排除该渠道 */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  dailyRequestLimit?: number | null;
+
+  /** 每日 token 限额（prompt+completion，0/留空 = 不限） */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  dailyTokenLimit?: number | null;
+
   /** 逐模型定价（成本/售价/折扣），同模型可跨渠道各异 */
   @IsOptional()
   @IsArray()
