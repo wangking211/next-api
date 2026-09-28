@@ -75,7 +75,11 @@ function makeService(
 ) {
   const prisma = {
     channelModel: { findMany: jest.fn().mockResolvedValue(rows) },
-    modelCatalog: { findUnique: jest.fn().mockResolvedValue(null) },
+    modelCatalog: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     channel: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   };
   const crypto = {
@@ -284,5 +288,117 @@ describe('ChannelResolverService', () => {
       'cheap',
       'pricey',
     ]);
+  });
+
+  it('resolves aliases to the canonical model name', async () => {
+    const { service, prisma } = makeService([]);
+    prisma.modelCatalog.findFirst.mockResolvedValue({ name: 'gpt-5.1' });
+    await expect(service.resolveAlias('gpt-5')).resolves.toBe('gpt-5.1');
+    const arg = prisma.modelCatalog.findFirst.mock.calls[0][0];
+    expect(arg.where.OR[0]).toEqual({ name: 'gpt-5' });
+    expect(arg.where.OR[1]).toEqual({ aliases: { has: 'gpt-5' } });
+  });
+
+  it('strips the :latest suffix and re-resolves the base name', async () => {
+    const { service, prisma } = makeService([]);
+    // 第一次查 `gpt-5:latest` 无命中，第二次查 `gpt-5` 命中别名 → 规范名
+    prisma.modelCatalog.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ name: 'gpt-5.1' });
+    await expect(service.resolveAlias('gpt-5:latest')).resolves.toBe('gpt-5.1');
+  });
+
+  it('falls back to stripping :latest when the catalog has no match', async () => {
+    const { service } = makeService([]);
+    await expect(service.resolveAlias('unknown:latest')).resolves.toBe('unknown');
+  });
+
+  it('returns unknown model names unchanged', async () => {
+    const { service } = makeService([]);
+    await expect(service.resolveAlias('mystery-model')).resolves.toBe('mystery-model');
+  });
+
+  describe('allowedModelSet / isModelAllowed', () => {
+    it('returns null for an empty whitelist (no restriction)', async () => {
+      const { service, prisma } = makeService([]);
+      await expect(service.allowedModelSet([])).resolves.toBeNull();
+      expect(prisma.modelCatalog.findMany).not.toHaveBeenCalled();
+    });
+
+    it('normalizes catalog hits to canonical names in one batch query', async () => {
+      const { service, prisma } = makeService([]);
+      prisma.modelCatalog.findMany.mockResolvedValue([
+        { name: 'gpt-5.1', aliases: ['gpt-5'] },
+      ]);
+      const set = await service.allowedModelSet(['gpt-5', 'unknown-model']);
+      expect(set).toEqual(new Set(['gpt-5.1', 'unknown-model']));
+      const arg = prisma.modelCatalog.findMany.mock.calls[0][0];
+      expect(arg.where.OR).toEqual([
+        { name: { in: ['gpt-5', 'unknown-model'] } },
+        { aliases: { hasSome: ['gpt-5', 'unknown-model'] } },
+      ]);
+    });
+
+    it('strips :latest from whitelist entries', async () => {
+      const { service, prisma } = makeService([]);
+      prisma.modelCatalog.findMany.mockResolvedValue([]);
+      const set = await service.allowedModelSet(['gpt-5:latest']);
+      expect(set).toEqual(new Set(['gpt-5']));
+    });
+
+    it('degrades to literal matching when the catalog query fails', async () => {
+      const { service, prisma } = makeService([]);
+      prisma.modelCatalog.findMany.mockRejectedValue(new Error('db down'));
+      const set = await service.allowedModelSet(['gpt-4o']);
+      expect(set).toEqual(new Set(['gpt-4o']));
+    });
+
+    it('allows any model when the whitelist is empty', async () => {
+      const { service } = makeService([]);
+      await expect(service.isModelAllowed('anything', [])).resolves.toBe(true);
+    });
+
+    it('allows via the zero-query literal fast path (stripped :latest)', async () => {
+      const { service, prisma } = makeService([]);
+      prisma.modelCatalog.findMany.mockResolvedValue([]);
+      await expect(service.isModelAllowed('gpt-4o:latest', ['gpt-4o'])).resolves.toBe(true);
+      expect(prisma.modelCatalog.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('falls back to alias resolution when the literal path misses', async () => {
+      const { service, prisma } = makeService([]);
+      prisma.modelCatalog.findMany.mockResolvedValue([
+        { name: 'claude-sonnet-4-5', aliases: ['sonnet'] },
+      ]);
+      prisma.modelCatalog.findFirst.mockResolvedValue({ name: 'claude-sonnet-4-5' });
+      // 请求用别名、白名单存规范名 → 字面未命中 → 走 resolveAlias（findFirst）
+      await expect(service.isModelAllowed('sonnet', ['claude-sonnet-4-5'])).resolves.toBe(true);
+      expect(prisma.modelCatalog.findFirst).toHaveBeenCalled();
+    });
+
+    it('hits the fast path when the whitelist alias normalizes to the requested canonical name', async () => {
+      const { service, prisma } = makeService([]);
+      prisma.modelCatalog.findMany.mockResolvedValue([
+        { name: 'claude-sonnet-4-5', aliases: ['sonnet'] },
+      ]);
+      // 白名单 [sonnet] 归一为 claude-sonnet-4-5，与请求规范名字面一致 → 0 次 findFirst
+      await expect(
+        service.isModelAllowed('claude-sonnet-4-5', ['sonnet']),
+      ).resolves.toBe(true);
+      expect(prisma.modelCatalog.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('rejects a model outside the whitelist', async () => {
+      const { service, prisma } = makeService([]);
+      prisma.modelCatalog.findMany.mockResolvedValue([]);
+      prisma.modelCatalog.findFirst.mockResolvedValue(null);
+      await expect(service.isModelAllowed('o3-mini', ['gpt-4o'])).resolves.toBe(false);
+    });
+
+    it('treats a missing requested model as allowed', async () => {
+      const { service, prisma } = makeService([]);
+      prisma.modelCatalog.findMany.mockResolvedValue([]);
+      await expect(service.isModelAllowed('', ['gpt-4o'])).resolves.toBe(true);
+    });
   });
 });

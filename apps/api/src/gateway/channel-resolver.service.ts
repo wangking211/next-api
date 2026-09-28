@@ -245,6 +245,88 @@ export class ChannelResolverService {
     });
   }
 
+  /**
+   * 模型别名解析：目录 aliases 命中 → 规范名；`X:latest` → X（X 自身为别名时继续解析）；
+   * 无命中原样返回。目录查询失败时降级为仅剥 `:latest` 后缀。
+   */
+  async resolveAlias(model: string): Promise<string> {
+    if (!model) return model;
+    const lookup = (name: string) =>
+      this.prisma.modelCatalog
+        .findFirst({
+          where: { OR: [{ name }, { aliases: { has: name } }] },
+          select: { name: true },
+        })
+        .catch(() => null);
+    const direct = await lookup(model);
+    if (direct) return direct.name;
+    if (model.endsWith(':latest')) {
+      const base = model.slice(0, -':latest'.length);
+      const viaBase = await lookup(base);
+      if (viaBase) return viaBase.name;
+      return base;
+    }
+    return model;
+  }
+
+  /** 批量取目录元数据（provider / capabilities / aliases），供 /v1/models 输出能力字段 */
+  async catalogFor(
+    names: string[],
+  ): Promise<
+    Map<string, { name: string; provider: string; capabilities: string[]; aliases: string[] }>
+  > {
+    if (!names.length) return new Map();
+    const rows = await this.prisma.modelCatalog.findMany({
+      where: { name: { in: names } },
+      select: { name: true, provider: true, capabilities: true, aliases: true },
+    });
+    return new Map(rows.map((r) => [r.name, r]));
+  }
+
+  /**
+   * 白名单 → 规范名集合。空/全无效返回 null（不限制）。
+   * 批量查询：`name in entries OR aliases hasSome entries`（1 次 findMany）；
+   * 命中目录的条目归一为规范名，未命中的（含 DB 故障降级）原样保留（剥 `:latest`）。
+   */
+  async allowedModelSet(whitelist: string[]): Promise<Set<string> | null> {
+    const entries = (whitelist ?? [])
+      .map((m) => (typeof m === 'string' && m.endsWith(':latest') ? m.slice(0, -':latest'.length) : m))
+      .map((m) => m.trim())
+      .filter(Boolean);
+    if (!entries.length) return null;
+    const uniq = [...new Set(entries)];
+    let rows: { name: string; aliases: string[] }[] = [];
+    try {
+      rows = await this.prisma.modelCatalog.findMany({
+        where: { OR: [{ name: { in: uniq } }, { aliases: { hasSome: uniq } }] },
+        select: { name: true, aliases: true },
+      });
+    } catch {
+      rows = []; // 目录查询失败降级为字面比对
+    }
+    const out = new Set<string>();
+    for (const entry of uniq) {
+      const row = rows.find((r) => r.name === entry || r.aliases.includes(entry));
+      out.add(row ? row.name : entry);
+    }
+    return out;
+  }
+
+  /**
+   * Key 模型白名单判定。白名单为空 → true（不限制）。
+   * 字面快速路径（剥 `:latest` 后命中）→ 0 查询；否则 resolveAlias 规范名 + 白名单规范集比对。
+   * 判定依据：请求名（规范形式）∈ 白名单（规范形式）；两者均可含别名。
+   */
+  async isModelAllowed(requested: string, whitelist: string[]): Promise<boolean> {
+    const set = await this.allowedModelSet(whitelist);
+    if (!set) return true; // 无白名单限制
+    if (!requested) return true; // 未带 model（如 GET /v1/models）交由控制器/后续校验
+    const strip = (m: string) => (m.endsWith(':latest') ? m.slice(0, -':latest'.length) : m);
+    if (set.has(strip(requested))) return true; // 字面命中（0 额外查询，已含剥 :latest 的快速路径）
+    const canonical = await this.resolveAlias(requested);
+    return set.has(strip(canonical));
+  }
+
   /** 汇总用户当前可实际调用的模型（自有+平台启用渠道所支持的模型） */
   async availableModels(userId: string): Promise<string[]> {
     const rows = await this.prisma.channelModel.findMany({
