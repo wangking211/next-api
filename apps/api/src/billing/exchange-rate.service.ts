@@ -11,7 +11,7 @@ const MEMO_MS = 60_000;
 /**
  * 美元兑人民币汇率（在线充值用）。
  * 取值优先级：`PAY_CNY_PER_USD` 固定值 > Redis 缓存 > 实时汇率接口 > 上次已知值（接口故障兜底）。
- * 实时接口默认 ECB 参考汇率（Frankfurter，无需密钥），可用 `PAY_RATE_API_URL` 替换。
+ * 实时接口默认 exchangerate-api 免费端点（无需密钥），可用 `PAY_RATE_API_URL` 替换为任意返回 `rates.CNY` 的接口。
  */
 @Injectable()
 export class ExchangeRateService {
@@ -69,7 +69,7 @@ export class ExchangeRateService {
   private async fetchLive(): Promise<number> {
     const url =
       this.config.get<string>('PAY_RATE_API_URL', '') ||
-      'https://api.frankfurter.app/latest?from=USD&to=CNY';
+      'https://open.er-api.com/v6/latest/USD';
     const timeout = Number(this.config.get<string>('PAY_RATE_TIMEOUT_MS', '5000')) || 5000;
     const ttl = Number(this.config.get<string>('PAY_RATE_TTL_MS', '')) || 6 * 3600 * 1000;
 

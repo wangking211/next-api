@@ -162,7 +162,7 @@ curl http://localhost:3000/v1/chat/completions \
 | `JAIPAY_BASE_URL` | `https://pay.zxixing.com` | 网关地址 |
 | `JAIPAY_NOTIFY_URL` / `JAIPAY_RETURN_URL` | `https://xiaopuyun.com/api/pay/jai/notify` / `…/billing` | 异步通知与同步跳转地址 |
 | `PAY_CNY_PER_USD` | 留空 | 充值汇率（1 美元 = N 元）：**留空自动获取实时汇率**，填写数字则固定（覆盖实时值） |
-| `PAY_RATE_API_URL` / `PAY_RATE_TTL_MS` / `PAY_RATE_TIMEOUT_MS` | Frankfurter(ECB) / `21600000` / `5000` | 实时汇率接口（JSON 含 `rates.CNY`）/ 成功缓存时长 / 超时 |
+| `PAY_RATE_API_URL` / `PAY_RATE_TTL_MS` / `PAY_RATE_TIMEOUT_MS` | `https://open.er-api.com/v6/latest/USD` / `21600000` / `5000` | 实时汇率接口（任意返回 JSON `rates.CNY` 的地址，可换 Frankfurter/ECB）/ 成功缓存时长 / 超时 |
 | `CREDITS_PER_USD` | `100` | 1 美元 = N 积分；`充值积分 = 元 ÷ 汇率 × CREDITS_PER_USD` |
 
 > 汇率取值优先级：`PAY_CNY_PER_USD` 固定值 → Redis 缓存 → 实时接口 → **上次已知值**（接口故障时兜底）；全部失败时下单接口明确报错、前端提示稍后重试，不会用错误汇率成交。汇率结果同时通过 `/api/config`（`payRate` / `creditsPerCny`）暴露给前端展示。
