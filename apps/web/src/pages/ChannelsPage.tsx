@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import {
-  Alert,
   App,
   Button,
   Card,
@@ -8,164 +7,23 @@ import {
   Input,
   InputNumber,
   Modal,
-  Popconfirm,
   Select,
   Space,
   Table,
-  Tag,
-  Tooltip,
   Typography,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { channelsApi, modelsApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { usePageClamp } from '../hooks/usePageClamp';
-import { getCreditsPerUsd } from '../utils/format';
-import type { ChannelInfo, ChannelTestResult, ModelInfo } from '../api/types';
-
-type PriceRow = {
-  costDiscount?: number;
-  priceDiscount?: number;
-};
-
-type SetPrice = (model: string, key: keyof PriceRow, value: number | null) => void;
-
-/** 渠道×模型 折扣编辑表；右侧实时显示按官方价折算的成本/售价（积分/1M） */
-function PricingTable({
-  models,
-  pricing,
-  setP,
-  catalog,
-}: {
-  models: string[];
-  pricing: Record<string, PriceRow>;
-  setP: SetPrice;
-  catalog: ModelInfo[];
-}) {
-  const official = (name: string) => {
-    const m = catalog.find((c) => c.name === name);
-    return m ? { in: Number(m.inputPrice), out: Number(m.outputPrice) } : { in: 0, out: 0 };
-  };
-  const disc = (model: string, key: keyof PriceRow) => pricing[model]?.[key] ?? 1;
-  const credits = (usdPerM: number, d: number) =>
-    (usdPerM * d * getCreditsPerUsd()).toFixed(2);
-  const num = (model: string, key: keyof PriceRow) => (
-    <InputNumber
-      size="small"
-      min={0}
-      max={1}
-      step={0.05}
-      style={{ width: 84 }}
-      value={pricing[model]?.[key]}
-      placeholder="1"
-      onChange={(v) => setP(model, key, v as number)}
-    />
-  );
-  return (
-    <Table
-      size="small"
-      rowKey="model"
-      pagination={false}
-      scroll={{ y: 260, x: 620 }}
-      style={{ marginTop: 6 }}
-      dataSource={models.map((m) => ({ model: m }))}
-      columns={[
-        { title: '模型', dataIndex: 'model', width: 150, ellipsis: true },
-        { title: '上游折扣', width: 100, render: (_: unknown, r: { model: string }) => num(r.model, 'costDiscount') },
-        { title: '下游折扣', width: 100, render: (_: unknown, r: { model: string }) => num(r.model, 'priceDiscount') },
-        {
-          title: '成本(积分/1M)',
-          width: 150,
-          render: (_: unknown, r: { model: string }) => {
-            const o = official(r.model);
-            const d = disc(r.model, 'costDiscount');
-            return <Typography.Text type="secondary">{credits(o.in, d)} / {credits(o.out, d)}</Typography.Text>;
-          },
-        },
-        {
-          title: '售价(积分/1M)',
-          width: 150,
-          render: (_: unknown, r: { model: string }) => {
-            const o = official(r.model);
-            const d = disc(r.model, 'priceDiscount');
-            return <Typography.Text strong>{credits(o.in, d)} / {credits(o.out, d)}</Typography.Text>;
-          },
-        },
-      ]}
-    />
-  );
-}
-
-const PROVIDERS = [
-  { value: 'openai', label: 'OpenAI', placeholder: 'https://api.openai.com/v1' },
-  { value: 'anthropic', label: 'Anthropic', placeholder: 'https://api.anthropic.com/v1' },
-  { value: 'gemini', label: 'Google Gemini', placeholder: 'https://generativelanguage.googleapis.com/v1beta' },
-  { value: 'deepseek', label: 'DeepSeek', placeholder: 'https://api.deepseek.com/v1' },
-  { value: 'moonshot', label: 'Moonshot', placeholder: 'https://api.moonshot.cn/v1' },
-  { value: 'qwen', label: 'Qwen (DashScope)', placeholder: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
-  { value: 'zhipu', label: '智谱 GLM', placeholder: 'https://open.bigmodel.cn/api/paas/v4' },
-  { value: 'custom', label: '自定义 (OpenAI 兼容)', placeholder: 'https://your-endpoint/v1' },
-];
-
-interface Filters {
-  name?: string;
-  provider?: string;
-  status?: string;
-  ownerType?: string;
-  model?: string;
-}
-
-function TestResults({ result }: { result: ChannelTestResult }) {
-  const { summary } = result;
-  const tone = summary.failed === 0 ? 'green' : summary.ok === 0 ? 'red' : 'orange';
-  return (
-    <Space direction="vertical" size={10} style={{ width: '100%' }}>
-      <Tag color={tone}>
-        通过 {summary.ok}/{summary.total}
-      </Tag>
-      {result.results.map((r) => (
-        <div key={r.model} style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
-          <Space wrap>
-            <Typography.Text code>{r.model}</Typography.Text>
-            {r.ok ? (
-              <Tag color="green">
-                成功 · HTTP {r.status} · {r.latencyMs}ms
-              </Tag>
-            ) : (
-              <Tag color="red">
-                失败{r.status ? ` · HTTP ${r.status}` : ''} · {r.latencyMs}ms
-              </Tag>
-            )}
-          </Space>
-          {r.ok && r.sample ? (
-            <div style={{ marginTop: 4, color: '#888', fontSize: 12 }}>示例：{r.sample}</div>
-          ) : null}
-          {!r.ok && r.error ? (
-            <Alert
-              style={{ marginTop: 6 }}
-              type="error"
-              showIcon
-              message={r.error}
-              description={
-                r.detail && r.detail !== r.error ? (
-                  <Typography.Paragraph
-                    code
-                    copyable
-                    style={{ whiteSpace: 'pre-wrap', marginBottom: 0, maxHeight: 140, overflow: 'auto' }}
-                  >
-                    {r.detail}
-                  </Typography.Paragraph>
-                ) : undefined
-              }
-            />
-          ) : null}
-        </div>
-      ))}
-    </Space>
-  );
-}
+import type { ChannelInfo, ChannelTestResult } from '../api/types';
+import { PROVIDERS, type Filters, type PriceRow } from './channels/constants';
+import { PricingTable } from './channels/PricingTable';
+import { TestResults } from './channels/TestResults';
+import { ChannelFilterForm } from './channels/ChannelFilterForm';
+import { buildChannelColumns } from './channels/ChannelTableColumns';
 
 export default function ChannelsPage() {
   const { message } = App.useApp();
@@ -384,66 +242,14 @@ export default function ChannelsPage() {
         </Button>
       }
     >
-      <Form
-        layout="inline"
-        style={{ marginBottom: 16, rowGap: 8 }}
-        onFinish={(v: Filters) => applyFilters(v)}
-      >
-        <Form.Item name="name">
-          <Input allowClear placeholder="渠道名称" style={{ width: 150 }} />
-        </Form.Item>
-        <Form.Item name="provider">
-          <Select
-            allowClear
-            placeholder="服务商"
-            style={{ width: 150 }}
-            options={PROVIDERS.map((p) => ({ value: p.value, label: p.label }))}
-          />
-        </Form.Item>
-        <Form.Item name="model">
-          <Input allowClear placeholder="模型名" style={{ width: 150 }} />
-        </Form.Item>
-        <Form.Item name="status">
-          <Select
-            allowClear
-            placeholder="状态"
-            style={{ width: 120 }}
-            options={[
-              { value: 'ENABLED', label: '启用' },
-              { value: 'DISABLED', label: '停用' },
-            ]}
-          />
-        </Form.Item>
-        {isAdmin && (
-          <Form.Item name="ownerType">
-            <Select
-              allowClear
-              placeholder="归属"
-              style={{ width: 120 }}
-              options={[
-                { value: 'PLATFORM', label: '平台' },
-                { value: 'USER', label: '用户' },
-              ]}
-            />
-          </Form.Item>
-        )}
-        <Form.Item>
-          <Space>
-            <Button type="primary" htmlType="submit">
-              查询
-            </Button>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => {
-                form.resetFields();
-                applyFilters({});
-              }}
-            >
-              重置
-            </Button>
-          </Space>
-        </Form.Item>
-      </Form>
+      <ChannelFilterForm
+        isAdmin={isAdmin}
+        onSearch={applyFilters}
+        onReset={() => {
+          form.resetFields();
+          applyFilters({});
+        }}
+      />
 
       <Table<ChannelInfo>
         rowKey="id"
@@ -461,113 +267,21 @@ export default function ChannelsPage() {
             setPageSize(ps);
           },
         }}
-        columns={[
-          { title: '名称', dataIndex: 'name' },
-          {
-            title: '归属',
-            dataIndex: 'ownerType',
-            render: (v: string) =>
-              v === 'PLATFORM' ? <Tag color="gold">平台</Tag> : <Tag color="blue">我的</Tag>,
+        columns={buildChannelColumns({
+          testingId,
+          onTest: (r) => {
+            setTestPick(r);
+            setPickModels(r.models);
           },
-          { title: '服务商', dataIndex: 'provider' },
-          { title: 'Base URL', dataIndex: 'baseUrl', ellipsis: true },
-          {
-            title: '模型',
-            dataIndex: 'models',
-            render: (models: string[]) => (
-              <Space size={[0, 4]} wrap>
-                {models.slice(0, 4).map((m) => (
-                  <Tag key={m}>{m}</Tag>
-                ))}
-                {models.length > 4 && <Tag>+{models.length - 4}</Tag>}
-              </Space>
-            ),
-          },
-          { title: '优先级', dataIndex: 'priority' },
-          { title: '权重', dataIndex: 'weight' },
-          {
-            title: 'Key',
-            dataIndex: 'apiKeyPreview',
-            render: (v: string) => <code>{v}</code>,
-          },
-          {
-            title: '状态',
-            dataIndex: 'status',
-            render: (v: string, r) =>
-              v === 'ENABLED' ? (
-                <Tag color="green">启用</Tag>
-              ) : r.autoDisabled ? (
-                <Tooltip title={r.lastErrorMsg ?? '因连续失败自动禁用'}>
-                  <Tag color="red">自动禁用</Tag>
-                </Tooltip>
-              ) : (
-                <Tag color="default">停用</Tag>
-              ),
-          },
-          {
-            title: '价格 / 折扣',
-            render: (_: unknown, r: ChannelInfo) => {
-              const rows = r.modelPrices ?? [];
-              const priced = rows.filter(
-                (m) => m.priceInput != null || m.priceOutput != null,
-              ).length;
-              const discounts = rows
-                .map((m) => m.discount)
-                .filter((d): d is number => d != null);
-              return (
-                <Space size={4} wrap>
-                  {priced ? (
-                    <Tag color="blue">{priced} 个售价</Tag>
-                  ) : (
-                    <Typography.Text type="secondary">默认价</Typography.Text>
-                  )}
-                  {discounts.length > 0 && (
-                    <Tag color="orange">折扣 {Math.min(...discounts)}</Tag>
-                  )}
-                </Space>
-              );
-            },
-          },
-          {
-            title: '操作',
-            fixed: 'right',
-            width: 340,
-            render: (_, r) => (
-              <Space>
-                <Button
-                  size="small"
-                  loading={testingId === r.id}
-                  onClick={() => {
-                    setTestPick(r);
-                    setPickModels(r.models);
-                  }}
-                >
-                  测试
-                </Button>
-                <Button size="small" onClick={() => openPricing(r)}>
-                  定价
-                </Button>
-                <Button size="small" onClick={() => openEdit(r)}>
-                  编辑
-                </Button>
-                {r.status === 'ENABLED' ? (
-                  <Button size="small" onClick={() => updateMut.mutate({ id: r.id, status: 'DISABLED' })}>
-                    停用
-                  </Button>
-                ) : (
-                  <Button size="small" onClick={() => updateMut.mutate({ id: r.id, status: 'ENABLED' })}>
-                    启用
-                  </Button>
-                )}
-                <Popconfirm title="确定删除该渠道？" onConfirm={() => removeMut.mutate(r.id)}>
-                  <Button size="small" danger>
-                    删除
-                  </Button>
-                </Popconfirm>
-              </Space>
-            ),
-          },
-        ]}
+          onPricing: openPricing,
+          onEdit: openEdit,
+          onToggle: (r) =>
+            updateMut.mutate({
+              id: r.id,
+              status: r.status === 'ENABLED' ? 'DISABLED' : 'ENABLED',
+            }),
+          onRemove: (id) => removeMut.mutate(id),
+        })}
       />
 
       <Modal
