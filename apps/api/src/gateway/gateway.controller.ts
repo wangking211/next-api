@@ -217,6 +217,20 @@ export class GatewayController {
     return this.executeEmbeddings(req, res, body);
   }
 
+  /** OpenAI 兼容图片生成：按次计费（未配置按次价则回退 token 计价） */
+  @ApiOperation({
+    summary: 'OpenAI 兼容图片生成（/images/generations，按次计费，支持故障转移）',
+  })
+  @Post('images/generations')
+  @HttpCode(200)
+  async imagesGenerations(
+    @Req() req: GatewayRequest,
+    @Res() res: Response,
+    @Body() body: Record<string, any>,
+  ) {
+    return this.executeImages(req, res, body);
+  }
+
   private async executeChat(
     req: GatewayRequest,
     res: Response,
@@ -780,8 +794,214 @@ export class GatewayController {
   }
 
   /**
-   * 会话粘性键：显式 x-session-id 优先（前端可传会话 ID），否则用 用户 + prompt 前缀。
-   * 同键请求倾向落同一渠道，保住上游 prompt cache；跨会话/跨请求则自然分散。
+   * 图片生成执行：与 embeddings 同构（别名→能力→路由→预授权→故障转移→计费/健康/指标）。
+   * 计费：配置了按次价（目录 perCallPrice / 渠道 pricePerCall）则按次计费（×张数 ×倍率）；
+   * 否则回退 token 计价（如 gpt-image 系列上游返回 usage）。
+   */
+  private async executeImages(
+    req: GatewayRequest,
+    res: Response,
+    body: Record<string, any>,
+  ) {
+    const err = (
+      message: string,
+      type = 'invalid_request_error',
+      code: string | null = null,
+    ) => openaiError(message, type, code);
+    const { user, apiKey } = req.gateway;
+    const requested: string | undefined = body?.model;
+    if (!requested) {
+      return res.status(400).json(err('Missing required field: model'));
+    }
+    const prompt = body?.prompt;
+    if (typeof prompt !== 'string' || !prompt.trim()) {
+      return res
+        .status(400)
+        .json(err('Missing required field: prompt (non-empty string)'));
+    }
+    const n = Math.max(1, Math.min(Math.floor(Number(body?.n ?? 1) || 1), 10));
+
+    const model = await this.resolver.resolveAlias(requested);
+    // 生效分组：决定可见模型、渠道隔离与分组倍率
+    const group = await this.groups.effectiveGroup(user.id, apiKey.groupId);
+    if (!this.groups.isModelVisible(group, model)) {
+      return res
+        .status(404)
+        .json(
+          err(
+            `No available channel for model "${model}". Configure a channel that serves this model.`,
+            'model_not_found',
+            'model_not_found',
+          ),
+        );
+    }
+    const billingInfo = await this.billing.getBillingMultiplier(user.id, group.ratio);
+    if (!(await this.checkCapabilities(model, body, res, err))) return;
+
+    const channels = await this.resolver.resolve(user.id, model, {
+      strategy: apiKey.routingStrategy,
+      stickyKey: this.buildStickyKey(req, user.id, body),
+      groupId: group.id,
+    });
+    if (channels.length === 0) {
+      return res
+        .status(404)
+        .json(
+          err(
+            `No available channel for model "${model}". Configure a channel that serves this model.`,
+            'model_not_found',
+            'model_not_found',
+          ),
+        );
+    }
+
+    const startedAt = Date.now();
+    const requestPreview = prompt.slice(0, 500);
+    let lastError: UpstreamError | null = null;
+    let unsupported = false; // 有候选但服务商未实现图片生成
+    let insufficientBalance = false;
+    const guards = this.balanceGuards(user.id, billingInfo.value);
+
+    const upstreamAbort = new AbortController();
+    let clientClosed = false;
+    res.on('close', () => {
+      clientClosed = true;
+      upstreamAbort.abort();
+    });
+
+    for (let i = 0; i < channels.length; i++) {
+      const { channel, apiKey: upstreamKey, upstreamModelName } = channels[i];
+      // 模型映射：对外规范名 → 上游真实名
+      const upstreamModel = upstreamModelName ?? model;
+      const upstreamBody =
+        upstreamModel === model ? body : { ...body, model: upstreamModel };
+      const provider = this.providers.resolve(channel.provider);
+      if (typeof provider.imagesGenerate !== 'function') {
+        unsupported = true;
+        continue;
+      }
+      const pricing = await this.billing.getChannelPricing(channel.id, model);
+      const pricePerCall = pricing.pricePerCall;
+      const costPerCall = pricing.costPerCall;
+      // 预授权：按次价 × 张数 × 倍率（未配置按次价时不做按次预授权）
+      if (
+        channel.ownerType === ChannelOwnerType.PLATFORM &&
+        pricePerCall > 0
+      ) {
+        const required = pricePerCall * n * billingInfo.value;
+        if ((await guards.getBalance()) < required) {
+          insufficientBalance = true;
+          continue;
+        }
+      }
+      const attemptStart = Date.now();
+      try {
+        const result = await provider.imagesGenerate(channel, upstreamKey, {
+          model: upstreamModel,
+          body: upstreamBody,
+          signal: upstreamAbort.signal,
+        });
+        const perCall = pricePerCall > 0;
+        const usage = result.usage ?? {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+        };
+        const images = Array.isArray(result.json?.data)
+          ? result.json.data.length
+          : n;
+        // 计费/健康度/路由指标互不依赖 → 并行落地
+        await Promise.all([
+          this.usage.record({
+            userId: user.id,
+            apiKeyId: apiKey.id,
+            channelId: channel.id,
+            model,
+            provider: channel.provider,
+            ...usage,
+            latencyMs: Date.now() - startedAt,
+            status: result.status,
+            chargeable: channel.ownerType === ChannelOwnerType.PLATFORM,
+            isStream: false,
+            requestPreview,
+            responsePreview: `[images ${images}]`,
+            multiplier: billingInfo.value,
+            multiplierSource: billingInfo.source,
+            ...(perCall
+              ? {
+                  costOverride: pricePerCall * n * billingInfo.value,
+                  upstreamCostOverride: costPerCall * n,
+                }
+              : {}),
+          }),
+          this.health.recordSuccess(channel.id),
+          this.metrics.record(channel.id, model, 'ok', {
+            latencyMs: Date.now() - attemptStart,
+            status: result.status,
+            totalTokens: usage.totalTokens,
+          }),
+        ]);
+        return res.status(result.status).json(result.json);
+      } catch (e) {
+        // 客户端已断开：中止是本端触发的，不计渠道失败、不再故障转移
+        if (clientClosed) return;
+        if (e instanceof UpstreamError) {
+          lastError = e;
+          const action = await this.handleUpstreamFailure(e, {
+            res,
+            channel,
+            model,
+            attemptStart,
+            startedAt,
+            userId: user.id,
+            apiKeyId: apiKey.id,
+            requestPreview,
+            isStream: false,
+            hasMore: i < channels.length - 1,
+            errorBody: err,
+          });
+          if (action === 'continue') continue;
+          return;
+        }
+        throw e;
+      }
+    }
+
+    if (insufficientBalance) {
+      return res
+        .status(403)
+        .json(
+          err(
+            'Insufficient balance. Please top up or configure a BYOK channel.',
+            'insufficient_quota',
+            'insufficient_balance',
+          ),
+        );
+    }
+    if (unsupported && !lastError) {
+      return res
+        .status(501)
+        .json(
+          err(
+            `Model "${model}": no upstream with image generation support among available channels ` +
+              '(/v1/images/generations is forwarded to openai-compatible providers only).',
+            'invalid_request_error',
+            'images_not_supported',
+          ),
+        );
+    }
+    return res
+      .status(lastError?.status ?? 502)
+      .json(
+        err(
+          lastError ? upstreamErrorMessage(lastError) : 'All channels failed',
+          'upstream_error',
+        ),
+      );
+  }
+
+  /**
+   * 会话粘性键：显式 x-session-id 优先（前端可传会话 ID），否则用 用户 + prompt 前缀。   * 同键请求倾向落同一渠道，保住上游 prompt cache；跨会话/跨请求则自然分散。
    */
   private buildStickyKey(
     req: GatewayRequest,

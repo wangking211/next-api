@@ -62,6 +62,12 @@ export class UpdateModelDto {
   @IsEnum(ModelOrigin)
   origin?: ModelOrigin;
 
+  /** 按次售价（USD/次）：图片等非 token 计费模型；null 清除 */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  perCallPrice?: number | null;
+
   /** 厂商规范名 */
   @IsOptional()
   @IsString()

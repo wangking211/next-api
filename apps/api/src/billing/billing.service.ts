@@ -20,6 +20,9 @@ export interface ChannelPricing {
   cacheWritePrice: number;
   cacheReadCost: number;
   cacheWriteCost: number;
+  /** 按次售价/成本（USD/次）：图片等非 token 计费模型 */
+  pricePerCall: number;
+  costPerCall: number;
   /** 是否来自渠道×模型显式定价（否则为目录默认价） */
   explicit: boolean;
 }
@@ -59,6 +62,8 @@ export class BillingService {
               discount: true,
               costDiscount: true,
               priceDiscount: true,
+              pricePerCall: true,
+              costPerCall: true,
             },
           })
         : Promise.resolve(null),
@@ -69,6 +74,7 @@ export class BillingService {
           outputPrice: true,
           cacheReadPrice: true,
           cacheWritePrice: true,
+          perCallPrice: true,
         },
       }),
     ]);
@@ -77,6 +83,8 @@ export class BillingService {
     const officialOut = catalog ? Number(catalog.outputPrice) : 0;
     const officialCacheRead = catalog ? Number(catalog.cacheReadPrice) : 0;
     const officialCacheWrite = catalog ? Number(catalog.cacheWritePrice) : 0;
+    const officialPerCall =
+      catalog?.perCallPrice != null ? Number(catalog.perCallPrice) : 0;
     // 兼容旧 discount：仅作为下游售价折扣
     const priceDisc =
       cm?.priceDiscount != null
@@ -94,6 +102,10 @@ export class BillingService {
       cm?.costInput != null ? Number(cm.costInput) : officialIn * costDisc;
     const costOutput =
       cm?.costOutput != null ? Number(cm.costOutput) : officialOut * costDisc;
+    const pricePerCall =
+      cm?.pricePerCall != null ? Number(cm.pricePerCall) : officialPerCall * priceDisc;
+    const costPerCall =
+      cm?.costPerCall != null ? Number(cm.costPerCall) : officialPerCall * costDisc;
 
     return {
       priceInput,
@@ -104,21 +116,25 @@ export class BillingService {
       cacheWritePrice: officialCacheWrite * priceDisc,
       cacheReadCost: officialCacheRead * costDisc,
       cacheWriteCost: officialCacheWrite * costDisc,
+      pricePerCall,
+      costPerCall,
       explicit:
         cm?.priceInput != null ||
         cm?.priceOutput != null ||
         cm?.costInput != null ||
         cm?.costOutput != null ||
+        cm?.pricePerCall != null ||
+        cm?.costPerCall != null ||
         cm?.costDiscount != null ||
         cm?.priceDiscount != null ||
         cm?.discount != null,
     };
   }
 
-  /** 该模型在渠道下是否为 0 价（免费，无需余额） */
+  /** 该模型在渠道下是否为 0 价（免费，无需余额）；按次模型以按次价为准 */
   async isFree(channelId: string | null, model: string): Promise<boolean> {
     const p = await this.getChannelPricing(channelId, model);
-    return p.priceInput === 0 && p.priceOutput === 0;
+    return p.priceInput === 0 && p.priceOutput === 0 && p.pricePerCall === 0;
   }
 
   /** 用户的有效售价倍率 = 用户倍率 > 所属代理倍率 > 1（作用在渠道价之上） */

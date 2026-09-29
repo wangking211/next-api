@@ -53,6 +53,15 @@ export class OpenAiCompatibleProvider implements Provider {
     return this.postJson(joinUrl(channel.baseUrl, 'embeddings'), apiKey, req);
   }
 
+  async imagesGenerate(
+    channel: Channel,
+    apiKey: string,
+    req: ChatRequest,
+  ): Promise<NonStreamResult> {
+    // OpenAI 兼容 /images/generations：请求体 {model, prompt, n, size, quality, ...}
+    return this.postJson(joinUrl(channel.baseUrl, 'images/generations'), apiKey, req);
+  }
+
   /** 非流式 POST JSON 透传：chat 与 embeddings 共用（连接失败/解析/错误分类语义一致） */
   private async postJson(
     url: string,

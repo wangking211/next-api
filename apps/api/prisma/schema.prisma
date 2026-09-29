@@ -288,6 +288,9 @@ model ChannelModel {
   /// 对用户售价 USD/1M tokens；为空时用 ModelCatalog 默认价 × discount
   priceInput  Decimal? @db.Decimal(18, 6)
   priceOutput Decimal? @db.Decimal(18, 6)
+  /// 按次成本 / 按次售价（USD/次）：图片等非 token 计费模型；为空时回退目录 perCallPrice
+  costPerCall  Decimal? @db.Decimal(18, 6)
+  pricePerCall Decimal? @db.Decimal(18, 6)
   /// 折扣系数（0.8 = 八折），作用于官方价；显式 price 存在时忽略
   discount      Decimal? @db.Decimal(6, 4)
   /// 上游成本折扣率（0.3 = 成本为官方价的 30%）
@@ -320,6 +323,8 @@ model ModelCatalog {
   outputPrice Decimal  @default(0) @db.Decimal(18, 6)
   cacheReadPrice  Decimal @default(0) @db.Decimal(18, 6)
   cacheWritePrice Decimal @default(0) @db.Decimal(18, 6)
+  /// 按次售价（USD/次）：图片等非 token 计费模型；null = 走 token 计价
+  perCallPrice    Decimal? @db.Decimal(18, 6)
   /// 能力标签（vision / tools / reasoning / json_mode 等）；空数组 = 未标注，能力检查放行
   capabilities String[] @default([])
   /// 别名列表：请求这些名字时解析到本模型（name 为规范名）

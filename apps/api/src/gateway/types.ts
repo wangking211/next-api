@@ -88,6 +88,16 @@ export interface Provider {
     apiKey: string,
     req: ChatRequest,
   ): Promise<NonStreamResult>;
+  /**
+   * 可选：`POST /v1/images/generations` 图片生成透传（OpenAI 兼容协议）。
+   * 与 embeddings 同款降级语义：未实现的服务商在图片调用中被跳过，
+   * 全部候选都不支持时网关返回 501 而不是把请求打到上游报错。
+   */
+  imagesGenerate?(
+    channel: Channel,
+    apiKey: string,
+    req: ChatRequest,
+  ): Promise<NonStreamResult>;
 }
 
 export class UpstreamError extends Error {

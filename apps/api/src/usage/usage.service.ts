@@ -26,6 +26,9 @@ export interface UsageEntry {
   multiplier?: number;
   /** 倍率来源：user / group / agent / default，用于账单审计 */
   multiplierSource?: string;
+  /** 直接指定费用（按次计费模型：图片等）；给定时跳过 token 计价 */
+  costOverride?: number;
+  upstreamCostOverride?: number;
   /** 输入文本（messages 拍平），受 LOG_CONTENT 开关控制 */
   requestPreview?: string | null;
   /** 输出文本，受 LOG_CONTENT 开关控制 */
@@ -106,16 +109,23 @@ export class UsageService {
     const multiplier =
       entry.multiplier ??
       (entry.userId ? await this.billing.getUserMultiplier(entry.userId) : 1);
-    const { cost, upstreamCost } = await this.computeCosts(
-      entry.channelId,
-      entry.model,
-      entry.promptTokens,
-      entry.completionTokens,
-      entry.userId,
-      entry.cacheReadTokens ?? 0,
-      entry.cacheWriteTokens ?? 0,
-      multiplier,
-    );
+    // 按次计费模型（图片等）直接给定金额；否则按 token 计价
+    const { cost, upstreamCost } =
+      entry.costOverride != null
+        ? {
+            cost: round6(entry.costOverride),
+            upstreamCost: round6(entry.upstreamCostOverride ?? 0),
+          }
+        : await this.computeCosts(
+            entry.channelId,
+            entry.model,
+            entry.promptTokens,
+            entry.completionTokens,
+            entry.userId,
+            entry.cacheReadTokens ?? 0,
+            entry.cacheWriteTokens ?? 0,
+            multiplier,
+          );
     const date = utcDay();
 
     try {

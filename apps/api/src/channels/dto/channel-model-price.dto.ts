@@ -35,6 +35,18 @@ export class ChannelModelPriceDto {
   @Min(0)
   costOutput?: number;
 
+  /** 按次成本（USD/次）：图片等非 token 计费模型 */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  costPerCall?: number;
+
+  /** 按次售价（USD/次）；为空回退目录 perCallPrice */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  pricePerCall?: number;
+
   /** 对用户售价 USD/1M tokens（为空则用目录价 × discount） */
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 6 })

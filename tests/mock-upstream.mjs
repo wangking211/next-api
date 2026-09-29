@@ -48,6 +48,24 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ---- OpenAI 兼容 images/generations（返回 n 张占位图；带 usage 以覆盖 token 计价路径） ----
+  if (url.endsWith('/images/generations')) {
+    const n = Number(body?.n ?? 1) || 1;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        created: Math.floor(Date.now() / 1000),
+        data: Array.from({ length: n }, (_, i) => ({
+          url: `https://mock.local/img-${i}.png`,
+          revised_prompt: body?.prompt ?? '',
+        })),
+        model: body?.model,
+        usage: { prompt_tokens: 5, completion_tokens: 0, total_tokens: 5 },
+      }),
+    );
+    return;
+  }
+
   // ---- Gemini 原生端点 ----
   if (url.includes(':streamGenerateContent')) {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });

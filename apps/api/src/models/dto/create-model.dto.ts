@@ -65,6 +65,12 @@ export class CreateModelDto {
   @IsEnum(ModelOrigin)
   origin?: ModelOrigin;
 
+  /** 按次售价（USD/次）：图片等非 token 计费模型；留空 = 走 token 计价 */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  perCallPrice?: number | null;
+
   /** 厂商规范名（留空按模型名自动推断） */
   @IsOptional()
   @IsString()
