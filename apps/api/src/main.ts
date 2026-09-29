@@ -6,15 +6,18 @@ import helmet from 'helmet';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { BootstrapService } from './auth/bootstrap.service';
-
-const INSECURE_JWT = ['change-me', 'change-me-in-production', ''];
+import { assertProdJwtSecret } from './auth/jwt-secret';
 
 function assertProductionSecrets(config: ConfigService) {
   if (config.get<string>('NODE_ENV') !== 'production') return;
-  const jwt = config.get<string>('JWT_SECRET', '');
   const enc = config.get<string>('ENCRYPTION_KEY', '');
   const errors: string[] = [];
-  if (INSECURE_JWT.includes(jwt)) errors.push('JWT_SECRET 必须设置为强随机值');
+  // JWT 密钥同源校验（与 JwtModule 解析共用一套规则）：占位符/过短/低熵 → 启动失败
+  try {
+    assertProdJwtSecret(config.get<string>('JWT_SECRET') ?? '');
+  } catch (e: any) {
+    errors.push(e.message);
+  }
   if (!/^[0-9a-fA-F]{64}$/.test(enc) || /^0+$/.test(enc)) {
     errors.push('ENCRYPTION_KEY 必须为 32 字节非全零 hex');
   }

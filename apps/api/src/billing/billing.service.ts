@@ -222,23 +222,59 @@ export class BillingService {
       select: { id: true, username: true },
     });
     if (!exists) return 0;
-    // 原子自减，避免并发下读-改-写丢更新
-    const updated = await tx.user.update({
-      where: { id: userId },
-      data: { balance: { decrement: cost } },
-      select: { balance: true },
-    });
-    const balanceAfter = round6(Number(updated.balance));
-    await tx.balanceTransaction.create({
-      data: {
-        userId,
-        type: BalanceTxType.CONSUME,
-        amount: -cost,
-        balanceAfter,
-        requestLogId,
-        description: description ?? null,
-      },
-    });
+
+    // 原子扣费（预授权是读判，不构成扣款）：
+    // 1) 余额足够 → 条件自减（balance >= cost 才命中），并发下不会写出负数；
+    // 2) 余额不足（并发透支）→ 按剩余余额封底扣减，CAS 匹配读到的快照值，
+    //    避免覆盖并发的充值/扣费；快照失效则重试，最多 3 轮。
+    // 3) 极端并发下仍无法扣减 → 本次少收（上限为当时余额），余额保持 >= 0。
+    let debited = 0;
+    for (let attempt = 0; attempt < 3 && debited === 0; attempt++) {
+      const full = await tx.user.updateMany({
+        where: { id: userId, balance: { gte: cost } },
+        data: { balance: { decrement: cost } },
+      });
+      if (full.count === 1) {
+        debited = cost;
+        break;
+      }
+      const cur = await tx.user.findUnique({
+        where: { id: userId },
+        select: { balance: true },
+      });
+      if (!cur) return 0;
+      const available = Number(cur.balance);
+      if (available <= 0) break; // 已无可扣余额（并发下被其他请求扣完）
+      const target = Math.min(cost, available);
+      const floored = await tx.user.updateMany({
+        where: { id: userId, balance: cur.balance },
+        data: { balance: { decrement: target } },
+      });
+      if (floored.count === 1) {
+        debited = target;
+        break;
+      }
+      // 快照已被并发改动 → 重试（下一轮先尝试足额扣减）
+    }
+
+    if (debited > 0) {
+      const row = await tx.user.findUnique({
+        where: { id: userId },
+        select: { balance: true },
+      });
+      const balanceAfter = round6(Number(row?.balance ?? 0));
+      await tx.balanceTransaction.create({
+        data: {
+          userId,
+          type: BalanceTxType.CONSUME,
+          amount: -debited,
+          balanceAfter,
+          requestLogId,
+          description: description ?? null,
+        },
+      });
+    }
+    // 返点按实际消费额（cost）发放，与扣款是否足额无关
     return this.payCommissions(tx, userId, exists.username, cost, requestLogId);
   }
 

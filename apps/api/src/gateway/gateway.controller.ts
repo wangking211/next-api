@@ -304,27 +304,30 @@ export class GatewayController {
         const usage = result.usage ?? this.estimateUsage(body, result.json);
         // TPM 回填：结算在 guard 的 finish 监听里按 实际−预估 校正
         if (req.gateway.tpm) req.gateway.tpm.actual = usage.totalTokens;
-        await this.usage.record({
-          userId: user.id,
-          apiKeyId: apiKey.id,
-          channelId: channel.id,
-          model,
-          provider: channel.provider,
-          ...usage,
-          latencyMs: Date.now() - startedAt,
-          status: result.status,
-          chargeable: channel.ownerType === ChannelOwnerType.PLATFORM,
-          isStream: false,
-          requestPreview,
-          responsePreview: extractAssistantText(result.json),
-        });
-        await this.health.recordSuccess(channel.id);
-        await this.metrics.record(channel.id, model, 'ok', {
-          latencyMs: Date.now() - attemptStart,
-          completionTokens: usage.completionTokens,
-          totalTokens: usage.totalTokens,
-          status: result.status,
-        });
+        // 计费/健康度/路由指标互不依赖 → 并行落地，缩短响应路径串行耗时
+        await Promise.all([
+          this.usage.record({
+            userId: user.id,
+            apiKeyId: apiKey.id,
+            channelId: channel.id,
+            model,
+            provider: channel.provider,
+            ...usage,
+            latencyMs: Date.now() - startedAt,
+            status: result.status,
+            chargeable: channel.ownerType === ChannelOwnerType.PLATFORM,
+            isStream: false,
+            requestPreview,
+            responsePreview: extractAssistantText(result.json),
+          }),
+          this.health.recordSuccess(channel.id),
+          this.metrics.record(channel.id, model, 'ok', {
+            latencyMs: Date.now() - attemptStart,
+            completionTokens: usage.completionTokens,
+            totalTokens: usage.totalTokens,
+            status: result.status,
+          }),
+        ]);
         return res
           .status(result.status)
           .json(
@@ -533,43 +536,51 @@ export class GatewayController {
     const usage = result.usageRef?.usage ?? collector.result(meta.promptFallback);
     // TPM 回填（结算由 guard 的 finish 监听触发）
     if (meta.tpm) meta.tpm.actual = usage.totalTokens;
-    await this.usage.record({
-      userId: meta.userId,
-      apiKeyId: meta.apiKeyId,
-      channelId: meta.channel.id,
-      model: meta.model,
-      provider: meta.channel.provider,
-      ...usage,
-      latencyMs: Date.now() - meta.startedAt,
-      status,
-      errorMessage: clientClosed ? 'client closed connection' : errorMessage,
-      chargeable: meta.chargeable,
-      isStream: true,
-      requestPreview: meta.requestPreview,
-      responsePreview: collector.text,
-    });
+    // 计费/健康度/路由指标互不依赖 → 并行落地，缩短响应路径串行耗时
+    const tasks: Promise<unknown>[] = [
+      this.usage.record({
+        userId: meta.userId,
+        apiKeyId: meta.apiKeyId,
+        channelId: meta.channel.id,
+        model: meta.model,
+        provider: meta.channel.provider,
+        ...usage,
+        latencyMs: Date.now() - meta.startedAt,
+        status,
+        errorMessage: clientClosed ? 'client closed connection' : errorMessage,
+        chargeable: meta.chargeable,
+        isStream: true,
+        requestPreview: meta.requestPreview,
+        responsePreview: collector.text,
+      }),
+    ];
 
     // 客户端主动断开不计入渠道健康度
     if (!clientClosed) {
       const latencyMs = Date.now() - meta.attemptStart;
       if (errorMessage) {
-        await this.health.recordFailure(meta.channel.id, errorMessage);
-        await this.metrics.record(meta.channel.id, meta.model, 'error', {
-          latencyMs,
-          status: 500,
-          totalTokens: usage.totalTokens,
-          errorMessage,
-        });
+        tasks.push(
+          this.health.recordFailure(meta.channel.id, errorMessage),
+          this.metrics.record(meta.channel.id, meta.model, 'error', {
+            latencyMs,
+            status: 500,
+            totalTokens: usage.totalTokens,
+            errorMessage,
+          }),
+        );
       } else {
-        await this.health.recordSuccess(meta.channel.id);
-        await this.metrics.record(meta.channel.id, meta.model, 'ok', {
-          latencyMs,
-          status: 200,
-          completionTokens: usage.completionTokens,
-          totalTokens: usage.totalTokens,
-        });
+        tasks.push(
+          this.health.recordSuccess(meta.channel.id),
+          this.metrics.record(meta.channel.id, meta.model, 'ok', {
+            latencyMs,
+            status: 200,
+            completionTokens: usage.completionTokens,
+            totalTokens: usage.totalTokens,
+          }),
+        );
       }
     }
+    await Promise.all(tasks);
 
     if (!res.writableEnded) res.end();
   }

@@ -45,8 +45,10 @@ pnpm dev
 首次启动会自动创建管理员（见 `apps/api/.env`）：
 
 ```
-admin / admin123456   (BOOTSTRAP_ADMIN_*)
+admin / admin123456   (BOOTSTRAP_ADMIN_*，仅限本地开发默认值)
 ```
+
+> 生产环境（`NODE_ENV=production`）启动时强制校验 `BOOTSTRAP_ADMIN_PASSWORD`（≥12 字符且非常见弱口令），`admin123456` 等默认口令会**拒绝启动**；请在 `.env` 设置强口令。
 
 `pnpm seed` 会额外灌入 **56 个主流模型**（OpenAI `gpt-5.x`/`gpt-6`、Anthropic `claude-opus-5.x`/`sonnet-5`、Gemini `3.x`、DeepSeek / Moonshot / Qwen / 智谱 / xAI / Mistral / Doubao / MiniMax，含占位默认定价，请按上游价目调整）、创建演示账号 `demo / demo123456`、3 个平台渠道（指向 `DEMO_UPSTREAM_URL`，默认 `http://localhost:4001`），并在首次运行时打印一个平台 Key。配合 `node tests/mock-upstream.mjs` 启动 mock 上游即可零依赖验证网关全链路。
 
@@ -158,7 +160,7 @@ curl http://localhost:3000/v1/chat/completions \
 - **在线充值**：金额档位（1 / 10 / 50 / 100 / 500 元，可自定义）+ 支付方式（通用收银台 / 微信扫码 / 支付宝扫码）；**按实时汇率折算**（可固定汇率覆盖），PC 展示二维码（antd `QRCode`）、手机端自动跳转收银台；下单后每 3 秒轮询订单状态，到账自动刷新余额；下方「充值订单」列表可回看最近 8 笔
 - **用户管理**（管理员）：用户列表、充值、余额调整
 - **兑换码**（管理员）：批量生成、复制导出、按状态筛选、作废；**有效期支持快速选择**（永久有效 / 7 天 / 1 个月 / 3 个月 / 6 个月 / 1 年 / 自定义截止时间）
-- **操作审计**（管理员）：写操作留痕（操作者、动作、状态、IP），支持过滤
+- **操作审计**（管理员）：写操作留痕（操作者、动作、状态、IP），支持过滤；不含 `/v1` 网关高频流量（由渠道健康度与请求日志覆盖）
 
 **计费规则**：平台托管渠道按调用成本从用户余额扣费，余额不足时拦截；BYOK（用户自带上游 Key）渠道不扣费，仅记录用量。用户可通过**在线充值（微信/支付宝）**、兑换码自助充值。
 
@@ -345,6 +347,9 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 
 - 平台 key：仅存 SHA-256 哈希，明文只在创建时返回一次。
 - 上游渠道 key：AES-256-GCM 加密存储，`ENCRYPTION_KEY`（32 字节 hex）务必在生产更换并妥善保管。
-- 生产环境请替换 `JWT_SECRET` 与 `BOOTSTRAP_ADMIN_PASSWORD`；当 `NODE_ENV=production` 时启动会强制校验 `JWT_SECRET` / `ENCRYPTION_KEY`，不安全则拒绝启动。
+- 生产环境请替换 `JWT_SECRET` 与 `BOOTSTRAP_ADMIN_PASSWORD`；当 `NODE_ENV=production` 时启动会强制校验，不安全则拒绝启动：
+  - `JWT_SECRET`：≥32 字符、非 `change-me` 等占位符、非单一重复字符；**任何环境都不再回退到占位符**（非生产未配置/过短时自动生成随机密钥，重启后已签发会话失效）。
+  - `BOOTSTRAP_ADMIN_PASSWORD`：≥12 字符且非常见弱口令（`admin123456` 等会被拒绝）。
+  - `ENCRYPTION_KEY`：32 字节非全零 hex。
 - 已启用 `helmet` 安全响应头、请求体大小限制（25MB）、按 key 的 RPM 限流。
 - 调用内容（输入/输出）默认记录到 `RequestLog`（`LOG_CONTENT=true`，单条上限 `LOG_CONTENT_MAX=20000` 字符）；如需隐私合规可设 `LOG_CONTENT=false` 仅保留元数据与 token。

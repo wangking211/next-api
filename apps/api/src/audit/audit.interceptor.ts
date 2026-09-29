@@ -18,6 +18,9 @@ export class AuditInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const req = context.switchToHttp().getRequest();
     if (!MUTATING.includes(req.method)) return next.handle();
+    // 网关流量（/v1/*）不写管理审计：高频噪音，失败/健康度已由渠道健康度与请求日志覆盖
+    const url = String(req.originalUrl ?? req.url ?? '').split('?')[0];
+    if (url === '/v1' || url.startsWith('/v1/')) return next.handle();
 
     const res = context.switchToHttp().getResponse();
     return next.handle().pipe(
