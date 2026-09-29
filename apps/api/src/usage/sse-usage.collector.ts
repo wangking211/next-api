@@ -34,6 +34,13 @@ export class SseUsageCollector {
             totalTokens:
               json.usage.total_tokens ??
               (json.usage.prompt_tokens ?? 0) + (json.usage.completion_tokens ?? 0),
+            // 部分上游（如 DeepSeek / 本平台渠道）会在 usage 里带缓存 token，一并采集
+            ...(json.usage.cache_read_tokens != null
+              ? { cacheReadTokens: json.usage.cache_read_tokens }
+              : {}),
+            ...(json.usage.cache_write_tokens != null
+              ? { cacheWriteTokens: json.usage.cache_write_tokens }
+              : {}),
           };
         }
         const content = json.choices?.[0]?.delta?.content;

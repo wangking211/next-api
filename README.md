@@ -108,6 +108,14 @@ pnpm cleanup             # 执行清理
 | GET | `/api/billing/pay/orders` | 我的充值订单（`?limit=`，最近 N 笔） | 登录 |
 | GET | `/api/billing/pay/orders/:id` | 单笔充值订单状态（前端轮询） | 登录（属主/管理员） |
 | GET | `/api/pay/jai/notify` | JAIPay 支付异步通知（GET Query，MD5 验签 + 幂等入账，返回 200） | 公开 |
+| GET | `/api/withdrawals` | 我的提现申请列表 | 登录 |
+| POST | `/api/withdrawals` | 发起提现（冻结余额，条件更新防并发超额） | 登录 |
+| GET | `/api/admin/withdrawals` | 提现申请列表（`?status=PENDING/APPROVED/REJECTED`） | 管理员 |
+| PATCH | `/api/admin/withdrawals/:id` | 审批提现（`{action:APPROVE\|REJECT}`；驳回原路退回余额，原子领取防重复退款） | 管理员 |
+| GET | `/api/agent/overview` | 代理总览（成员数/返点，管理员可传 `agentId`） | 代理/管理员 |
+| GET | `/api/agent/members` | 名下成员列表 | 代理/管理员 |
+| POST | `/api/agent/members` | 创建名下成员 | 代理/管理员 |
+| POST | `/api/agent/members/:id/recharge` | 用代理余额给成员充值 | 代理/管理员 |
 | GET | `/api/admin/users` | 用户列表（`?q=` 搜索） | 管理员 |
 | POST | `/api/admin/users/:id/recharge` | 充值 | 管理员 |
 | POST | `/api/admin/users/:id/adjust` | 余额调整（可负） | 管理员 |
@@ -166,7 +174,10 @@ curl http://localhost:3000/v1/chat/completions \
 | `CREDITS_PER_USD` | `100` | 1 美元 = N 积分；`充值积分 = 元 ÷ 汇率 × CREDITS_PER_USD` |
 
 > 汇率取值优先级：`PAY_CNY_PER_USD` 固定值 → Redis 缓存 → 实时接口 → **上次已知值**（接口故障时兜底）；全部失败时下单接口明确报错、前端提示稍后重试，不会用错误汇率成交。汇率结果同时通过 `/api/config`（`payRate` / `creditsPerCny`）暴露给前端展示。
-> 入账口径：订单金额（分）→ `creditUsd = 元 ÷ 汇率`（USD 额度，随订单落库，回调不再依赖当时汇率）；回调校验金额一致 + 状态机 `PENDING→PAID` 只入账一次，并写 `BalanceTransaction(RECHARGE)` 流水。
+> 入账口径：订单金额（分）→ `creditUsd = 元 ÷ 汇率`（USD 额度，随订单落库，回调不再依赖当时汇率）；回调校验**金额必须存在且一致**，状态机 `PENDING/FAILED → PAID` 只入账一次，并写 `BalanceTransaction(RECHARGE)` 流水。
+
+- **下单响应异常不置失败**：网络超时 / 5xx / 响应不可解析都视为「结果未知」，订单保持 `PENDING`（网关可能已受理，用户仍可能付款），后续成功回调可正常入账；只有网关**明确拒绝**（`code != 0`）才标记 `FAILED`——而 `FAILED` 订单若收到成功回调也会补记入账。
+- **异常对账与告警**：回调遇到未知订单 / 金额缺失或不一致 / 已关闭订单时**不会自动入账**，但会写入 `AuditLog`（管理端「操作审计」按 `action=payment.notify.*` 过滤即可对账），并在配置 `ALERT_WEBHOOK_URL` 时推送告警；人工核实后在「用户管理」用充值接口补单即可（幂等由订单状态保证，不会重复入账）。
 
 **渠道健康**：连续失败达到 `CHANNEL_FAILURE_THRESHOLD`（默认 5）次的渠道自动禁用（表中标记「自动禁用」），重新启用会清零失败计数；配置 `ALERT_WEBHOOK_URL` 可推送告警。
 
@@ -279,6 +290,8 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 - 管理员毛利 = 实收 − 上游实付（`billedCost - billedUpstreamCost`）；BYOK 两条腿都是 0，不产生幻影毛利。
 - 故障转移：BYOK 上游 5xx/429 会回落到平台渠道，回落成功的那一次按平台口径扣费（`gateway.controller.ts`）。
 - API Key 额度分工：`quotaLimit` 按 token 管用量（BYOK 也计），`costLimit` 只管真实花费。
+- **缓存口径统一**：所有渠道的 `promptTokens` 一律**包含缓存读写**（OpenAI 原生如此；Anthropic 的 `input_tokens` 不含缓存，转换时已补回 `cache_read + cache_creation`），因此 `usage.service` 用 `nonCached = prompt − cacheRead` 计算非缓存输入对所有协议都成立，不会因缓存命中而少计费。
+- **流式真实用量**：Anthropic 流式不产出 usage 分片，provider 在事件转换过程中采集真实用量（prompt 含缓存、output、cache 读写）并通过 `StreamResult.usageRef` 交给网关，网关**优先采用**它而不是按输出长度估算；OpenAI 兼容渠道若在分片中带 `usage.cache_read_tokens/cache_write_tokens`，SSE 收集器也会一并采集。
 
 ## 智能路由（评分排序 / 熔断 / 每日限额）
 

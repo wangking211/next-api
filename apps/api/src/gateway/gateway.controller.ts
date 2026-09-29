@@ -16,7 +16,7 @@ import { ChannelResolverService } from './channel-resolver.service';
 import { ProviderRegistry } from './providers/provider.registry';
 import { ChannelHealthService } from './channel-health.service';
 import { RoutingMetricsService } from './routing-metrics.service';
-import { GatewayAuthContext, GatewayRequest, UpstreamError, openaiError } from './types';
+import { GatewayAuthContext, GatewayRequest, StreamResult, UpstreamError, openaiError } from './types';
 import { detectRequiredCapabilities } from './capabilities';
 import {
   AnthropicStreamTranslator,
@@ -448,7 +448,7 @@ export class GatewayController {
 
   private async pipeStream(
     res: Response,
-    result: { chunks: AsyncIterable<string>; headers?: Record<string, string> },
+    result: StreamResult,
     meta: {
       userId: string;
       apiKeyId: string;
@@ -528,7 +528,9 @@ export class GatewayController {
     }
 
     const status = clientClosed ? 499 : errorMessage ? 500 : 200;
-    const usage = collector.result(meta.promptFallback);
+    // 优先使用 provider 在流式翻译中采集到的真实用量（如 Anthropic 不产出 usage 分片），
+    // 缺失时才回退到 SSE 收集器（解析 usage 分片或按输出长度估算）。
+    const usage = result.usageRef?.usage ?? collector.result(meta.promptFallback);
     // TPM 回填（结算由 guard 的 finish 监听触发）
     if (meta.tpm) meta.tpm.actual = usage.totalTokens;
     await this.usage.record({

@@ -62,6 +62,7 @@ function makeService(
       ),
       findMany: jest.fn().mockResolvedValue([order]),
     },
+    auditLog: { create: jest.fn().mockResolvedValue({}) },
     $transaction: (cb: any) => cb(tx),
   };
 
@@ -185,6 +186,29 @@ describe('PaymentService.createOrder', () => {
       data: { status: 'FAILED' },
     });
   });
+
+  it('网络异常时保持 PENDING（网关可能已受理，便于后续回调入账）', async () => {
+    const { service, prisma } = makeService();
+    jest.spyOn(global, 'fetch').mockRejectedValue(new Error('timeout'));
+
+    await expect(service.createOrder(user, 100)).rejects.toThrow(/无法连接支付网关/);
+    // 不能标记 FAILED，否则用户真实付款后回调无法入账
+    expect(prisma.paymentOrder.update).not.toHaveBeenCalledWith({
+      where: { id: 'o1' },
+      data: { status: 'FAILED' },
+    });
+  });
+
+  it('网关 5xx 时同样保持 PENDING', async () => {
+    const { service, prisma } = makeService();
+    mockFetch({ code: 1, msg: 'SYSTEM_ERROR' }, false, 502);
+
+    await expect(service.createOrder(user, 100)).rejects.toThrow(/下单失败（502）/);
+    expect(prisma.paymentOrder.update).not.toHaveBeenCalledWith({
+      where: { id: 'o1' },
+      data: { status: 'FAILED' },
+    });
+  });
 });
 
 describe('PaymentService.handleNotify', () => {
@@ -239,7 +263,8 @@ describe('PaymentService.handleNotify', () => {
 
     expect(res).toEqual({ ok: true });
     expect(tx.paymentOrder.updateMany).toHaveBeenCalledWith({
-      where: { id: 'o1', status: 'PENDING' },
+      // PENDING 与 FAILED 都可入账（FAILED 只代表下单响应异常）
+      where: { id: 'o1', status: { in: ['PENDING', 'FAILED'] } },
       data: expect.objectContaining({
         status: 'PAID',
         channel: 'wxpay',
@@ -268,6 +293,48 @@ describe('PaymentService.handleNotify', () => {
     const res = await service.handleNotify(signedQuery());
     expect(res).toMatchObject({ skipped: 'duplicate' });
     expect(tx.user.update).not.toHaveBeenCalled();
+  });
+
+  it('订单曾被标记失败时仍补记入账，并写异常记录', async () => {
+    const { service, tx, prisma } = makeService({ order: { status: 'FAILED' } });
+
+    const res = await service.handleNotify(signedQuery());
+
+    expect(res).toEqual({ ok: true });
+    expect(tx.paymentOrder.updateMany).toHaveBeenCalledWith({
+      where: { id: 'o1', status: { in: ['PENDING', 'FAILED'] } },
+      data: expect.objectContaining({ status: 'PAID' }),
+    });
+    expect(tx.user.update).toHaveBeenCalled();
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ action: 'payment.notify.paid-after-failed' }),
+    });
+  });
+
+  it('未知订单写异常记录供对账', async () => {
+    const { service, prisma } = makeService({ order: null });
+
+    const res = await service.handleNotify(signedQuery());
+
+    expect(res).toMatchObject({ skipped: 'unknown-order' });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'payment.notify.unknown-order',
+        targetId: 'PAY1',
+      }),
+    });
+  });
+
+  it('金额缺失（而非不一致）时同样拒绝入账并写异常', async () => {
+    const { service, tx, prisma } = makeService();
+
+    const res = await service.handleNotify(signedQuery({ amount: '' }));
+
+    expect(res).toMatchObject({ skipped: 'amount-mismatch' });
+    expect(tx.user.update).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ action: 'payment.notify.amount-mismatch' }),
+    });
   });
 
   it('does not credit when another callback already claimed it', async () => {

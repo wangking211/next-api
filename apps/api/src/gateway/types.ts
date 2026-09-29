@@ -51,6 +51,11 @@ export interface StreamResult {
   /** 已转换为 OpenAI SSE 的文本块 */
   chunks: AsyncIterable<string>;
   headers?: Record<string, string>;
+  /**
+   * 流式过程中采集到的真实用量（可选）。上游不产出 usage 分片时，
+   * provider 可在翻译过程中写入此处，网关优先采用它而不是估算值。
+   */
+  usageRef?: { usage?: UsageInfo };
 }
 
 export interface ResolvedChannel {

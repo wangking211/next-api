@@ -5,6 +5,7 @@ import {
   Provider,
   StreamResult,
   UpstreamError,
+  UsageInfo,
 } from '../types';
 import { joinUrl, sseEvents, describeFetchError, combineSignals } from './stream.util';
 
@@ -88,10 +89,14 @@ export function toOpenAiResponse(anth: any, model: string) {
     .filter((b: any) => b.type === 'text')
     .map((b: any) => b.text)
     .join('');
-  const prompt = anth.usage?.input_tokens ?? 0;
+  const inputTokens = anth.usage?.input_tokens ?? 0;
   const completion = anth.usage?.output_tokens ?? 0;
   const cacheRead = anth.usage?.cache_read_input_tokens ?? 0;
   const cacheWrite = anth.usage?.cache_creation_input_tokens ?? 0;
+  // Anthropic 的 input_tokens 不含缓存读/写；本项目统一按 OpenAI 口径计费
+  // （prompt_tokens 含缓存），故这里把缓存部分补回，否则 usage.service 会再减一次
+  // cacheRead，导致缓存命中时非缓存输入成本被少计（收入漏损）。
+  const prompt = inputTokens + cacheRead + cacheWrite;
   return {
     id: anth.id ?? `chatcmpl-${Date.now()}`,
     object: 'chat.completion',
@@ -224,21 +229,41 @@ export class AnthropicProvider implements Provider {
     if (!res.body) {
       throw new UpstreamError('Upstream returned empty stream', 502, true);
     }
+    const usageRef: { usage?: UsageInfo } = {};
     return {
       status: 200,
-      chunks: this.translateStream(res.body, req.model),
+      chunks: this.translateStream(res.body, req.model, usageRef),
       headers: { 'Content-Type': 'text/event-stream' },
+      usageRef,
     };
   }
 
   private async *translateStream(
     stream: ReadableStream<Uint8Array>,
     model: string,
+    usageRef?: { usage?: UsageInfo },
   ): AsyncGenerator<string> {
     let id = `chatcmpl-${Date.now()}`;
     const created = Math.floor(Date.now() / 1000);
     let finish: string | null = null;
     let started = false;
+    // Anthropic 流式不产出 OpenAI 的 usage 分片，这里在转换过程中采集，
+    // 供网关计费使用（cache 读写同样计入 prompt，口径与 OpenAI 一致）。
+    let inputTokens = 0;
+    let cacheRead = 0;
+    let cacheWrite = 0;
+    let completion = 0;
+    const publishUsage = () => {
+      if (!usageRef) return;
+      const prompt = inputTokens + cacheRead + cacheWrite;
+      usageRef.usage = {
+        promptTokens: prompt,
+        completionTokens: completion,
+        totalTokens: prompt + completion,
+        cacheReadTokens: cacheRead,
+        cacheWriteTokens: cacheWrite,
+      };
+    };
 
     for await (const ev of sseEvents(stream)) {
       let data: any;
@@ -251,6 +276,11 @@ export class AnthropicProvider implements Provider {
         case 'message_start': {
           id = data.message?.id ?? id;
           started = true;
+          const u = data.message?.usage ?? {};
+          inputTokens = u.input_tokens ?? 0;
+          cacheRead = u.cache_read_input_tokens ?? 0;
+          cacheWrite = u.cache_creation_input_tokens ?? 0;
+          if (typeof u.output_tokens === 'number') completion = u.output_tokens;
           yield chunkLine(id, data.message?.model ?? model, created, { role: 'assistant' }, null);
           break;
         }
@@ -263,6 +293,9 @@ export class AnthropicProvider implements Provider {
         }
         case 'message_delta': {
           if (data.delta?.stop_reason) finish = mapStopReason(data.delta.stop_reason);
+          if (typeof data.usage?.output_tokens === 'number') {
+            completion = data.usage.output_tokens;
+          }
           break;
         }
         case 'message_stop': {
@@ -277,5 +310,7 @@ export class AnthropicProvider implements Provider {
           break;
       }
     }
+    // 兜底：上游未发 message_stop 也尽量给出已采集的用量
+    if (usageRef && !usageRef.usage && (inputTokens || completion)) publishUsage();
   }
 }

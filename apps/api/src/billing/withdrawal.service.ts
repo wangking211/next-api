@@ -19,17 +19,21 @@ export class WithdrawalService {
     const amount = round6(amountUsd);
     if (amount <= 0) throw new BadRequestException('Amount must be positive');
     return this.prisma.$transaction(async (tx) => {
-      const u = await tx.user.findUnique({
-        where: { id: userId },
-        select: { balance: true },
+      // 原子冻结：条件更新保证并发下不会超额提现（余额足够才会 count=1）
+      const frozen = await tx.user.updateMany({
+        where: { id: userId, balance: { gte: amount } },
+        data: { balance: { decrement: amount } },
       });
-      if (!u) throw new NotFoundException('User not found');
-      if (Number(u.balance) < amount) {
+      if (frozen.count !== 1) {
+        const exists = await tx.user.findUnique({
+          where: { id: userId },
+          select: { id: true },
+        });
+        if (!exists) throw new NotFoundException('User not found');
         throw new BadRequestException('余额不足');
       }
-      const upd = await tx.user.update({
+      const upd = await tx.user.findUnique({
         where: { id: userId },
-        data: { balance: { decrement: amount } },
         select: { balance: true },
       });
       const w = await tx.withdrawalRequest.create({
@@ -40,7 +44,7 @@ export class WithdrawalService {
           userId,
           type: BalanceTxType.WITHDRAW,
           amount: -amount,
-          balanceAfter: round6(Number(upd.balance)),
+          balanceAfter: round6(Number(upd?.balance ?? 0)),
           description: '提现申请',
         },
       });
@@ -74,43 +78,38 @@ export class WithdrawalService {
     return this.prisma.$transaction(async (tx) => {
       const w = await tx.withdrawalRequest.findUnique({ where: { id } });
       if (!w) throw new NotFoundException('Withdrawal not found');
-      if (w.status !== WithdrawalStatus.PENDING) {
+
+      const status =
+        action === 'APPROVE' ? WithdrawalStatus.APPROVED : WithdrawalStatus.REJECTED;
+      // 原子领取：只有把 PENDING 改成终态的那一次调用才执行资金动作，
+      // 并发（双击 / 两个管理员）下不会重复退款或重复审批。
+      const claimed = await tx.withdrawalRequest.updateMany({
+        where: { id, status: WithdrawalStatus.PENDING },
+        data: { status, reviewedById: operatorId, reviewedAt: new Date() },
+      });
+      if (claimed.count !== 1) {
         throw new BadRequestException('该提现已处理');
       }
-      if (action === 'APPROVE') {
-        return tx.withdrawalRequest.update({
-          where: { id },
+
+      if (action === 'REJECT') {
+        const amount = Number(w.amount);
+        const upd = await tx.user.update({
+          where: { id: w.userId },
+          data: { balance: { increment: amount } },
+          select: { balance: true },
+        });
+        await tx.balanceTransaction.create({
           data: {
-            status: WithdrawalStatus.APPROVED,
-            reviewedById: operatorId,
-            reviewedAt: new Date(),
+            userId: w.userId,
+            type: BalanceTxType.ADJUST,
+            amount,
+            balanceAfter: round6(Number(upd.balance)),
+            description: '提现驳回退回',
+            operatorId,
           },
         });
       }
-      const amount = Number(w.amount);
-      const upd = await tx.user.update({
-        where: { id: w.userId },
-        data: { balance: { increment: amount } },
-        select: { balance: true },
-      });
-      await tx.balanceTransaction.create({
-        data: {
-          userId: w.userId,
-          type: BalanceTxType.ADJUST,
-          amount,
-          balanceAfter: round6(Number(upd.balance)),
-          description: '提现驳回退回',
-          operatorId,
-        },
-      });
-      return tx.withdrawalRequest.update({
-        where: { id },
-        data: {
-          status: WithdrawalStatus.REJECTED,
-          reviewedById: operatorId,
-          reviewedAt: new Date(),
-        },
-      });
+      return tx.withdrawalRequest.findUnique({ where: { id } });
     });
   }
 }

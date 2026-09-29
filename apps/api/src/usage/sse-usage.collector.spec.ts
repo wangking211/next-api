@@ -20,6 +20,30 @@ describe('SseUsageCollector', () => {
     });
   });
 
+  it('captures cache tokens when the upstream reports them', () => {
+    const c = new SseUsageCollector();
+    c.push(
+      chunk({
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+        usage: {
+          prompt_tokens: 100,
+          completion_tokens: 5,
+          total_tokens: 105,
+          cache_read_tokens: 90,
+          cache_write_tokens: 10,
+        },
+      }),
+    );
+    c.push('data: [DONE]\n\n');
+    expect(c.result(0)).toEqual({
+      promptTokens: 100,
+      completionTokens: 5,
+      totalTokens: 105,
+      cacheReadTokens: 90,
+      cacheWriteTokens: 10,
+    });
+  });
+
   it('falls back to estimation when usage missing', () => {
     const c = new SseUsageCollector();
     c.push(chunk({ choices: [{ delta: { content: '12345678' } }] }));

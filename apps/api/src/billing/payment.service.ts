@@ -153,18 +153,30 @@ export class PaymentService {
         signal: AbortSignal.timeout(15000),
       });
     } catch (e) {
-      await this.markFailed(order.id);
+      // 网络异常 / 超时属于「结果未知」：网关可能已受理该订单，
+      // 因此保持 PENDING，让后续成功回调仍能入账（标记 FAILED 会导致钱到账不进余额）。
+      this.logger.warn(
+        `下单请求异常，订单保持待支付以便回调入账: ${mchOrderNo} - ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
       throw new BadRequestException(
         `无法连接支付网关: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
 
     const json: any = await res.json().catch(() => null);
-    if (!res.ok || !json || json.code !== 0) {
-      await this.markFailed(order.id);
-      throw new BadRequestException(
-        `下单失败（${json?.code ?? res.status}）: ${json?.msg ?? res.statusText}`,
+    if (!res.ok || !json) {
+      // 5xx / 响应不可解析同样属于结果未知，保持 PENDING
+      this.logger.warn(
+        `下单响应异常（HTTP ${res.status}），订单保持待支付: ${mchOrderNo}`,
       );
+      throw new BadRequestException(`下单失败（${res.status}）: ${res.statusText}`);
+    }
+    if (json.code !== 0) {
+      // 网关明确拒绝：可确定订单未创建成功，标记失败避免悬挂
+      await this.markFailed(order.id);
+      throw new BadRequestException(`下单失败（${json.code}）: ${json.msg}`);
     }
 
     const data = json.data ?? {};
@@ -227,25 +239,43 @@ export class PaymentService {
       where: { mchOrderNo },
     });
     if (!order) {
-      this.logger.error(`支付回调订单不存在: ${mchOrderNo}`);
+      await this.recordAnomaly(
+        'unknown-order',
+        query,
+        '收到支付成功回调但本地无对应订单',
+      );
       return { ok: true, skipped: 'unknown-order' };
     }
 
+    // 金额必须存在且与订单一致，否则不自动入账（避免金额被绕过）
     const paidCents = Number(query.amount);
-    if (Number.isFinite(paidCents) && paidCents !== order.amountCents) {
-      this.logger.error(
-        `支付金额不一致: 订单 ${mchOrderNo} 期望 ${order.amountCents} 分，回调 ${paidCents} 分`,
+    if (!Number.isFinite(paidCents) || paidCents !== order.amountCents) {
+      await this.recordAnomaly(
+        'amount-mismatch',
+        query,
+        `期望 ${order.amountCents} 分，回调 ${query.amount ?? '缺失'} 分`,
       );
       return { ok: true, skipped: 'amount-mismatch' };
     }
     if (order.status === PaymentOrderStatus.PAID) {
       return { ok: true, skipped: 'duplicate' };
     }
+    if (order.status === PaymentOrderStatus.CLOSED) {
+      await this.recordAnomaly('closed-order', query, '回调命中已关闭订单');
+      return { ok: true, skipped: 'closed' };
+    }
 
     const successAt = Number(query.successTime);
+    const paidAfterFailed = order.status === PaymentOrderStatus.FAILED;
+    let credited = false;
     await this.prisma.$transaction(async (tx) => {
+      // PENDING 与 FAILED 都可入账：FAILED 只代表下单响应异常，
+      // 用户仍可能实际付款成功，必须补记（否则钱到账不进余额）。
       const claimed = await tx.paymentOrder.updateMany({
-        where: { id: order.id, status: PaymentOrderStatus.PENDING },
+        where: {
+          id: order.id,
+          status: { in: [PaymentOrderStatus.PENDING, PaymentOrderStatus.FAILED] },
+        },
         data: {
           status: PaymentOrderStatus.PAID,
           payOrderId: query.payOrderId ?? order.payOrderId,
@@ -259,6 +289,7 @@ export class PaymentService {
         },
       });
       if (claimed.count !== 1) return; // 并发下已被其它回调处理
+      credited = true;
 
       const credit = Number(order.creditUsd);
       const updated = await tx.user.update({
@@ -277,10 +308,84 @@ export class PaymentService {
       });
     });
 
+    if (!credited) {
+      this.logger.warn(`支付回调未入账（订单状态已变更）: ${mchOrderNo}`);
+      return { ok: true, skipped: 'duplicate' };
+    }
+    if (paidAfterFailed) {
+      await this.recordAnomaly(
+        'paid-after-failed',
+        query,
+        '订单此前因下单响应异常被标记失败，本次回调成功已补记入账',
+      );
+    }
+
     this.logger.log(
       `在线充值到账: ${mchOrderNo} +${order.creditUsd} USD（${order.credits} 积分）`,
     );
     return { ok: true };
+  }
+
+  /**
+   * 支付异常落库 + 告警：
+   * - 落库到 AuditLog（管理端「操作审计」按 action=payment.notify.* 过滤即可对账/追溯）
+   * - 配置了 ALERT_WEBHOOK_URL 时同步推送，便于第一时间人工核对/补单
+   */
+  private async recordAnomaly(
+    reason: string,
+    query: Record<string, string>,
+    detail: string,
+  ): Promise<void> {
+    const mchOrderNo = query.mchOrderNo ?? '';
+    this.logger.error(`支付回调异常[${reason}]: ${mchOrderNo} - ${detail}`);
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          action: `payment.notify.${reason}`,
+          method: 'GET',
+          path: '/api/pay/jai/notify',
+          statusCode: 200,
+          targetType: 'PaymentOrder',
+          targetId: mchOrderNo || null,
+          metadata: {
+            reason,
+            detail,
+            amount: query.amount ?? null,
+            state: query.state ?? null,
+            ifCode: query.ifCode ?? null,
+            payOrderId: query.payOrderId ?? null,
+            channelOrderNo: query.channelOrderNo ?? null,
+          },
+        },
+      });
+    } catch (e) {
+      this.logger.warn(
+        `支付异常落库失败: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+
+    const webhook = this.config.get<string>('ALERT_WEBHOOK_URL', '') || '';
+    if (!webhook) return;
+    try {
+      await fetch(webhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'payment_anomaly',
+          reason,
+          detail,
+          mchOrderNo,
+          amount: query.amount ?? null,
+          channelOrderNo: query.channelOrderNo ?? null,
+          at: new Date().toISOString(),
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch (e) {
+      this.logger.warn(
+        `支付异常告警发送失败: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   }
 
   private async markFailed(id: string) {
