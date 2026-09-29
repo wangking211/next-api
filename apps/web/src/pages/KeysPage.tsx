@@ -18,8 +18,9 @@ import {
 import { PlusOutlined, CopyOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { keysApi } from '../api/endpoints';
+import { keysApi, groupsApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 import { formatDateTime, formatCredits } from '../utils/format';
 import type { ApiKeyCreated, ApiKeyInfo, RoutingStrategy } from '../api/types';
 
@@ -57,6 +58,8 @@ const STRATEGY_LABEL: Record<RoutingStrategy, StrategyLabelKey> = {
 export default function KeysPage() {
   const { t } = useTranslation();
   const { message } = App.useApp();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [created, setCreated] = useState<ApiKeyCreated | null>(null);
@@ -65,6 +68,11 @@ export default function KeysPage() {
   const { data: keys = [], isLoading } = useQuery({
     queryKey: ['keys'],
     queryFn: ({ signal }) => keysApi.list(signal),
+  });
+
+  const { data: groups = [] } = useQuery({
+    queryKey: ['groups'],
+    queryFn: ({ signal }) => groupsApi.list(signal),
   });
 
   const createMut = useMutation({
@@ -97,6 +105,16 @@ export default function KeysPage() {
     onError: (e) => message.error(errorMessage(e)),
   });
 
+  const groupMut = useMutation({
+    mutationFn: ({ id, groupId }: { id: string; groupId: string | null }) =>
+      keysApi.update(id, { groupId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['keys'] });
+      message.success(t('keys.toast.updated'));
+    },
+    onError: (e) => message.error(errorMessage(e)),
+  });
+
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -120,7 +138,7 @@ export default function KeysPage() {
         loading={isLoading}
         dataSource={keys}
         pagination={false}
-        scroll={{ x: 900 }}
+        scroll={{ x: 1100 }}
         columns={[
           { title: t('keys.table.name'), dataIndex: 'name' },
           { title: 'Key', dataIndex: 'keyPrefix', render: (v: string) => <code>{v}</code> },
@@ -188,6 +206,29 @@ export default function KeysPage() {
             title: t('keys.table.lastUsed'),
             dataIndex: 'lastUsedAt',
             render: (v: string | null) => (v ? formatDateTime(v) : t('keys.table.never')),
+          },
+          {
+            title: t('keys.table.group'),
+            dataIndex: 'group',
+            width: 190,
+            render: (_, r) =>
+              isAdmin ? (
+                <Select
+                  size="small"
+                  allowClear
+                  style={{ width: 170 }}
+                  placeholder={t('keys.table.groupNone')}
+                  value={r.groupId ?? undefined}
+                  options={groups.map((g) => ({ value: g.id, label: g.displayName }))}
+                  onChange={(v) => groupMut.mutate({ id: r.id, groupId: v ?? null })}
+                />
+              ) : r.group ? (
+                <Tooltip title={t('keys.form.groupAdminOnly')}>
+                  <Tag color="cyan">{r.group.displayName}</Tag>
+                </Tooltip>
+              ) : (
+                t('keys.table.groupNone')
+              ),
           },
           {
             title: t('common.action'),
@@ -261,6 +302,19 @@ export default function KeysPage() {
           <Form.Item name="tpmLimit" label={t('keys.form.tpmLimit')}>
             <InputNumber min={1} style={{ width: '100%' }} placeholder={t('keys.form.example', { value: 100000 })} />
           </Form.Item>
+          {isAdmin && (
+            <Form.Item
+              name="groupId"
+              label={t('keys.form.group')}
+              extra={t('keys.form.groupPlaceholder')}
+            >
+              <Select
+                allowClear
+                placeholder={t('keys.table.groupNone')}
+                options={groups.map((g) => ({ value: g.id, label: g.displayName }))}
+              />
+            </Form.Item>
+          )}
           <Form.Item
             name="models"
             label={t('keys.form.models')}

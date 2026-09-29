@@ -42,5 +42,10 @@
   "keys.toast.updated": "已更新",
   "keys.toast.deleted": "已刪除",
   "keys.toast.copied": "已複製到剪貼簿",
-  "keys.toast.copyFailed": "複製失敗，請手動選取複製"
+  "keys.toast.copyFailed": "複製失敗，請手動選取複製",
+  "keys.table.group": "分組",
+  "keys.table.groupNone": "跟隨預設",
+  "keys.form.group": "所屬分組",
+  "keys.form.groupPlaceholder": "留空 = 跟隨使用者預設",
+  "keys.form.groupAdminOnly": "僅管理員可修改"
 }

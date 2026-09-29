@@ -42,5 +42,10 @@
   "keys.toast.updated": "Updated",
   "keys.toast.deleted": "Deleted",
   "keys.toast.copied": "Copied to clipboard",
-  "keys.toast.copyFailed": "Copy failed, please copy manually"
+  "keys.toast.copyFailed": "Copy failed, please copy manually",
+  "keys.table.group": "Group",
+  "keys.table.groupNone": "Follow default",
+  "keys.form.group": "Group",
+  "keys.form.groupPlaceholder": "Blank = follow the user default",
+  "keys.form.groupAdminOnly": "Admin only"
 }

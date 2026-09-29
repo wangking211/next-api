@@ -42,5 +42,10 @@
   "keys.toast.updated": "已更新",
   "keys.toast.deleted": "已删除",
   "keys.toast.copied": "已复制到剪贴板",
-  "keys.toast.copyFailed": "复制失败，请手动选择复制"
+  "keys.toast.copyFailed": "复制失败，请手动选择复制",
+  "keys.table.group": "分组",
+  "keys.table.groupNone": "跟随默认",
+  "keys.form.group": "所属分组",
+  "keys.form.groupPlaceholder": "留空 = 跟随用户默认",
+  "keys.form.groupAdminOnly": "仅管理员可修改"
 }

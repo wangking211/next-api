@@ -8,6 +8,7 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
+  Select,
   Space,
   Switch,
   Table,
@@ -58,10 +59,26 @@ export default function ModelsPage() {
     onError: (e) => message.error(errorMessage(e)),
   });
 
+  const classifyMut = useMutation({
+    mutationFn: () => modelsApi.classifyOrigins(),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['models'] });
+      message.success(t('models.classify.success', { updated: r.updated, total: r.total }));
+    },
+    onError: (e) => message.error(errorMessage(e)),
+  });
+
   const openCreate = () => {
     setEditing(null);
     form.resetFields();
-    form.setFieldsValue({ enabled: true, inputPrice: 0, outputPrice: 0, cacheReadPrice: 0, cacheWritePrice: 0 });
+    form.setFieldsValue({
+      enabled: true,
+      origin: 'OVERSEAS',
+      inputPrice: 0,
+      outputPrice: 0,
+      cacheReadPrice: 0,
+      cacheWritePrice: 0,
+    });
     setOpen(true);
   };
 
@@ -71,6 +88,8 @@ export default function ModelsPage() {
       name: r.name,
       displayName: r.displayName,
       provider: r.provider,
+      origin: r.origin,
+      vendor: r.vendor ?? undefined,
       inputPrice: Number(r.inputPrice),
       outputPrice: Number(r.outputPrice),
       cacheReadPrice: Number(r.cacheReadPrice ?? 0),
@@ -85,9 +104,19 @@ export default function ModelsPage() {
       title={t('models.title')}
       extra={
         isAdmin && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            {t('models.add')}
-          </Button>
+          <Space>
+            <Popconfirm
+              title={t('models.classify.confirm')}
+              onConfirm={() => classifyMut.mutate()}
+            >
+              <Button loading={classifyMut.isPending} title={t('models.classify.tip')}>
+                {t('models.classify.button')}
+              </Button>
+            </Popconfirm>
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              {t('models.add')}
+            </Button>
+          </Space>
         )
       }
     >
@@ -96,11 +125,28 @@ export default function ModelsPage() {
         loading={isLoading}
         dataSource={models}
         pagination={{ pageSize: 20 }}
-        scroll={{ x: 1000 }}
+        scroll={{ x: 1200 }}
         columns={[
           { title: t('models.column.name'), dataIndex: 'name', render: (v: string) => <code>{v}</code> },
           { title: t('models.column.displayName'), dataIndex: 'displayName' },
           { title: t('models.column.provider'), dataIndex: 'provider', render: (v: string) => <Tag>{v}</Tag> },
+          {
+            title: t('models.column.origin'),
+            dataIndex: 'origin',
+            width: 100,
+            render: (v: string) =>
+              v === 'DOMESTIC' ? (
+                <Tag color="volcano">{t('models.origin.domestic')}</Tag>
+              ) : (
+                <Tag color="geekblue">{t('models.origin.overseas')}</Tag>
+              ),
+          },
+          {
+            title: t('models.column.vendor'),
+            dataIndex: 'vendor',
+            width: 120,
+            render: (v: string | null) => v ?? '-',
+          },
           {
             title: t('models.column.inputPrice'),
             dataIndex: 'inputPrice',
@@ -180,6 +226,20 @@ export default function ModelsPage() {
           <Form.Item name="provider" label={t('models.form.providerLabel')} rules={[{ required: true }]}>
             <Input placeholder="openai" />
           </Form.Item>
+          <Space size={16} wrap>
+            <Form.Item name="origin" label={t('models.form.originLabel')}>
+              <Select
+                style={{ width: 160 }}
+                options={[
+                  { value: 'DOMESTIC', label: t('models.origin.domestic') },
+                  { value: 'OVERSEAS', label: t('models.origin.overseas') },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="vendor" label={t('models.form.vendorLabel')}>
+              <Input placeholder={t('models.form.vendorPlaceholder')} style={{ width: 200 }} />
+            </Form.Item>
+          </Space>
           <Space size={16} wrap>
             <Form.Item name="inputPrice" label={t('models.form.inputPriceLabel')}>
               <InputNumber min={0} step={0.01} />

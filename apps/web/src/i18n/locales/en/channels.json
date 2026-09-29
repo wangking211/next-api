@@ -84,5 +84,15 @@
   "channels.message.fillModels": "Please fill in supported models first",
   "channels.message.upstreamModels": "Fetched {{count}} models from upstream",
   "channels.provider.zhipu": "Zhipu GLM",
-  "channels.provider.custom": "Custom (OpenAI compatible)"
+  "channels.provider.custom": "Custom (OpenAI compatible)",
+  "channels.table.groups": "Groups",
+  "channels.table.groupNone": "Public",
+  "channels.table.upstreamGroup": "Upstream group",
+  "channels.form.groups": "Bound groups (admin only)",
+  "channels.form.groupsExtra": "Blank = public channel (visible to all groups); when selected, visible only to the same group",
+  "channels.form.groupsPlaceholder": "Select groups",
+  "channels.form.upstreamGroup": "Upstream group name",
+  "channels.form.upstreamGroupExtra": "Group parameter passed through to upstream (e.g. new-api group name); blank = not sent",
+  "channels.form.upstreamGroupPlaceholder": "e.g. default",
+  "channels.pricing.upstreamModelName": "Upstream model name"
 }

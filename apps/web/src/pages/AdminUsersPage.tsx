@@ -18,7 +18,7 @@ import {
 import { SearchOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { adminApi, usageApi } from '../api/endpoints';
+import { adminApi, groupsApi, usageApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { formatCredits, fromCredits } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
@@ -52,12 +52,18 @@ export default function AdminUsersPage() {
     queryFn: ({ signal }) => adminApi.users(undefined, 1, 100, signal, 'AGENT'),
   });
 
+  const { data: groups = [] } = useQuery({
+    queryKey: ['groups'],
+    queryFn: ({ signal }) => groupsApi.list(signal),
+  });
+
   const saveEditMut = useMutation({
     mutationFn: async (values: {
       role?: string;
       priceMultiplier?: number | null;
       agentId?: string | null;
       rebateRate?: number | null;
+      groupId?: string | null;
     }) => {
       if (!editUser) return;
       await adminApi.updateUser(editUser.id, {
@@ -65,6 +71,7 @@ export default function AdminUsersPage() {
         priceMultiplier: values.priceMultiplier ?? null,
         agentId: values.agentId ?? null,
         rebateRate: values.rebateRate ?? null,
+        groupId: values.groupId ?? null,
       });
     },
     onSuccess: () => {
@@ -83,6 +90,7 @@ export default function AdminUsersPage() {
       priceMultiplier: u.priceMultiplier != null ? Number(u.priceMultiplier) : undefined,
       rebateRate: u.rebateRate != null ? Number(u.rebateRate) : undefined,
       agentId: u.agentId ?? undefined,
+      groupId: u.groupId ?? undefined,
     });
   };
 
@@ -144,7 +152,7 @@ export default function AdminUsersPage() {
         rowKey="id"
         loading={isLoading}
         dataSource={data?.items ?? []}
-        scroll={{ x: 900 }}
+        scroll={{ x: 1000 }}
         pagination={{
           current: page,
           pageSize,
@@ -203,6 +211,11 @@ export default function AdminUsersPage() {
           {
             title: t('admin.users.column.agent'),
             render: (_, r) => r.agent?.username ?? '-',
+          },
+          {
+            title: t('admin.users.column.group'),
+            render: (_, r) =>
+              r.group ? <Tag color="cyan">{r.group.displayName}</Tag> : t('admin.users.groupNone'),
           },
           {
             title: t('admin.users.column.keyChannel'),
@@ -356,6 +369,17 @@ export default function AdminUsersPage() {
                 value: a.id,
                 label: a.username,
               }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="groupId"
+            label={t('admin.users.groupField')}
+            extra={t('admin.users.groupExtra')}
+          >
+            <Select
+              allowClear
+              placeholder={t('admin.users.groupNone')}
+              options={groups.map((g) => ({ value: g.id, label: g.displayName }))}
             />
           </Form.Item>
           <Form.Item

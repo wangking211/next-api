@@ -29,5 +29,17 @@
   "models.available.help": "呼叫時只需填寫模型名，閘道會按「自有渠道優先 → 平台渠道」自動路由（含優先順序/權重與故障轉移）。點擊標籤即可複製。",
   "models.available.empty": "暫無可用模型，請先新增渠道或聯絡管理員",
   "models.platform": "平台",
-  "models.mine": "我的"
+  "models.mine": "我的",
+  "models.column.origin": "產地",
+  "models.column.vendor": "廠商",
+  "models.origin.domestic": "國產",
+  "models.origin.overseas": "海外",
+  "models.origin.unknown": "未知",
+  "models.form.originLabel": "產地",
+  "models.form.vendorLabel": "廠商",
+  "models.form.vendorPlaceholder": "例如 openai（留空自動推斷）",
+  "models.classify.button": "一鍵歸類",
+  "models.classify.confirm": "將按模型名重新推斷並覆蓋廠商/產地，確定繼續？",
+  "models.classify.tip": "按模型名自動補標廠商與產地（會覆蓋已有值）",
+  "models.classify.success": "已歸類 {{updated}} / {{total}}"
 }

@@ -29,5 +29,17 @@
   "models.available.help": "调用时只需填写模型名，网关会按「自有渠道优先 → 平台渠道」自动路由（含优先级/权重与故障转移）。点击标签即可复制。",
   "models.available.empty": "暂无可用模型，请先添加渠道或联系管理员",
   "models.platform": "平台",
-  "models.mine": "我的"
+  "models.mine": "我的",
+  "models.column.origin": "产地",
+  "models.column.vendor": "厂商",
+  "models.origin.domestic": "国产",
+  "models.origin.overseas": "海外",
+  "models.origin.unknown": "未知",
+  "models.form.originLabel": "产地",
+  "models.form.vendorLabel": "厂商",
+  "models.form.vendorPlaceholder": "例如 openai（留空自动推断）",
+  "models.classify.button": "一键归类",
+  "models.classify.confirm": "将按模型名重新推断并覆盖厂商/产地，确定继续？",
+  "models.classify.tip": "按模型名自动补标厂商与产地（会覆盖已有值）",
+  "models.classify.success": "已归类 {{updated}} / {{total}}"
 }

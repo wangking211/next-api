@@ -90,5 +90,9 @@
   "admin.audit.adminTag": "Admin",
   "admin.audit.anonymous": "Anonymous",
   "admin.audit.column.ip": "IP",
-  "admin.audit.column.path": "Path"
+  "admin.audit.column.path": "Path",
+  "admin.users.column.group": "Group",
+  "admin.users.groupField": "Assigned group",
+  "admin.users.groupExtra": "The user uses this group's visible models and ratio by default; a key can override it",
+  "admin.users.groupNone": "None (unrestricted)"
 }

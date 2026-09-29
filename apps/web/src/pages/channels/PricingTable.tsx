@@ -1,4 +1,4 @@
-import { InputNumber, Table, Tooltip, Typography } from 'antd';
+import { Input, InputNumber, Table, Tooltip, Typography } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { getCreditsPerUsd } from '../../utils/format';
 import type { ModelInfo } from '../../api/types';
@@ -21,7 +21,8 @@ export function PricingTable({
     const m = catalog.find((c) => c.name === name);
     return m ? { in: Number(m.inputPrice), out: Number(m.outputPrice) } : { in: 0, out: 0 };
   };
-  const disc = (model: string, key: keyof PriceRow) => pricing[model]?.[key] ?? 1;
+  const disc = (model: string, key: 'costDiscount' | 'priceDiscount') =>
+    (pricing[model]?.[key] as number | undefined) ?? 1;
   const credits = (usdPerM: number, d: number) =>
     (usdPerM * d * getCreditsPerUsd()).toFixed(2);
   const num = (model: string, key: keyof PriceRow) => (
@@ -41,11 +42,23 @@ export function PricingTable({
       size="small"
       rowKey="model"
       pagination={false}
-      scroll={{ y: 260, x: 720 }}
+      scroll={{ y: 260, x: 880 }}
       style={{ marginTop: 6 }}
       dataSource={models.map((m) => ({ model: m }))}
       columns={[
         { title: t('common.model'), dataIndex: 'model', width: 150, ellipsis: true },
+        {
+          title: t('channels.pricing.upstreamModelName'),
+          width: 160,
+          render: (_: unknown, r: { model: string }) => (
+            <Input
+              size="small"
+              style={{ width: 150 }}
+              value={pricing[r.model]?.upstreamModelName}
+              onChange={(e) => setP(r.model, 'upstreamModelName', e.target.value)}
+            />
+          ),
+        },
         { title: t('channels.pricing.costDiscount'), width: 100, render: (_: unknown, r: { model: string }) => num(r.model, 'costDiscount') },
         { title: t('channels.pricing.priceDiscount'), width: 100, render: (_: unknown, r: { model: string }) => num(r.model, 'priceDiscount') },
         {

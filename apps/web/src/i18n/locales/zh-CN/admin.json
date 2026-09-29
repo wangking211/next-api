@@ -90,5 +90,9 @@
   "admin.audit.adminTag": "管理员",
   "admin.audit.anonymous": "匿名",
   "admin.audit.column.ip": "IP",
-  "admin.audit.column.path": "路径"
+  "admin.audit.column.path": "路径",
+  "admin.users.column.group": "分组",
+  "admin.users.groupField": "所属分组",
+  "admin.users.groupExtra": "用户默认使用该分组的可见模型与倍率；令牌可单独覆盖",
+  "admin.users.groupNone": "无（不限制）"
 }

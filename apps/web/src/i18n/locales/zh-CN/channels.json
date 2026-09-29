@@ -84,5 +84,15 @@
   "channels.message.fillModels": "请先填写支持模型",
   "channels.message.upstreamModels": "上游返回 {{count}} 个模型，已填入",
   "channels.provider.zhipu": "智谱 GLM",
-  "channels.provider.custom": "自定义 (OpenAI 兼容)"
+  "channels.provider.custom": "自定义 (OpenAI 兼容)",
+  "channels.table.groups": "分组",
+  "channels.table.groupNone": "公共",
+  "channels.table.upstreamGroup": "上游分组",
+  "channels.form.groups": "绑定分组（仅管理员）",
+  "channels.form.groupsExtra": "留空 = 公共渠道（所有分组可见）；选中后仅同分组可见",
+  "channels.form.groupsPlaceholder": "选择分组",
+  "channels.form.upstreamGroup": "上游分组名",
+  "channels.form.upstreamGroupExtra": "透传给上游的分组参数（如 new-api 的分组名）；留空不传",
+  "channels.form.upstreamGroupPlaceholder": "例如 default",
+  "channels.pricing.upstreamModelName": "上游模型名"
 }

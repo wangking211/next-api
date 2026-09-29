@@ -15,6 +15,7 @@ import {
   TagsOutlined,
   BarChartOutlined,
   ApartmentOutlined,
+  ClusterOutlined,
 } from '@ant-design/icons';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -45,13 +46,14 @@ export default function AppLayout() {
     '/billing': t('layout.title.billing'),
     '/agent': t('layout.title.agent'),
     '/users': t('layout.title.users'),
+    '/groups': t('layout.title.groups'),
     '/redeem-codes': t('layout.title.redeemCodes'),
     '/audit-logs': t('layout.title.auditLogs'),
     '/withdrawals': t('layout.title.withdrawals'),
   };
 
   const selectedKey = useMemo(() => {
-    const match = ['/keys', '/channels', '/available-models', '/models', '/logs', '/usage-stats', '/billing', '/agent', '/users', '/redeem-codes', '/audit-logs', '/withdrawals'].find((p) =>
+    const match = ['/keys', '/channels', '/available-models', '/models', '/logs', '/usage-stats', '/billing', '/agent', '/users', '/groups', '/redeem-codes', '/audit-logs', '/withdrawals'].find((p) =>
       location.pathname.startsWith(p),
     );
     return match ?? '/dashboard';
@@ -85,6 +87,7 @@ export default function AppLayout() {
     ...(user?.role === 'ADMIN'
       ? [
           { key: '/users', icon: <TeamOutlined />, label: t('layout.menu.users') },
+          { key: '/groups', icon: <ClusterOutlined />, label: t('layout.menu.groups') },
           { key: '/redeem-codes', icon: <GiftOutlined />, label: t('layout.menu.redeemCodes') },
           { key: '/audit-logs', icon: <AuditOutlined />, label: t('layout.menu.auditLogs') },
           { key: '/withdrawals', icon: <WalletOutlined />, label: t('layout.menu.withdrawals') },

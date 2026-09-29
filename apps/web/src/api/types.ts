@@ -8,6 +8,48 @@ export interface UserInfo {
 
 export type ApiKeyStatus = 'ACTIVE' | 'DISABLED' | 'REVOKED';
 
+export type ModelGroupStatus = 'ENABLED' | 'DISABLED';
+
+/** 模型产地 */
+export type ModelOrigin = 'DOMESTIC' | 'OVERSEAS';
+
+/** 分组简要信息（用户所属分组携带倍率） */
+export interface GroupRef {
+  id: string;
+  name: string;
+  displayName: string;
+  ratio: number | null;
+}
+
+/** 分组简要信息（令牌 / 渠道关联，不含倍率） */
+export interface GroupTag {
+  id: string;
+  name: string;
+  displayName: string;
+}
+
+export interface ModelGroupCounts {
+  models: number;
+  users: number;
+  apiKeys: number;
+  channels: number;
+}
+
+export interface ModelGroup {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string | null;
+  /** 分组倍率；null = 不参与（回退用户/代理倍率） */
+  ratio: number | null;
+  status: ModelGroupStatus;
+  priority: number;
+  isDefault: boolean;
+  /** 可见模型；空数组 = 不限制（全部可见） */
+  models: string[];
+  counts: ModelGroupCounts;
+}
+
 /** 智能路由策略（评分权重预设），null = 跟随全局默认 */
 export type RoutingStrategy =
   | 'BALANCED'
@@ -29,6 +71,8 @@ export interface ApiKeyInfo {
   routingStrategy: RoutingStrategy | null;
   tpmLimit: number | null;
   models: string[];
+  groupId: string | null;
+  group: GroupTag | null;
   expiresAt: string | null;
   lastUsedAt: string | null;
   createdAt: string;
@@ -41,6 +85,8 @@ export interface ApiKeyCreated extends ApiKeyInfo {
 
 export interface ChannelModelPrice {
   model: string;
+  /** 上游实际模型名（本地模型名 → 上游模型名映射） */
+  upstreamModelName: string | null;
   costInput: number | null;
   costOutput: number | null;
   priceInput: number | null;
@@ -76,6 +122,10 @@ export interface ChannelInfo {
   dailyRequestLimit: number | null;
   /** 每日 token 限额，null/0 = 不限 */
   dailyTokenLimit: number | null;
+  /** 渠道绑定的分组（仅管理员可设置） */
+  groups: GroupTag[];
+  /** 上游分组名（透传给上游的参数） */
+  upstreamGroup: string | null;
   createdAt: string;
   modelPrices?: ChannelModelPrice[];
 }
@@ -85,12 +135,22 @@ export interface ModelInfo {
   name: string;
   displayName: string;
   provider: string;
+  origin: ModelOrigin;
+  vendor: string | null;
   inputPrice: string;
   outputPrice: string;
   cacheReadPrice: string;
   cacheWritePrice: string;
   enabled: boolean;
   createdAt: string;
+}
+
+/** POST /api/models/classify-origins —— 一键归类结果 */
+export interface ClassifyOriginsResult {
+  total: number;
+  updated: number;
+  byOrigin: Record<string, number>;
+  byVendor: Record<string, number>;
 }
 
 /** GET /api/public/models —— 落地页定价表（价格单位 $/1M tokens） */
@@ -318,6 +378,8 @@ export interface AdminUser {
   rebateRate: string | null;
   agentId: string | null;
   agent: { id: string; username: string; priceMultiplier: string | null } | null;
+  groupId: string | null;
+  group: GroupRef | null;
   createdAt: string;
   _count: { apiKeys: number; channels: number };
 }

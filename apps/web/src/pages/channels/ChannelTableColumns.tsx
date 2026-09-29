@@ -35,6 +35,29 @@ export function buildChannelColumns({
         ),
     },
     { title: t('channels.table.provider'), dataIndex: 'provider' },
+    {
+      title: t('channels.table.groups'),
+      dataIndex: 'groups',
+      width: 170,
+      render: (gs: { id: string; displayName: string }[]) =>
+        gs?.length ? (
+          <Space size={[0, 4]} wrap>
+            {gs.map((g) => (
+              <Tag key={g.id} color="cyan">
+                {g.displayName}
+              </Tag>
+            ))}
+          </Space>
+        ) : (
+          <Tag>{t('channels.table.groupNone')}</Tag>
+        ),
+    },
+    {
+      title: t('channels.table.upstreamGroup'),
+      dataIndex: 'upstreamGroup',
+      width: 120,
+      render: (v: string | null) => (v ? <code>{v}</code> : '-'),
+    },
     { title: 'Base URL', dataIndex: 'baseUrl', ellipsis: true },
     {
       title: t('common.model'),

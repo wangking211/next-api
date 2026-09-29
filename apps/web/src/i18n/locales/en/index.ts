@@ -12,6 +12,7 @@ import usage from './usage.json';
 import billing from './billing.json';
 import agent from './agent.json';
 import admin from './admin.json';
+import groups from './groups.json';
 
 /** English — key set must mirror zh-CN exactly (verified by scripts/i18n-check.mjs) */
 export default {
@@ -29,4 +30,5 @@ export default {
   ...billing,
   ...agent,
   ...admin,
+  ...groups,
 };

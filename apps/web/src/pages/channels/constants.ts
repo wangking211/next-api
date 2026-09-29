@@ -5,9 +5,11 @@ export type PriceRow = {
   priceDiscount?: number;
   /** L1 人工质量分 0~2（1=正常） */
   qualityScore?: number;
+  /** 上游实际模型名（本地模型名 → 上游模型名映射） */
+  upstreamModelName?: string;
 };
 
-export type SetPrice = (model: string, key: keyof PriceRow, value: number | null) => void;
+export type SetPrice = (model: string, key: keyof PriceRow, value: number | string | null) => void;
 
 export interface Filters {
   name?: string;

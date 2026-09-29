@@ -90,5 +90,9 @@
   "admin.audit.adminTag": "管理員",
   "admin.audit.anonymous": "匿名",
   "admin.audit.column.ip": "IP",
-  "admin.audit.column.path": "路徑"
+  "admin.audit.column.path": "路徑",
+  "admin.users.column.group": "分組",
+  "admin.users.groupField": "所屬分組",
+  "admin.users.groupExtra": "使用者預設使用該分組的可見模型與倍率；令牌可單獨覆蓋",
+  "admin.users.groupNone": "無（不限制）"
 }

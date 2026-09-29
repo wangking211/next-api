@@ -15,7 +15,7 @@ import {
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { channelsApi, modelsApi } from '../api/endpoints';
+import { channelsApi, groupsApi, modelsApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { usePageClamp } from '../hooks/usePageClamp';
@@ -61,7 +61,7 @@ export default function ChannelsPage() {
       ? ownerTypeValue !== 'PLATFORM'
       : true;
 
-  const setP = (model: string, key: keyof PriceRow, value: number | null) =>
+  const setP = (model: string, key: keyof PriceRow, value: number | string | null) =>
     setPricing((p) => ({ ...p, [model]: { ...p[model], [key]: value ?? undefined } }));
 
   const buildModelPrices = (models: string[]) =>
@@ -71,6 +71,7 @@ export default function ChannelsPage() {
       if (r.costDiscount != null) entry.costDiscount = r.costDiscount;
       if (r.priceDiscount != null) entry.priceDiscount = r.priceDiscount;
       if (r.qualityScore != null) entry.qualityScore = r.qualityScore;
+      if (r.upstreamModelName) entry.upstreamModelName = r.upstreamModelName;
       return entry;
     });
 
@@ -80,6 +81,10 @@ export default function ChannelsPage() {
   });
 
   usePageClamp(page, setPage, data);
+  const { data: groups = [] } = useQuery({
+    queryKey: ['groups'],
+    queryFn: ({ signal }) => groupsApi.list(signal),
+  });
   const { data: catalog = [] } = useQuery({
     queryKey: ['models'],
     queryFn: ({ signal }) => modelsApi.list(signal),
@@ -151,6 +156,8 @@ export default function ChannelsPage() {
       models: r.models,
       weight: r.weight,
       priority: r.priority,
+      groups: r.groups?.map((g) => g.id) ?? [],
+      upstreamGroup: r.upstreamGroup ?? undefined,
       dailyRequestLimit: r.dailyRequestLimit ?? undefined,
       dailyTokenLimit: r.dailyTokenLimit ?? undefined,
     });
@@ -160,6 +167,7 @@ export default function ChannelsPage() {
         costDiscount: mp.costDiscount ?? undefined,
         priceDiscount: mp.priceDiscount ?? mp.discount ?? undefined,
         qualityScore: mp.qualityScore ?? undefined,
+        upstreamModelName: mp.upstreamModelName ?? undefined,
       };
     }
     setPricing(p);
@@ -249,6 +257,7 @@ export default function ChannelsPage() {
         costDiscount: mp.costDiscount ?? undefined,
         priceDiscount: mp.priceDiscount ?? mp.discount ?? undefined,
         qualityScore: mp.qualityScore ?? undefined,
+        upstreamModelName: mp.upstreamModelName ?? undefined,
       };
     }
     setPricing(p);
@@ -300,7 +309,7 @@ export default function ChannelsPage() {
         rowKey="id"
         loading={isLoading || isFetching}
         dataSource={data?.items ?? []}
-        scroll={{ x: 1000 }}
+        scroll={{ x: 1200 }}
         pagination={{
           current: page,
           pageSize,
@@ -369,6 +378,8 @@ export default function ChannelsPage() {
               // 清空输入框 = 清除限额（发 null，undefined 会被后端视为不修改）
               dailyRequestLimit: v.dailyRequestLimit ?? null,
               dailyTokenLimit: v.dailyTokenLimit ?? null,
+              upstreamGroup: v.upstreamGroup || null,
+              groups: v.groups ?? [],
               modelPrices: buildModelPrices(v.models ?? []),
             })
           }
@@ -420,6 +431,27 @@ export default function ChannelsPage() {
                 editing ? t('channels.form.apiKeyPlaceholderKeep') : t('channels.form.apiKeyPlaceholderNew')
               }
             />
+          </Form.Item>
+          {isAdmin && (
+            <Form.Item
+              name="groups"
+              label={t('channels.form.groups')}
+              extra={t('channels.form.groupsExtra')}
+            >
+              <Select
+                mode="multiple"
+                allowClear
+                placeholder={t('channels.form.groupsPlaceholder')}
+                options={groups.map((g) => ({ value: g.id, label: g.displayName }))}
+              />
+            </Form.Item>
+          )}
+          <Form.Item
+            name="upstreamGroup"
+            label={t('channels.form.upstreamGroup')}
+            extra={t('channels.form.upstreamGroupExtra')}
+          >
+            <Input placeholder={t('channels.form.upstreamGroupPlaceholder')} />
           </Form.Item>
           <Form.Item
             name="models"

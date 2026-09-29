@@ -29,5 +29,17 @@
   "models.available.help": "Just fill in the model name when calling. The gateway routes automatically (own channels first, then platform channels), with priority/weight and failover. Click a tag to copy.",
   "models.available.empty": "No available models yet. Add a channel or contact the administrator.",
   "models.platform": "Platform",
-  "models.mine": "Mine"
+  "models.mine": "Mine",
+  "models.column.origin": "Origin",
+  "models.column.vendor": "Vendor",
+  "models.origin.domestic": "Domestic",
+  "models.origin.overseas": "Overseas",
+  "models.origin.unknown": "Unknown",
+  "models.form.originLabel": "Origin",
+  "models.form.vendorLabel": "Vendor",
+  "models.form.vendorPlaceholder": "e.g. openai (auto-inferred when blank)",
+  "models.classify.button": "Auto-classify",
+  "models.classify.confirm": "Vendor/origin will be re-inferred from model names and overwritten. Continue?",
+  "models.classify.tip": "Auto-tag vendor and origin by model name (overwrites existing values)",
+  "models.classify.success": "Classified {{updated}} / {{total}}"
 }

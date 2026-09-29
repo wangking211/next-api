@@ -10,10 +10,14 @@ import {
   BalanceTxType,
   ChannelInfo,
   ChannelTestResult,
+  ClassifyOriginsResult,
   CommonModel,
   GenerateCodesResult,
   LogFilters,
+  ModelGroup,
   ModelInfo,
+  ModelOrigin,
+  ModelGroupStatus,
   Paginated,
   PaymentOrder,
   PaymentOrderCreated,
@@ -78,6 +82,8 @@ export const keysApi = {
     expiresAt?: string;
     /** 智能路由策略；留空跟随全局默认 */
     routingStrategy?: string;
+    /** 所属分组（仅管理员生效） */
+    groupId?: string | null;
   }) {
     const { data } = await api.post<ApiKeyCreated>('/keys', body);
     return data;
@@ -93,6 +99,8 @@ export const keysApi = {
       routingStrategy: string | null;
       tpmLimit: number | null;
       models: string[] | null;
+      /** 所属分组（仅管理员生效） */
+      groupId: string | null;
     }>,
   ) {
     const { data } = await api.patch<ApiKeyInfo>(`/keys/${id}`, body);
@@ -161,6 +169,10 @@ export const channelsApi = {
     ownerType?: 'USER' | 'PLATFORM';
     weight?: number;
     priority?: number;
+    /** 绑定分组（仅管理员生效） */
+    groups?: string[];
+    /** 上游分组名 */
+    upstreamGroup?: string | null;
   }) {
     const { data } = await api.post<ChannelInfo>('/channels', body);
     return data;
@@ -187,6 +199,8 @@ export const modelsApi = {
     name: string;
     displayName: string;
     provider: string;
+    origin?: ModelOrigin;
+    vendor?: string | null;
     inputPrice?: number;
     outputPrice?: number;
     cacheReadPrice?: number;
@@ -202,6 +216,54 @@ export const modelsApi = {
   },
   async remove(id: string) {
     await api.delete(`/models/${id}`);
+  },
+  /** 一键按模型名补标厂商/产地（管理员；会覆盖已有值） */
+  async classifyOrigins() {
+    const { data } = await api.post<ClassifyOriginsResult>('/models/classify-origins');
+    return data;
+  },
+};
+
+/** 模型分组（全部需登录；写操作仅管理员） */
+export const groupsApi = {
+  async list(signal?: AbortSignal) {
+    const { data } = await api.get<ModelGroup[]>('/groups', { signal });
+    return data;
+  },
+  async create(body: {
+    name: string;
+    displayName: string;
+    description?: string | null;
+    ratio?: number | null;
+    status?: ModelGroupStatus;
+    priority?: number;
+    isDefault?: boolean;
+    models?: string[];
+  }) {
+    const { data } = await api.post<ModelGroup>('/groups', body);
+    return data;
+  },
+  async update(
+    id: string,
+    body: Partial<{
+      displayName: string;
+      description: string | null;
+      ratio: number | null;
+      status: ModelGroupStatus;
+      priority: number;
+      isDefault: boolean;
+      models: string[];
+    }>,
+  ) {
+    const { data } = await api.patch<ModelGroup>(`/groups/${id}`, body);
+    return data;
+  },
+  async setModels(id: string, models: string[]) {
+    const { data } = await api.put<ModelGroup>(`/groups/${id}/models`, { models });
+    return data;
+  },
+  async remove(id: string) {
+    await api.delete(`/groups/${id}`);
   },
 };
 
@@ -316,6 +378,7 @@ export const adminApi = {
       priceMultiplier?: number | null;
       agentId?: string | null;
       rebateRate?: number | null;
+      groupId?: string | null;
     },
   ) {
     const { data } = await api.patch<AdminUser>(`/admin/users/${id}`, body);
