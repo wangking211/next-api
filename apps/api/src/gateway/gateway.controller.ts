@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ApiKeyGuard } from './guards/api-key.guard';
 import { ChannelResolverService } from './channel-resolver.service';
 import { ProviderRegistry } from './providers/provider.registry';
@@ -70,6 +71,8 @@ function isRefusal(e: UpstreamError): boolean {
   return REFUSAL_RE.test(upstreamErrorSignal(e));
 }
 
+@ApiTags('gateway')
+@ApiBearerAuth('bearer')
 @UseGuards(ApiKeyGuard)
 @Controller('v1')
 export class GatewayController {
@@ -91,6 +94,7 @@ export class GatewayController {
       Number(config.get<string>('PREAUTH_MAX_OUTPUT_TOKENS', '4096')) || 4096;
   }
 
+  @ApiOperation({ summary: '列出当前 Key 可用模型（含 capabilities 与别名）' })
   @Get('models')
   async listModels(@Req() req: GatewayRequest, @Res() res: Response) {
     const { user, apiKey } = req.gateway;
@@ -125,6 +129,7 @@ export class GatewayController {
     res.json({ object: 'list', data });
   }
 
+  @ApiOperation({ summary: 'OpenAI 兼容对话补全（支持 stream 流式 SSE）' })
   @Post('chat/completions')
   @HttpCode(200)
   async chatCompletions(
@@ -136,6 +141,7 @@ export class GatewayController {
   }
 
   /** Anthropic Messages API：入站转换为内部 OpenAI 协议，出站（响应/SSE/错误）再翻译回 Anthropic */
+  @ApiOperation({ summary: 'Anthropic Messages API（请求/响应/SSE 双向协议自动转换）' })
   @Post('messages')
   @HttpCode(200)
   async messages(
