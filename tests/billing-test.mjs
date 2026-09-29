@@ -60,6 +60,14 @@ const r1 = await chat(sk, { model: pmodel, messages: [{ role: 'user', content: '
 check('platform call 200', r1.status === 200, r1.status);
 const bal2 = await api('GET', '/api/billing/me', { token: jwt });
 check('balance deducted by cost', Math.abs(bal2.data.balance - 0.999975) < 1e-9, bal2.data);
+// 平台渠道调用会累计 Key 费用额度（与余额扣款同口径）
+const keysAfterPlatform = await api('GET', '/api/keys', { token: jwt });
+const keyAfterPlatform = keysAfterPlatform.data.find((k) => k.id === keyRes.data.id);
+check(
+  'key costUsed accumulates for platform',
+  Math.abs(Number(keyAfterPlatform.costUsed) - 0.000025) < 1e-9,
+  keyAfterPlatform.costUsed,
+);
 
 // 账单明细
 const txs = await api('GET', '/api/billing/transactions', { token: jwt });
@@ -72,6 +80,14 @@ const r2 = await chat(sk, { model: bmodel, messages: [{ role: 'user', content: '
 check('byok call 200', r2.status === 200, r2.status);
 const bal3 = await api('GET', '/api/billing/me', { token: jwt });
 check('byok call does not deduct balance', Math.abs(bal3.data.balance - bal2.data.balance) < 1e-9, bal3.data);
+// BYOK 调用不得消耗 Key 费用额度（否则 costLimit 会被免费调用吃满）
+const keysAfterByok = await api('GET', '/api/keys', { token: jwt });
+const keyAfterByok = keysAfterByok.data.find((k) => k.id === keyRes.data.id);
+check(
+  'byok call does not consume costUsed',
+  Math.abs(Number(keyAfterByok.costUsed) - Number(keyAfterPlatform.costUsed)) < 1e-9,
+  keyAfterByok.costUsed,
+);
 
 // 管理员调整余额到 0，再次拦截
 await api('POST', `/api/admin/users/${uid}/adjust`, { token: adminJwt, body: { amount: -(bal3.data.balance), description: 'reset' } });

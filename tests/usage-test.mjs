@@ -43,7 +43,9 @@ check('non-stream ok', r1.status === 200, r1.status);
 const keys1 = await api('GET', '/api/keys', { token: jwt });
 const kA = keys1.data.find((k) => k.id === keyA.data.id);
 check('key quotaUsed = 18', kA.quotaUsed === 18, kA.quotaUsed);
-check('key costUsed = 0.000025', Math.abs(Number(kA.costUsed) - 0.000025) < 1e-9, kA.costUsed);
+// BYOK（用户自有）渠道不实际扣费，因此 Key 的费用额度不累计；
+// 折算金额仍记录在 summary/logs（见下方断言），平台渠道才累计 costUsed（见 billing-test.mjs）
+check('key costUsed stays 0 for BYOK', Number(kA.costUsed) === 0, kA.costUsed);
 
 // summary
 const sum1 = await api('GET', '/api/usage/summary', { token: jwt });
