@@ -21,6 +21,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { adminApi, groupsApi, usageApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
+import { downloadBlob } from '../utils/csv';
 import { formatCredits, fromCredits } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
 import type { AdminUser } from '../api/types';
@@ -45,6 +46,8 @@ export default function AdminUsersPage() {
   const [range, setRange] = useState<any>(null);
   const [sortBy, setSortBy] = useState<'createdAt' | 'balance' | 'username'>('createdAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [hasKeys, setHasKeys] = useState<boolean | undefined>();
+  const [hasChannels, setHasChannels] = useState<boolean | undefined>();
   const [target, setTarget] = useState<AdminUser | null>(null);
   const [mode, setMode] = useState<Mode>('recharge');
   const [usageUser, setUsageUser] = useState<AdminUser | null>(null);
@@ -62,6 +65,8 @@ export default function AdminUsersPage() {
     balanceMax,
     createdFrom: range?.[0] ? range[0].toISOString() : undefined,
     createdTo: range?.[1] ? range[1].toISOString() : undefined,
+    hasKeys,
+    hasChannels,
     sortBy,
     sortOrder,
   };
@@ -75,9 +80,20 @@ export default function AdminUsersPage() {
     setBalanceMin(undefined);
     setBalanceMax(undefined);
     setRange(null);
+    setHasKeys(undefined);
+    setHasChannels(undefined);
     setSortBy('createdAt');
     setSortOrder('desc');
     setPage(1);
+  };
+
+  const exportCsv = async () => {
+    try {
+      const blob = await adminApi.exportUsers(filters);
+      downloadBlob('users.csv', blob);
+    } catch (e) {
+      message.error(errorMessage(e));
+    }
   };
 
   const { data, isLoading } = useQuery({
@@ -321,7 +337,42 @@ export default function AdminUsersPage() {
           </Space>
         </Col>
         <Col>
-          <Button onClick={resetFilters}>{t('admin.users.filter.reset')}</Button>
+          <Select
+            allowClear
+            placeholder={t('admin.users.filter.hasKeys')}
+            style={{ width: 130 }}
+            value={hasKeys === undefined ? undefined : String(hasKeys)}
+            onChange={(v) => {
+              setHasKeys(v === undefined ? undefined : v === 'true');
+              setPage(1);
+            }}
+            options={[
+              { value: 'true', label: t('admin.users.filter.has') },
+              { value: 'false', label: t('admin.users.filter.none') },
+            ]}
+          />
+        </Col>
+        <Col>
+          <Select
+            allowClear
+            placeholder={t('admin.users.filter.hasChannels')}
+            style={{ width: 130 }}
+            value={hasChannels === undefined ? undefined : String(hasChannels)}
+            onChange={(v) => {
+              setHasChannels(v === undefined ? undefined : v === 'true');
+              setPage(1);
+            }}
+            options={[
+              { value: 'true', label: t('admin.users.filter.has') },
+              { value: 'false', label: t('admin.users.filter.none') },
+            ]}
+          />
+        </Col>
+        <Col>
+          <Space>
+            <Button onClick={resetFilters}>{t('admin.users.filter.reset')}</Button>
+            <Button onClick={exportCsv}>{t('admin.users.export')}</Button>
+          </Space>
         </Col>
       </Row>
       <Table<AdminUser>
@@ -396,6 +447,11 @@ export default function AdminUsersPage() {
           {
             title: t('admin.users.column.keyChannel'),
             render: (_, r) => `${r._count.apiKeys} / ${r._count.channels}`,
+          },
+          {
+            title: t('admin.users.column.lastActive'),
+            render: (_, r) =>
+              r.lastActiveAt ? new Date(r.lastActiveAt).toLocaleString() : '-',
           },
           {
             title: t('common.action'),

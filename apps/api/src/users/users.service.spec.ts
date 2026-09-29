@@ -8,6 +8,7 @@ describe('UsersService.list 筛选与排序', () => {
         findMany: jest.fn().mockResolvedValue([]),
         count: jest.fn().mockResolvedValue(0),
       },
+      requestLog: { groupBy: jest.fn().mockResolvedValue([]) },
     };
     return { service: new UsersService(prisma as unknown as PrismaService), prisma };
   }
@@ -59,5 +60,52 @@ describe('UsersService.list 筛选与排序', () => {
     await service.list({ balanceMax: 5 });
     const arg = prisma.user.findMany.mock.calls[0][0];
     expect(arg.where.balance).toEqual({ lte: 5 });
+  });
+
+  it('有无 Key / 有无渠道筛选', async () => {
+    const { service, prisma } = svc();
+    await service.list({ hasKeys: true, hasChannels: false });
+    const arg = prisma.user.findMany.mock.calls[0][0];
+    expect(arg.where.apiKeys).toEqual({ some: {} });
+    expect(arg.where.channels).toEqual({ none: {} });
+  });
+
+  it('最后活跃时间由调用明细聚合派生并挂到列表项', async () => {
+    const { service, prisma } = svc();
+    const when = new Date('2026-09-29T10:00:00Z');
+    prisma.user.findMany.mockResolvedValue([{ id: 'u1' }, { id: 'u2' }]);
+    prisma.requestLog.groupBy.mockResolvedValue([
+      { userId: 'u1', _max: { createdAt: when } },
+    ]);
+    const res = await service.list();
+    expect(res.items[0]).toEqual({ id: 'u1', lastActiveAt: when });
+    expect(res.items[1]).toEqual({ id: 'u2', lastActiveAt: null });
+    expect(prisma.requestLog.groupBy).toHaveBeenCalledTimes(1);
+  });
+
+  it('CSV 导出复用同一套筛选条件并带上表头', async () => {
+    const { service, prisma } = svc();
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'u1',
+        email: 'a@b.com',
+        username: 'a,b',
+        role: 'USER',
+        status: 'ACTIVE',
+        balance: 1.5,
+        priceMultiplier: null,
+        rebateRate: null,
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        agent: null,
+        group: { name: 'default' },
+        _count: { apiKeys: 1, channels: 0 },
+      },
+    ]);
+    const { csv, count } = await service.exportCsv({ hasKeys: true });
+    expect(count).toBe(1);
+    const [header, row] = csv.split('\n');
+    expect(header).toContain('lastActiveAt');
+    expect(row).toContain('"a,b"'); // 含逗号的字段被转义
+    expect(prisma.user.findMany.mock.calls[0][0].where.apiKeys).toEqual({ some: {} });
   });
 });

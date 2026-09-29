@@ -378,6 +378,8 @@ export const adminApi = {
       balanceMax?: number;
       createdFrom?: string;
       createdTo?: string;
+      hasKeys?: boolean;
+      hasChannels?: boolean;
       sortBy?: 'createdAt' | 'balance' | 'username';
       sortOrder?: 'asc' | 'desc';
     } = {},
@@ -388,6 +390,31 @@ export const adminApi = {
       signal,
     });
     return data;
+  },
+  async exportUsers(
+    params: {
+      q?: string;
+      role?: string;
+      status?: string;
+      groupId?: string;
+      agentId?: string;
+      balanceMin?: number;
+      balanceMax?: number;
+      createdFrom?: string;
+      createdTo?: string;
+      hasKeys?: boolean;
+      hasChannels?: boolean;
+      sortBy?: 'createdAt' | 'balance' | 'username';
+      sortOrder?: 'asc' | 'desc';
+    } = {},
+    signal?: AbortSignal,
+  ): Promise<Blob> {
+    const res = await api.get('/admin/users/export', {
+      params,
+      responseType: 'blob',
+      signal,
+    });
+    return res.data as Blob;
   },
   async updateUser(
     id: string,

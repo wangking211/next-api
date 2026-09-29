@@ -385,6 +385,8 @@ export interface AdminUser {
   agent: { id: string; username: string; priceMultiplier: string | null } | null;
   groupId: string | null;
   group: GroupRef | null;
+  /** 最后活跃（由调用明细派生；null = 从未调用） */
+  lastActiveAt: string | null;
   createdAt: string;
   _count: { apiKeys: number; channels: number };
 }
