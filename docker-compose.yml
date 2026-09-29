@@ -17,6 +17,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    logging: &log-rotate
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     image: redis:7-alpine
@@ -33,6 +38,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    logging: *log-rotate
 
   api:
     profiles: ["full"]
@@ -84,6 +90,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 40s
+    logging: *log-rotate
 
   web:
     profiles: ["full"]
@@ -104,6 +111,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    logging: *log-rotate
 
 volumes:
   pgdata:

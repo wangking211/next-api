@@ -344,6 +344,9 @@ export class GatewayController {
               : result.json,
           );
       } catch (e) {
+        // 客户端已断开：中止是本端触发的，不计渠道失败、不再故障转移
+        //（全部候选共享同一 signal，继续试只会连败触发冷却/自动禁用）
+        if (clientClosed) return;
         if (e instanceof UpstreamError) {
           lastError = e;
           const action = await this.handleUpstreamFailure(e, {
@@ -568,7 +571,11 @@ export class GatewayController {
 
     // 客户端断开时中止上游请求，避免连接泄漏
     const upstreamAbort = new AbortController();
-    res.on('close', () => upstreamAbort.abort());
+    let clientClosed = false;
+    res.on('close', () => {
+      clientClosed = true;
+      upstreamAbort.abort();
+    });
 
     for (let i = 0; i < channels.length; i++) {
       const { channel, apiKey: upstreamKey } = channels[i];
@@ -629,6 +636,8 @@ export class GatewayController {
         ]);
         return res.status(result.status).json(result.json);
       } catch (e) {
+        // 客户端已断开：中止是本端触发的，不计渠道失败、不再故障转移
+        if (clientClosed) return;
         if (e instanceof UpstreamError) {
           lastError = e;
           const action = await this.handleUpstreamFailure(e, {

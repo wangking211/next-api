@@ -1,7 +1,8 @@
 /**
  * 清理 e2e 测试产生的数据，保留演示种子数据。
- *   pnpm cleanup            # 实际删除
+ *   pnpm cleanup            # 实际删除（仅限本地开发库）
  *   pnpm cleanup --dry-run  # 仅预览
+ *   pnpm cleanup --force    # 非本地库 / NODE_ENV=production 时强制执行（危险）
  *
  * 识别规则：
  *  - 用户邮箱以 @test.com / @t.com 结尾（级联删除其 Key/渠道/日志/用量/账单）
@@ -27,6 +28,32 @@ for (const p of [join(__dirname, '..', '.env'), join(process.cwd(), '.env')]) {
 
 const prisma = new PrismaClient();
 const DRY = process.argv.includes('--dry-run');
+const FORCE = process.argv.includes('--force');
+
+/**
+ * 安全守卫：非本地数据库或生产环境一律拒绝删除，防止在服务器上连到生产库误删真实数据
+ *（本脚本按邮箱/渠道名/前缀匹配删除，规则会命中真实用户与兑换码）。
+ * --dry-run 只读预览始终放行；确认无误可加 --force 强制执行。
+ */
+function assertSafeEnv() {
+  if (DRY || FORCE) return;
+  let host = '';
+  try {
+    host = new URL(process.env.DATABASE_URL ?? '').hostname;
+  } catch {
+    // URL 缺失/不可解析 → 按不安全处理
+  }
+  const localHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+  if (!localHosts.has(host) || process.env.NODE_ENV === 'production') {
+    console.error(
+      `[cleanup] 拒绝执行：DATABASE_URL 主机 "${host || '(不可解析)'}"，` +
+        `NODE_ENV=${process.env.NODE_ENV ?? '(未设置)'}。\n` +
+        '此脚本会删除用户/渠道/兑换码等真实数据，仅允许在本地开发库运行。\n' +
+        '确认无误可加 --force 强制执行，或先用 --dry-run 预览。',
+    );
+    process.exit(1);
+  }
+}
 
 const TEST_MODEL_PREFIXES = ['smoke-model-', 'p4model-', 'p7plat-', 'p7byok-', 'ops-'];
 const TEST_CHANNEL_NAMES = [
@@ -44,6 +71,7 @@ const TEST_CHANNEL_NAMES = [
 ];
 
 async function main() {
+  assertSafeEnv();
   const users = await prisma.user.findMany({
     where: {
       OR: [{ email: { endsWith: '@test.com' } }, { email: { endsWith: '@t.com' } }],

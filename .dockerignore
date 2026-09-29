@@ -4,6 +4,9 @@ dist
 **/dist
 .git
 .env
+.env.*
+**/.env
+**/.env.*
 *.log
 coverage
 .vite

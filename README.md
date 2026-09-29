@@ -360,4 +360,4 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
   - `BOOTSTRAP_ADMIN_PASSWORD`：≥12 字符且非常见弱口令（`admin123456` 等会被拒绝）。
   - `ENCRYPTION_KEY`：32 字节非全零 hex。
 - 已启用 `helmet` 安全响应头、请求体大小限制（25MB）、按 key 的 RPM 限流。
-- 调用内容（输入/输出）默认记录到 `RequestLog`（`LOG_CONTENT=true`，单条上限 `LOG_CONTENT_MAX=20000` 字符）；如需隐私合规可设 `LOG_CONTENT=false` 仅保留元数据与 token。
+- 调用内容（输入/输出）默认不记录（`LOG_CONTENT=false`，仅保留元数据与 token）；设 `LOG_CONTENT=true` 时写入 `RequestLog`，单条上限 `LOG_CONTENT_MAX=20000` 字符（生产开启会显著增加磁盘与日志占用）。

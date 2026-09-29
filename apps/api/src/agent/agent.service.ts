@@ -172,15 +172,18 @@ export class AgentService {
     return this.prisma.$transaction(async (tx) => {
       const agent = await tx.user.findUnique({
         where: { id: agentId },
-        select: { balance: true, username: true },
+        select: { username: true },
       });
       if (!agent) throw new NotFoundException('Agent not found');
-      if (Number(agent.balance) < cost) {
-        throw new BadRequestException('代理余额不足');
-      }
-      const au = await tx.user.update({
-        where: { id: agentId },
+      // 条件扣减（与 withdrawal.service 同款）：命中 0 行 = 余额不足。
+      // 先读后扣在并发充值下会把代理余额打成负数
+      const dec = await tx.user.updateMany({
+        where: { id: agentId, balance: { gte: cost } },
         data: { balance: { decrement: cost } },
+      });
+      if (dec.count === 0) throw new BadRequestException('代理余额不足');
+      const au = await tx.user.findUniqueOrThrow({
+        where: { id: agentId },
         select: { balance: true },
       });
       const mu = await tx.user.update({

@@ -61,7 +61,7 @@ export class UsageService {
     private readonly billing: BillingService,
     config: ConfigService,
   ) {
-    this.logContent = config.get<string>('LOG_CONTENT', 'true') !== 'false';
+    this.logContent = config.get<string>('LOG_CONTENT', 'false') !== 'false';
     this.maxChars = Number(config.get<string>('LOG_CONTENT_MAX', '20000')) || 20000;
   }
 

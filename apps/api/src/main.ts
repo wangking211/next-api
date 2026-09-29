@@ -74,29 +74,35 @@ async function bootstrap() {
   await app.get(BootstrapService).ensureAdmin();
 
   // Swagger 文档（/api/docs，自带 Try it out 交互式调用）
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('AI Gateway API')
-    .setDescription(
-      '控制台 API（/api/**，JWT Bearer）与 OpenAI 兼容网关（/v1/**，sk- API Key）。' +
-        '网关端点支持 Authorization: Bearer sk-... 与 x-api-key: sk-... 两种鉴权。',
-    )
-    .setVersion('1.0')
-    .addBearerAuth(
-      { type: 'http', scheme: 'bearer', description: 'JWT（控制台 API）或 sk- API Key（网关）' },
-      'bearer',
-    )
-    .build();
-  const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, swaggerDocument, {
-    customSiteTitle: 'AI Gateway API Docs',
-    swaggerOptions: {
-      persistAuthorization: true,
-      deepLinking: true,
-      docExpansion: 'list',
-      tagsSorter: 'alpha',
-      operationsSorter: 'alpha',
-    },
-  });
+  // 生产默认关闭（避免暴露全量 API 结构），需要时设 SWAGGER_ENABLED=true 显式开启
+  const swaggerFlag = config.get<string>('SWAGGER_ENABLED', '').trim();
+  if (swaggerFlag === 'true' || (swaggerFlag !== 'false' && !isProd)) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('AI Gateway API')
+      .setDescription(
+        '控制台 API（/api/**，JWT Bearer）与 OpenAI 兼容网关（/v1/**，sk- API Key）。' +
+          '网关端点支持 Authorization: Bearer sk-... 与 x-api-key: sk-... 两种鉴权。',
+      )
+      .setVersion('1.0')
+      .addBearerAuth(
+        { type: 'http', scheme: 'bearer', description: 'JWT（控制台 API）或 sk- API Key（网关）' },
+        'bearer',
+      )
+      .build();
+    const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('api/docs', app, swaggerDocument, {
+      customSiteTitle: 'AI Gateway API Docs',
+      swaggerOptions: {
+        persistAuthorization: true,
+        deepLinking: true,
+        docExpansion: 'list',
+        tagsSorter: 'alpha',
+        operationsSorter: 'alpha',
+      },
+    });
+  } else {
+    Logger.log('Swagger 已禁用（生产默认关闭，SWAGGER_ENABLED=true 可开启）', 'Bootstrap');
+  }
 
   app.enableShutdownHooks();
 
