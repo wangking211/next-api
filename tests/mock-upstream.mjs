@@ -28,6 +28,26 @@ const server = http.createServer(async (req, res) => {
 
   const body = await readBody(req);
 
+  // ---- OpenAI 兼容 embeddings（向量列表；usage 固定 7 便于 e2e 断言） ----
+  if (url.endsWith('/embeddings')) {
+    const input = body?.input;
+    const count = Array.isArray(input) ? input.length : 1;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        object: 'list',
+        data: Array.from({ length: count }, (_, i) => ({
+          object: 'embedding',
+          index: i,
+          embedding: [0.1, 0.2, 0.3],
+        })),
+        model: body?.model,
+        usage: { prompt_tokens: 7, prompt_tokens_details: null, total_tokens: 7 },
+      }),
+    );
+    return;
+  }
+
   // ---- Gemini 原生端点 ----
   if (url.includes(':streamGenerateContent')) {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });

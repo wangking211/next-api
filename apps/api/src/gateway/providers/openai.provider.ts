@@ -41,7 +41,24 @@ export class OpenAiCompatibleProvider implements Provider {
     apiKey: string,
     req: ChatRequest,
   ): Promise<NonStreamResult> {
-    const url = joinUrl(channel.baseUrl, 'chat/completions');
+    return this.postJson(joinUrl(channel.baseUrl, 'chat/completions'), apiKey, req);
+  }
+
+  async embeddingsNonStream(
+    channel: Channel,
+    apiKey: string,
+    req: ChatRequest,
+  ): Promise<NonStreamResult> {
+    // OpenAI 兼容 /embeddings：请求体 {model, input, ...}，响应含 usage.prompt_tokens（无输出 token）
+    return this.postJson(joinUrl(channel.baseUrl, 'embeddings'), apiKey, req);
+  }
+
+  /** 非流式 POST JSON 透传：chat 与 embeddings 共用（连接失败/解析/错误分类语义一致） */
+  private async postJson(
+    url: string,
+    apiKey: string,
+    req: ChatRequest,
+  ): Promise<NonStreamResult> {
     let res: Response;
     try {
       res = await fetch(url, {

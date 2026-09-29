@@ -15,5 +15,17 @@ export function estimatePromptTokens(body: any): number {
       }
     }
   }
-  return Math.ceil(chars / 4);
+  return Math.ceil((chars + inputChars(body?.input)) / 4);
+}
+
+/**
+ * embeddings 请求的 input 字符量：
+ * - string → 长度；number → token id，按 1 个 token（≈4 字符）计；
+ * - array 递归（支持 string[] / number[] / number[][] 批量输入）。
+ */
+function inputChars(input: any): number {
+  if (typeof input === 'string') return input.length;
+  if (typeof input === 'number') return 4;
+  if (Array.isArray(input)) return input.reduce((n: number, x: any) => n + inputChars(x), 0);
+  return 0;
 }

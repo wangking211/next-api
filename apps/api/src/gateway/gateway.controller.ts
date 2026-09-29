@@ -71,6 +71,29 @@ function isRefusal(e: UpstreamError): boolean {
   return REFUSAL_RE.test(upstreamErrorSignal(e));
 }
 
+/** embeddings 请求预览：只取首个输入片段（批量输入全量写日志会撑爆 RequestLog） */
+function embeddingsPreview(body: any): string {
+  const input = body?.input;
+  if (typeof input === 'string') return input.slice(0, 500);
+  if (Array.isArray(input) && input.length > 0) {
+    const first =
+      typeof input[0] === 'string'
+        ? input[0]
+        : JSON.stringify(input[0]) ?? '';
+    const more = input.length > 1 ? `（+${input.length - 1} 条）` : '';
+    return `${first.slice(0, 500)}${more}`;
+  }
+  return '';
+}
+
+/** embeddings 响应预览：只记向量条数与维度，向量本身绝不入库（1536 维会撑爆日志） */
+function embeddingsResponsePreview(json: any): string {
+  const data = json?.data;
+  if (!Array.isArray(data)) return '';
+  const dim = Array.isArray(data[0]?.embedding) ? `×${data[0].embedding.length}` : '';
+  return `[embeddings ${data.length} ${dim}]`.trim();
+}
+
 @ApiTags('gateway')
 @ApiBearerAuth('bearer')
 @UseGuards(ApiKeyGuard)
@@ -162,6 +185,20 @@ export class GatewayController {
     return this.executeChat(req, res, anthropicToOpenAiRequest(body), 'anthropic');
   }
 
+  /** OpenAI 兼容 embeddings：向量化透传，按输入 token 计费（无输出 token） */
+  @ApiOperation({
+    summary: 'OpenAI 兼容 embeddings（向量化；按输入 token 计费，支持故障转移）',
+  })
+  @Post('embeddings')
+  @HttpCode(200)
+  async embeddings(
+    @Req() req: GatewayRequest,
+    @Res() res: Response,
+    @Body() body: Record<string, any>,
+  ) {
+    return this.executeEmbeddings(req, res, body);
+  }
+
   private async executeChat(
     req: GatewayRequest,
     res: Response,
@@ -186,23 +223,7 @@ export class GatewayController {
     const model = await this.resolver.resolveAlias(requested);
 
     // 能力校验：目录声明了 capabilities 时，请求所需能力必须被覆盖（未声明则放行）
-    const requiredCaps = detectRequiredCapabilities(body);
-    if (requiredCaps.length) {
-      const cat = await this.resolver.catalogFor([model]);
-      const declared = cat.get(model)?.capabilities ?? [];
-      if (declared.length) {
-        const missing = requiredCaps.filter((c) => !declared.includes(c));
-        if (missing.length) {
-          return res.status(400).json(
-            err(
-              `Model "${model}" does not support: ${missing.join(', ')}. ` +
-                `Declared capabilities: ${declared.join(', ')}.`,
-              'invalid_request_error',
-            ),
-          );
-        }
-      }
-    }
+    if (!(await this.checkCapabilities(model, body, res, err))) return;
 
     const channels = await this.resolver.resolve(user.id, model, {
       strategy: apiKey.routingStrategy,
@@ -227,20 +248,7 @@ export class GatewayController {
     let lastError: UpstreamError | null = null;
 
     // 平台渠道需余额：0 价模型豁免；对每个候选渠道按“输入 + 最大输出”预估上限做预授权，避免单次调用透支
-    let cachedBalance: number | null = null;
-    const getBalance = async () => {
-      if (cachedBalance === null) {
-        cachedBalance = (await this.billing.getBalance(user.id)).balance;
-      }
-      return cachedBalance;
-    };
-    let cachedMultiplier: number | null = null;
-    const getUserMultiplier = async () => {
-      if (cachedMultiplier === null) {
-        cachedMultiplier = await this.billing.getUserMultiplier(user.id);
-      }
-      return cachedMultiplier;
-    };
+    const guards = this.balanceGuards(user.id);
     const maxOutputTokens =
       Number(body?.max_tokens ?? body?.max_completion_tokens ?? 0) ||
       this.defaultMaxOutputTokens;
@@ -262,8 +270,8 @@ export class GatewayController {
         const required =
           ((promptFallback / 1_000_000) * p.priceInput +
             (maxOutputTokens / 1_000_000) * p.priceOutput) *
-          (await getUserMultiplier());
-        if (required > 0 && (await getBalance()) < required) {
+          (await guards.getUserMultiplier());
+        if (required > 0 && (await guards.getBalance()) < required) {
           insufficientBalance = true;
           continue;
         }
@@ -338,58 +346,21 @@ export class GatewayController {
       } catch (e) {
         if (e instanceof UpstreamError) {
           lastError = e;
-          const latencyMs = Date.now() - attemptStart;
-          const signal = upstreamErrorSignal(e) || e.message;
-          // 错误分类（客户端 4xx 不计健康度，防止被恶意请求自动禁用渠道）：
-          //  限流/超限 → 冷却退避且不累计失败；5xx/连接故障 → 健康度失败计数；
-          //  上游鉴权失败(401) → 只降路由质量分；拒答/内容过滤 → 只降质量分
-          const limited = isRateLimited(e);
-          const transient = e.retryable && !limited;
-          const authFault = !limited && e.status === 401;
-          const refusal = !limited && !transient && !authFault && isRefusal(e);
-          if (limited) {
-            await this.health.recordRateLimited(channel.id, signal);
-            await this.metrics.record(channel.id, model, 'rate_limited', {
-              latencyMs,
-              status: e.status,
-              errorMessage: signal,
-            });
-          } else if (transient) {
-            await this.health.recordFailure(channel.id, e.message);
-            await this.metrics.record(channel.id, model, 'error', {
-              latencyMs,
-              status: e.status,
-              errorMessage: signal,
-            });
-          } else if (authFault || refusal) {
-            await this.metrics.record(channel.id, model, authFault ? 'error' : 'refused', {
-              latencyMs,
-              status: e.status,
-              errorMessage: signal,
-            });
-          }
-          const hasMore = i < channels.length - 1;
-          // 故障转移：上游故障、限流/超限、鉴权失效都要换下一家试
-          if ((transient || limited || authFault) && hasMore) continue;
-          await this.usage.record({
+          const action = await this.handleUpstreamFailure(e, {
+            res,
+            channel,
+            model,
+            attemptStart,
+            startedAt,
             userId: user.id,
             apiKeyId: apiKey.id,
-            channelId: channel.id,
-            model,
-            provider: channel.provider,
-            promptTokens: 0,
-            completionTokens: 0,
-            totalTokens: 0,
-            latencyMs: Date.now() - startedAt,
-            status: e.status || 502,
-            errorMessage: e.message,
-            chargeable: channel.ownerType === ChannelOwnerType.PLATFORM,
-            isStream,
             requestPreview,
+            isStream,
+            hasMore: i < channels.length - 1,
+            errorBody: err,
           });
-          return res
-            .status(e.status || 502)
-            .json(err(upstreamErrorMessage(e), 'upstream_error'));
+          if (action === 'continue') continue;
+          return;
         }
         throw e;
       }
@@ -407,6 +378,302 @@ export class GatewayController {
         );
     }
 
+    return res
+      .status(lastError?.status ?? 502)
+      .json(
+        err(
+          lastError ? upstreamErrorMessage(lastError) : 'All channels failed',
+          'upstream_error',
+        ),
+      );
+  }
+
+  /** 余额/倍率按用户缓存（同一次请求的多个候选渠道共享，避免重复查库） */
+  private balanceGuards(userId: string) {
+    let cachedBalance: number | null = null;
+    let cachedMultiplier: number | null = null;
+    return {
+      getBalance: async (): Promise<number> => {
+        if (cachedBalance === null) {
+          cachedBalance = (await this.billing.getBalance(userId)).balance;
+        }
+        return cachedBalance;
+      },
+      getUserMultiplier: async (): Promise<number> => {
+        if (cachedMultiplier === null) {
+          cachedMultiplier = await this.billing.getUserMultiplier(userId);
+        }
+        return cachedMultiplier;
+      },
+    };
+  }
+
+  /**
+   * 能力校验：目录声明了 capabilities 时，请求所需能力必须被覆盖（未声明则放行）。
+   * @returns true = 通过；false = 已写出 400 响应，调用方应直接 return。
+   */
+  private async checkCapabilities(
+    model: string,
+    body: Record<string, any>,
+    res: Response,
+    err: (message: string, type?: string, code?: string | null) => any,
+  ): Promise<boolean> {
+    const requiredCaps = detectRequiredCapabilities(body);
+    if (!requiredCaps.length) return true;
+    const cat = await this.resolver.catalogFor([model]);
+    const declared = cat.get(model)?.capabilities ?? [];
+    if (!declared.length) return true;
+    const missing = requiredCaps.filter((c) => !declared.includes(c));
+    if (!missing.length) return true;
+    res.status(400).json(
+      err(
+        `Model "${model}" does not support: ${missing.join(', ')}. ` +
+          `Declared capabilities: ${declared.join(', ')}.`,
+        'invalid_request_error',
+      ),
+    );
+    return false;
+  }
+
+  /**
+   * 上游失败统一处理（chat 与 embeddings 共用）：错误分类 → 记录健康度/路由指标 →
+   * 可故障转移则返回 'continue'（调用方试下一家），否则落用量日志并写出错误响应。
+   */
+  private async handleUpstreamFailure(
+    e: UpstreamError,
+    ctx: {
+      res: Response;
+      channel: Channel;
+      model: string;
+      attemptStart: number;
+      startedAt: number;
+      userId: string;
+      apiKeyId: string;
+      requestPreview: string;
+      isStream: boolean;
+      hasMore: boolean;
+      errorBody: (message: string, type?: string, code?: string | null) => any;
+    },
+  ): Promise<'continue' | 'responded'> {
+    const latencyMs = Date.now() - ctx.attemptStart;
+    const signal = upstreamErrorSignal(e) || e.message;
+    // 错误分类（客户端 4xx 不计健康度，防止被恶意请求自动禁用渠道）：
+    //  限流/超限 → 冷却退避且不累计失败；5xx/连接故障 → 健康度失败计数；
+    //  上游鉴权失败(401) → 只降路由质量分；拒答/内容过滤 → 只降质量分
+    const limited = isRateLimited(e);
+    const transient = e.retryable && !limited;
+    const authFault = !limited && e.status === 401;
+    const refusal = !limited && !transient && !authFault && isRefusal(e);
+    if (limited) {
+      await this.health.recordRateLimited(ctx.channel.id, signal);
+      await this.metrics.record(ctx.channel.id, ctx.model, 'rate_limited', {
+        latencyMs,
+        status: e.status,
+        errorMessage: signal,
+      });
+    } else if (transient) {
+      await this.health.recordFailure(ctx.channel.id, e.message);
+      await this.metrics.record(ctx.channel.id, ctx.model, 'error', {
+        latencyMs,
+        status: e.status,
+        errorMessage: signal,
+      });
+    } else if (authFault || refusal) {
+      await this.metrics.record(ctx.channel.id, ctx.model, authFault ? 'error' : 'refused', {
+        latencyMs,
+        status: e.status,
+        errorMessage: signal,
+      });
+    }
+    // 故障转移：上游故障、限流/超限、鉴权失效都要换下一家试
+    if ((transient || limited || authFault) && ctx.hasMore) return 'continue';
+    await this.usage.record({
+      userId: ctx.userId,
+      apiKeyId: ctx.apiKeyId,
+      channelId: ctx.channel.id,
+      model: ctx.model,
+      provider: ctx.channel.provider,
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      latencyMs: Date.now() - ctx.startedAt,
+      status: e.status || 502,
+      errorMessage: e.message,
+      chargeable: ctx.channel.ownerType === ChannelOwnerType.PLATFORM,
+      isStream: ctx.isStream,
+      requestPreview: ctx.requestPreview,
+    });
+    ctx.res
+      .status(e.status || 502)
+      .json(ctx.errorBody(upstreamErrorMessage(e), 'upstream_error'));
+    return 'responded';
+  }
+
+  /**
+   * embeddings 执行：与 executeChat 同构（别名→能力→路由→预授权→故障转移→计费/健康/指标），
+   * 差异：只走非流式单跳；input 为 string / string[] / token id 数组；无输出 token；
+   * 只有实现了 embeddingsNonStream 的服务商（当前为 OpenAI 兼容类）参与候选。
+   */
+  private async executeEmbeddings(
+    req: GatewayRequest,
+    res: Response,
+    body: Record<string, any>,
+  ) {
+    const err = (
+      message: string,
+      type = 'invalid_request_error',
+      code: string | null = null,
+    ) => openaiError(message, type, code);
+    const { user, apiKey } = req.gateway;
+    const requested: string | undefined = body?.model;
+    if (!requested) {
+      return res.status(400).json(err('Missing required field: model'));
+    }
+    const input = body?.input;
+    const hasInput =
+      (typeof input === 'string' && input.length > 0) ||
+      (Array.isArray(input) && input.length > 0);
+    if (!hasInput) {
+      return res
+        .status(400)
+        .json(err('Missing required field: input (non-empty string or array of strings/tokens)'));
+    }
+
+    const model = await this.resolver.resolveAlias(requested);
+    if (!(await this.checkCapabilities(model, body, res, err))) return;
+
+    const channels = await this.resolver.resolve(user.id, model, {
+      strategy: apiKey.routingStrategy,
+      stickyKey: this.buildStickyKey(req, user.id, body),
+    });
+    if (channels.length === 0) {
+      return res
+        .status(404)
+        .json(
+          err(
+            `No available channel for model "${model}". Configure a channel that serves this model.`,
+            'model_not_found',
+            'model_not_found',
+          ),
+        );
+    }
+
+    const startedAt = Date.now();
+    const promptFallback = estimatePromptTokens(body);
+    const requestPreview = embeddingsPreview(body);
+    let lastError: UpstreamError | null = null;
+    let unsupported = false; // 存在候选渠道，但其服务商未实现 embeddings 透传
+    let insufficientBalance = false;
+    const guards = this.balanceGuards(user.id);
+
+    // 客户端断开时中止上游请求，避免连接泄漏
+    const upstreamAbort = new AbortController();
+    res.on('close', () => upstreamAbort.abort());
+
+    for (let i = 0; i < channels.length; i++) {
+      const { channel, apiKey: upstreamKey } = channels[i];
+      const provider = this.providers.resolve(channel.provider);
+      if (typeof provider.embeddingsNonStream !== 'function') {
+        unsupported = true; // 如 anthropic/gemini 暂无兼容端点 → 换下一家
+        continue;
+      }
+      if (channel.ownerType === ChannelOwnerType.PLATFORM) {
+        // 预授权：embeddings 只有输入 token（输出恒为 0），按输入预估上限
+        const p = await this.billing.getChannelPricing(channel.id, model);
+        const required =
+          (promptFallback / 1_000_000) * p.priceInput * (await guards.getUserMultiplier());
+        if (required > 0 && (await guards.getBalance()) < required) {
+          insufficientBalance = true;
+          continue;
+        }
+      }
+      const attemptStart = Date.now();
+      try {
+        const result = await provider.embeddingsNonStream(channel, upstreamKey, {
+          model,
+          body,
+          signal: upstreamAbort.signal,
+          // timeoutMs 未传 → 默认 120s 上游总超时
+        });
+        // 上游未回 usage 时按 input 兜底估算；embeddings 无输出 token
+        const usage = result.usage ?? {
+          promptTokens: promptFallback,
+          completionTokens: 0,
+          totalTokens: promptFallback,
+        };
+        // TPM 回填：结算在 guard 的 finish 监听里按 实际−预估 校正
+        if (req.gateway.tpm) req.gateway.tpm.actual = usage.totalTokens;
+        // 计费/健康度/路由指标互不依赖 → 并行落地，缩短响应路径串行耗时
+        await Promise.all([
+          this.usage.record({
+            userId: user.id,
+            apiKeyId: apiKey.id,
+            channelId: channel.id,
+            model,
+            provider: channel.provider,
+            ...usage,
+            latencyMs: Date.now() - startedAt,
+            status: result.status,
+            chargeable: channel.ownerType === ChannelOwnerType.PLATFORM,
+            isStream: false,
+            requestPreview,
+            responsePreview: embeddingsResponsePreview(result.json),
+          }),
+          this.health.recordSuccess(channel.id),
+          this.metrics.record(channel.id, model, 'ok', {
+            latencyMs: Date.now() - attemptStart,
+            completionTokens: usage.completionTokens,
+            totalTokens: usage.totalTokens,
+            status: result.status,
+          }),
+        ]);
+        return res.status(result.status).json(result.json);
+      } catch (e) {
+        if (e instanceof UpstreamError) {
+          lastError = e;
+          const action = await this.handleUpstreamFailure(e, {
+            res,
+            channel,
+            model,
+            attemptStart,
+            startedAt,
+            userId: user.id,
+            apiKeyId: apiKey.id,
+            requestPreview,
+            isStream: false,
+            hasMore: i < channels.length - 1,
+            errorBody: err,
+          });
+          if (action === 'continue') continue;
+          return;
+        }
+        throw e;
+      }
+    }
+
+    if (insufficientBalance) {
+      return res
+        .status(403)
+        .json(
+          err(
+            'Insufficient balance. Please top up or configure a BYOK channel.',
+            'insufficient_quota',
+            'insufficient_balance',
+          ),
+        );
+    }
+    if (unsupported && !lastError) {
+      return res
+        .status(501)
+        .json(
+          err(
+            `Model "${model}": no upstream with embeddings support among available channels ` +
+              '(/v1/embeddings is forwarded to openai-compatible providers only).',
+            'invalid_request_error',
+            'embeddings_not_supported',
+          ),
+        );
+    }
     return res
       .status(lastError?.status ?? 502)
       .json(

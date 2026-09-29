@@ -76,6 +76,16 @@ export interface Provider {
     apiKey: string,
     req: ChatRequest,
   ): Promise<StreamResult>;
+  /**
+   * 可选：`POST /v1/embeddings` 向量化透传（OpenAI 兼容协议）。未实现该方法的服务商
+   * 在 embeddings 调用中会被跳过（如 Anthropic / Gemini 暂无兼容端点），全部候选
+   * 都不支持时网关返回 501 而不是把请求打到上游报错。
+   */
+  embeddingsNonStream?(
+    channel: Channel,
+    apiKey: string,
+    req: ChatRequest,
+  ): Promise<NonStreamResult>;
 }
 
 export class UpstreamError extends Error {

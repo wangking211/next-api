@@ -3,6 +3,7 @@
  * 只识别结构化字段：
  * - message content 中出现 image_url part → vision
  * - 非空 tools 数组 → tools
+ * - 无 messages 且带 input（string / string[] / token id 数组）→ embeddings
  * Anthropic 入站请求在 executeChat 之前已转换为 OpenAI 格式，故此处无需处理 Anthropic 块。
  */
 export function detectRequiredCapabilities(body: Record<string, any>): string[] {
@@ -16,5 +17,8 @@ export function detectRequiredCapabilities(body: Record<string, any>): string[] 
     }
   }
   if (Array.isArray(body?.tools) && body.tools.length > 0) caps.add('tools');
+  // embeddings 请求体：有 input 字段（string / string[] / token id 数组）即视为向量化调用。
+  // chat 误发 input 体也会被引到 embeddings 能力校验，得到清晰的 400 而不是打到上游。
+  if (body && body.input != null && !messages.length) caps.add('embeddings');
   return [...caps];
 }

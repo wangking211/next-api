@@ -64,7 +64,7 @@ pnpm cleanup             # 执行清理
 - [x] **P0** 脚手架：monorepo、docker-compose、NestJS + Prisma + Redis、Vite Web 骨架
 - [x] **P1** 数据模型 + 认证：User / ApiKey / Channel / ModelCatalog / RequestLog / UsageDaily；注册、登录、JWT、角色守卫、管理员自举
 - [x] **P2** Key 与渠道：平台 key 签发（SHA-256 存储，仅展示一次）、BYOK/平台渠道 CRUD（上游 key AES-256-GCM 加密）、模型目录
-- [x] **P3** 网关转发：`/v1/chat/completions` OpenAI 兼容（流式/非流式）、Anthropic 双向协议转换、渠道选择 + 自动故障转移
+- [x] **P3** 网关转发：`/v1/chat/completions` OpenAI 兼容（流式/非流式）、`/v1/embeddings` 向量化（OpenAI 兼容透传，按输入 token 计费）、Anthropic 双向协议转换、渠道选择 + 自动故障转移
 - [x] **P4** 计量与限流：token 计费、请求日志、Redis 限流、额度控制、日聚合
 - [x] **P5** 前端控制台：登录注册、总览（用量/图表）、Key/渠道/模型/日志页面
 - [x] **P6** 打磨：Dockerfile（api/web + nginx）、单元测试 + e2e、安全加固、文档
@@ -132,6 +132,7 @@ pnpm cleanup             # 执行清理
 | --- | --- | --- |
 | GET | `/v1/models` | 列出当前 key 可用模型 |
 | POST | `/v1/chat/completions` | 对话补全（支持 `stream: true`） |
+| POST | `/v1/embeddings` | 向量化（`input` 为 string / string[] / token id 数组，按输入 token 计费） |
 
 鉴权：`Authorization: Bearer sk-...` 或 `x-api-key: sk-...`。
 
@@ -140,7 +141,14 @@ curl http://localhost:3000/v1/chat/completions \
   -H "Authorization: Bearer sk-你的key" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
+
+curl http://localhost:3000/v1/embeddings \
+  -H "Authorization: Bearer sk-你的key" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"text-embedding-3-small","input":["hello","world"]}'
 ```
+
+**`/v1/embeddings`**：与对话端点同套鉴权/白名单/TPM/预授权/故障转移/计费链路，差异三点——①只透传给实现了 OpenAI 兼容 `/embeddings` 的服务商（当前为 OpenAI 兼容类渠道；Anthropic/Gemini 渠道会被跳过，全部不支持时返回 501 `embeddings_not_supported`）；②只产生输入 token（响应无 `completion_tokens`）；③日志只记向量条数与维度，**不落盘向量本身**。
 
 **路由规则**：按 `model` 匹配渠道 → 用户自有 BYOK 渠道优先于平台渠道 → 同级按 `priority` 降序、`weight` 加权随机 → 遇 5xx/429 自动故障转移到下一渠道。上游协议适配：**OpenAI 兼容透传**、**Anthropic 双向转换**、**Gemini 原生协议转换**。
 

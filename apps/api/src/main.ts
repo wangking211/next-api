@@ -42,6 +42,7 @@ async function bootstrap() {
       { path: 'v1/chat/completions', method: RequestMethod.POST },
       { path: 'v1/models', method: RequestMethod.GET },
       { path: 'v1/messages', method: RequestMethod.POST },
+      { path: 'v1/embeddings', method: RequestMethod.POST },
     ],
   });
 

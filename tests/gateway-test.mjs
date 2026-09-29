@@ -186,6 +186,39 @@ check('gemini stream 200', s3.status === 200, s3.status);
 check('gemini stream converted', s3.text.includes('"object":"chat.completion.chunk"') && s3.text.includes('"content":"Hello"'), s3.text.slice(0, 300));
 check('gemini stream DONE', s3.text.includes('data: [DONE]'), s3.text.slice(-120));
 
+// 8.5. embeddings（OpenAI 兼容透传：批量/单条/入参校验/鉴权）
+const emb = await api('POST', '/v1/embeddings', {
+  token: sk,
+  body: { model: 'gpt-test', input: ['hello world', 'embed me'] },
+});
+check('embeddings 200', emb.status === 200, emb.data);
+check(
+  'embeddings data shape',
+  emb.data?.object === 'list' &&
+    Array.isArray(emb.data?.data) &&
+    emb.data.data.length === 2 &&
+    emb.data.data[0]?.object === 'embedding' &&
+    emb.data.data[0]?.index === 0 &&
+    Array.isArray(emb.data.data[0]?.embedding),
+  emb.data,
+);
+check(
+  'embeddings usage',
+  emb.data?.usage?.prompt_tokens === 7 && emb.data?.usage?.total_tokens === 7,
+  emb.data?.usage,
+);
+const embOne = await api('POST', '/v1/embeddings', {
+  token: sk,
+  body: { model: 'gpt-test', input: 'single string' },
+});
+check('embeddings single string -> 1 vector', embOne.status === 200 && embOne.data?.data?.length === 1, embOne.data);
+const embNoInput = await api('POST', '/v1/embeddings', { token: sk, body: { model: 'gpt-test' } });
+check('embeddings missing input -> 400', embNoInput.status === 400, embNoInput.data);
+const embNoModel = await api('POST', '/v1/embeddings', { token: sk, body: { input: 'x' } });
+check('embeddings missing model -> 400', embNoModel.status === 400, embNoModel.data);
+const embNoKey = await api('POST', '/v1/embeddings', { body: { model: 'gpt-test', input: 'x' } });
+check('embeddings no api key -> 401', embNoKey.status === 401, embNoKey.data);
+
 // 9. /v1/models
 const models = await fetch(API + '/v1/models', { headers: { Authorization: `Bearer ${sk}` } });
 const modelsJson = await models.json();

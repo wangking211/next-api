@@ -75,4 +75,19 @@ describe('detectRequiredCapabilities', () => {
       detectRequiredCapabilities({ messages: [{ role: 'user', content: 'text only' }] }),
     ).toEqual([]);
   });
+
+  it('detects embeddings from an input field without messages', () => {
+    expect(detectRequiredCapabilities({ model: 'text-embedding-3-small', input: 'hello' })).toEqual([
+      'embeddings',
+    ]);
+    expect(detectRequiredCapabilities({ model: 'm', input: ['a', 'b'] })).toEqual(['embeddings']);
+    expect(detectRequiredCapabilities({ model: 'm', input: [1, 2, 3] })).toEqual(['embeddings']);
+  });
+
+  it('does not mark chat bodies (messages present) as embeddings', () => {
+    expect(
+      detectRequiredCapabilities({ messages: [{ role: 'user', content: 'hi' }], input: 'stray' }),
+    ).toEqual([]);
+    expect(detectRequiredCapabilities({ input: null })).toEqual([]);
+  });
 });
