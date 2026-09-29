@@ -11,6 +11,7 @@ import { UsersModule } from './users/users.module';
 import { KeysModule } from './keys/keys.module';
 import { ChannelsModule } from './channels/channels.module';
 import { ModelsModule } from './models/models.module';
+import { GroupsModule } from './groups/groups.module';
 import { HealthModule } from './health/health.module';
 import { PublicModule } from './public/public.module';
 import { GatewayModule } from './gateway/gateway.module';
@@ -50,6 +51,7 @@ import { PaymentModule } from './billing/payment.module';
     KeysModule,
     ChannelsModule,
     ModelsModule,
+    GroupsModule,
     HealthModule,
     PublicModule,
     GatewayModule,

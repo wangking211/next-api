@@ -2,9 +2,10 @@ import { Module } from '@nestjs/common';
 import { ChannelsService } from './channels.service';
 import { ChannelsController } from './channels.controller';
 import { ProvidersModule } from '../gateway/providers/providers.module';
+import { GroupsModule } from '../groups/groups.module';
 
 @Module({
-  imports: [ProvidersModule],
+  imports: [ProvidersModule, GroupsModule],
   controllers: [ChannelsController],
   providers: [ChannelsService],
   exports: [ChannelsService],

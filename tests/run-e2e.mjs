@@ -65,7 +65,11 @@ const results = [];
 let mock, api;
 try {
   mock = start('mock', [join(__dirname, 'mock-upstream.mjs')], root);
-  api = start('api', [apiEntry], apiDir, { CHANNEL_FAILURE_THRESHOLD: '3' });
+  api = start('api', [apiEntry], apiDir, {
+    CHANNEL_FAILURE_THRESHOLD: '3',
+    // 生产默认不记录调用内容（LOG_CONTENT=false）；e2e 需验证「日志详情含输入/输出」，故显式开启
+    LOG_CONTENT: 'true',
+  });
 
   const healthy = await waitFor('http://localhost:3000/api/health');
   if (!healthy) {

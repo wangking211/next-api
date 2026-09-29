@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
 import { ResolvedChannel } from './types';
 import { RoutingMetricsService } from './routing-metrics.service';
+import { GroupsService } from '../groups/groups.service';
 import {
   DEFAULT_STRATEGY,
   applySticky,
@@ -17,6 +18,8 @@ export interface RouteOptions {
   strategy?: RoutingStrategy | null;
   /** 会话粘性键：x-session-id，或 userId + prompt 前缀 */
   stickyKey?: string | null;
+  /** 生效模型分组 id（渠道分组隔离）；null/缺省 = 不限制 */
+  groupId?: string | null;
 }
 
 interface Candidate {
@@ -43,6 +46,7 @@ export class ChannelResolverService {
     private readonly prisma: PrismaService,
     private readonly crypto: CryptoService,
     private readonly metrics: RoutingMetricsService,
+    private readonly groups: GroupsService,
     config: ConfigService,
   ) {
     const s = config.get<string>('ROUTING_STRATEGY', DEFAULT_STRATEGY);
@@ -88,17 +92,24 @@ export class ChannelResolverService {
     model: string,
     opts: RouteOptions = {},
   ): Promise<ResolvedChannel[]> {
+    const groupWhere = this.groups.channelVisibilityWhere(opts.groupId ?? null);
     const [rows, catalog] = await Promise.all([
       this.prisma.channelModel.findMany({
         where: {
           modelName: model,
           enabled: true,
           channel: {
-            OR: [
-              { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
-              { ownerType: ChannelOwnerType.PLATFORM },
+            AND: [
+              this.availabilityWhere(this.reenableCutoff()),
+              {
+                OR: [
+                  // 自有 BYOK 渠道不受分组限制
+                  { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
+                  // 平台渠道：未配分组（公共）或与本分组一致
+                  groupWhere,
+                ],
+              },
             ],
-            AND: [this.availabilityWhere(this.reenableCutoff())],
           },
         },
         include: { channel: true },
@@ -130,7 +141,7 @@ export class ChannelResolverService {
           : officialIn * (cm.costDiscount != null ? Number(cm.costDiscount) : 1);
       candidates.push({
         id: cm.channel.id,
-        c: { channel: cm.channel, apiKey },
+        c: { channel: cm.channel, apiKey, upstreamModelName: cm.upstreamModelName },
         tier: cm.channel.ownerType === ChannelOwnerType.USER ? 0 : 1,
         priority: cm.priority ?? cm.channel.priority,
         cost: rawCost > 0 ? rawCost : Number.POSITIVE_INFINITY,
@@ -328,16 +339,21 @@ export class ChannelResolverService {
   }
 
   /** 汇总用户当前可实际调用的模型（自有+平台启用渠道所支持的模型） */
-  async availableModels(userId: string): Promise<string[]> {
+  async availableModels(userId: string, groupId?: string | null): Promise<string[]> {
+    const groupWhere = this.groups.channelVisibilityWhere(groupId ?? null);
     const rows = await this.prisma.channelModel.findMany({
       where: {
         enabled: true,
         channel: {
-          OR: [
-            { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
-            { ownerType: ChannelOwnerType.PLATFORM },
+          AND: [
+            this.availabilityWhere(this.reenableCutoff()),
+            {
+              OR: [
+                { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
+                groupWhere,
+              ],
+            },
           ],
-          AND: [this.availabilityWhere(this.reenableCutoff())],
         },
       },
       distinct: ['modelName'],

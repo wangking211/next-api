@@ -26,6 +26,7 @@ import {
 } from './anthropic-format';
 import { UsageService } from '../usage/usage.service';
 import { BillingService } from '../billing/billing.service';
+import { GroupsService } from '../groups/groups.service';
 import { SseUsageCollector } from '../usage/sse-usage.collector';
 import { estimatePromptTokens, estimateTokensFromText } from '../usage/token.util';
 import { flattenMessages, extractAssistantText } from '../usage/content.util';
@@ -71,6 +72,19 @@ function isRefusal(e: UpstreamError): boolean {
   return REFUSAL_RE.test(upstreamErrorSignal(e));
 }
 
+/**
+ * 上游「令牌无权访问该模型」特征（new-api 分组未开通等）：属配置问题，
+ * 应换下一家上游试（可能别家有权限），并返回明确的 model_not_found，
+ * 且只冷却「该渠道 × 该模型」，不误禁整条渠道。
+ */
+const MODEL_ACCESS_RE =
+  /(no access to model|model[_\s-]?not[_\s-]?found|not have access|no permission|permission denied|not authorized|unsupported model|无权访问|没有权限|无权限|未开通|权限不足)/i;
+
+function isModelAccessDenied(e: UpstreamError): boolean {
+  if (e.status !== 403 && e.status !== 404) return false;
+  return MODEL_ACCESS_RE.test(upstreamErrorSignal(e));
+}
+
 /** embeddings 请求预览：只取首个输入片段（批量输入全量写日志会撑爆 RequestLog） */
 function embeddingsPreview(body: any): string {
   const input = body?.input;
@@ -109,6 +123,7 @@ export class GatewayController {
     private readonly billing: BillingService,
     private readonly health: ChannelHealthService,
     private readonly metrics: RoutingMetricsService,
+    private readonly groups: GroupsService,
     config: ConfigService,
   ) {
     this.streamIdleMs =
@@ -121,7 +136,10 @@ export class GatewayController {
   @Get('models')
   async listModels(@Req() req: GatewayRequest, @Res() res: Response) {
     const { user, apiKey } = req.gateway;
-    let names = await this.resolver.availableModels(user.id);
+    const group = await this.groups.effectiveGroup(user.id, apiKey.groupId);
+    let names = await this.resolver.availableModels(user.id, group.id);
+    // 模型分组可见性（分组未配置可见模型 = 不限制）
+    names = names.filter((n) => this.groups.isModelVisible(group, n));
     // Key 模型白名单：仅展示允许的模型（空数组表示不限制）
     const allowed = await this.resolver.allowedModelSet(apiKey.models);
     if (allowed) names = names.filter((n) => allowed.has(n));
@@ -222,12 +240,28 @@ export class GatewayController {
     // 别名解析（含 :latest）到规范名后再路由/计费/记日志
     const model = await this.resolver.resolveAlias(requested);
 
+    // 生效分组（令牌分组 > 用户分组 > 默认分组）：决定可见模型、渠道隔离与分组倍率
+    const group = await this.groups.effectiveGroup(user.id, apiKey.groupId);
+    if (!this.groups.isModelVisible(group, model)) {
+      return res
+        .status(404)
+        .json(
+          err(
+            `No available channel for model "${model}". Configure a channel that serves this model.`,
+            'model_not_found',
+            'model_not_found',
+          ),
+        );
+    }
+    const billingInfo = await this.billing.getBillingMultiplier(user.id, group.ratio);
+
     // 能力校验：目录声明了 capabilities 时，请求所需能力必须被覆盖（未声明则放行）
     if (!(await this.checkCapabilities(model, body, res, err))) return;
 
     const channels = await this.resolver.resolve(user.id, model, {
       strategy: apiKey.routingStrategy,
       stickyKey: this.buildStickyKey(req, user.id, body),
+      groupId: group.id,
     });
     if (channels.length === 0) {
       return res
@@ -248,7 +282,7 @@ export class GatewayController {
     let lastError: UpstreamError | null = null;
 
     // 平台渠道需余额：0 价模型豁免；对每个候选渠道按“输入 + 最大输出”预估上限做预授权，避免单次调用透支
-    const guards = this.balanceGuards(user.id);
+    const guards = this.balanceGuards(user.id, billingInfo.value);
     const maxOutputTokens =
       Number(body?.max_tokens ?? body?.max_completion_tokens ?? 0) ||
       this.defaultMaxOutputTokens;
@@ -263,7 +297,11 @@ export class GatewayController {
     });
 
     for (let i = 0; i < channels.length; i++) {
-      const { channel, apiKey: upstreamKey } = channels[i];
+      const { channel, apiKey: upstreamKey, upstreamModelName } = channels[i];
+      // 模型映射：对外规范名 → 上游真实名（渠道×模型未配置则用规范名）
+      const upstreamModel = upstreamModelName ?? model;
+      const upstreamBody =
+        upstreamModel === model ? body : { ...body, model: upstreamModel };
       if (channel.ownerType === ChannelOwnerType.PLATFORM) {
         // 预授权：按该渠道的售价预估上限，余额不足则跳过
         const p = await this.billing.getChannelPricing(channel.id, model);
@@ -281,8 +319,8 @@ export class GatewayController {
       try {
         if (isStream) {
           const result = await provider.chatStream(channel, upstreamKey, {
-            model,
-            body,
+            model: upstreamModel,
+            body: upstreamBody,
             signal: upstreamAbort.signal,
             timeoutMs: 0, // 流式不设总超时，改由空闲超时 + 客户端断开控制
           });
@@ -300,13 +338,15 @@ export class GatewayController {
             idleMs: this.streamIdleMs,
             isClientClosed: () => clientClosed,
             apiFormat,
+            multiplier: billingInfo.value,
+            multiplierSource: billingInfo.source,
             tpm: req.gateway.tpm,
           });
         }
 
         const result = await provider.chatNonStream(channel, upstreamKey, {
-          model,
-          body,
+          model: upstreamModel,
+          body: upstreamBody,
           signal: upstreamAbort.signal,
         });
         const usage = result.usage ?? this.estimateUsage(body, result.json);
@@ -327,6 +367,8 @@ export class GatewayController {
             isStream: false,
             requestPreview,
             responsePreview: extractAssistantText(result.json),
+            multiplier: billingInfo.value,
+            multiplierSource: billingInfo.source,
           }),
           this.health.recordSuccess(channel.id),
           this.metrics.record(channel.id, model, 'ok', {
@@ -392,9 +434,9 @@ export class GatewayController {
   }
 
   /** 余额/倍率按用户缓存（同一次请求的多个候选渠道共享，避免重复查库） */
-  private balanceGuards(userId: string) {
+  private balanceGuards(userId: string, presetMultiplier?: number) {
     let cachedBalance: number | null = null;
-    let cachedMultiplier: number | null = null;
+    let cachedMultiplier: number | null = presetMultiplier ?? null;
     return {
       getBalance: async (): Promise<number> => {
         if (cachedBalance === null) {
@@ -466,7 +508,9 @@ export class GatewayController {
     const limited = isRateLimited(e);
     const transient = e.retryable && !limited;
     const authFault = !limited && e.status === 401;
-    const refusal = !limited && !transient && !authFault && isRefusal(e);
+    const modelDenied = !limited && !authFault && isModelAccessDenied(e);
+    const refusal =
+      !limited && !transient && !authFault && !modelDenied && isRefusal(e);
     if (limited) {
       await this.health.recordRateLimited(ctx.channel.id, signal);
       await this.metrics.record(ctx.channel.id, ctx.model, 'rate_limited', {
@@ -481,6 +525,13 @@ export class GatewayController {
         status: e.status,
         errorMessage: signal,
       });
+    } else if (modelDenied) {
+      // 无权访问该模型：只记 (渠道×模型) 指标并触发该组合的冷却，不计渠道健康度
+      await this.metrics.record(ctx.channel.id, ctx.model, 'model_denied', {
+        latencyMs,
+        status: e.status,
+        errorMessage: signal,
+      });
     } else if (authFault || refusal) {
       await this.metrics.record(ctx.channel.id, ctx.model, authFault ? 'error' : 'refused', {
         latencyMs,
@@ -488,8 +539,8 @@ export class GatewayController {
         errorMessage: signal,
       });
     }
-    // 故障转移：上游故障、限流/超限、鉴权失效都要换下一家试
-    if ((transient || limited || authFault) && ctx.hasMore) return 'continue';
+    // 故障转移：上游故障、限流/超限、鉴权失效、无权访问该模型都要换下一家试
+    if ((transient || limited || authFault || modelDenied) && ctx.hasMore) return 'continue';
     await this.usage.record({
       userId: ctx.userId,
       apiKeyId: ctx.apiKeyId,
@@ -506,6 +557,20 @@ export class GatewayController {
       isStream: ctx.isStream,
       requestPreview: ctx.requestPreview,
     });
+    if (modelDenied) {
+      // 所有候选上游都无该模型权限：返回明确的 model_not_found，而非透传上游 403 文案
+      ctx.res
+        .status(404)
+        .json(
+          ctx.errorBody(
+            `No upstream channel has access to model "${ctx.model}". ` +
+              'The configured upstream key/group does not include this model.',
+            'model_not_found',
+            'model_not_found',
+          ),
+        );
+      return 'responded';
+    }
     ctx.res
       .status(e.status || 502)
       .json(ctx.errorBody(upstreamErrorMessage(e), 'upstream_error'));
@@ -543,11 +608,26 @@ export class GatewayController {
     }
 
     const model = await this.resolver.resolveAlias(requested);
+    // 生效分组：决定可见模型、渠道隔离与分组倍率
+    const group = await this.groups.effectiveGroup(user.id, apiKey.groupId);
+    if (!this.groups.isModelVisible(group, model)) {
+      return res
+        .status(404)
+        .json(
+          err(
+            `No available channel for model "${model}". Configure a channel that serves this model.`,
+            'model_not_found',
+            'model_not_found',
+          ),
+        );
+    }
+    const billingInfo = await this.billing.getBillingMultiplier(user.id, group.ratio);
     if (!(await this.checkCapabilities(model, body, res, err))) return;
 
     const channels = await this.resolver.resolve(user.id, model, {
       strategy: apiKey.routingStrategy,
       stickyKey: this.buildStickyKey(req, user.id, body),
+      groupId: group.id,
     });
     if (channels.length === 0) {
       return res
@@ -567,7 +647,7 @@ export class GatewayController {
     let lastError: UpstreamError | null = null;
     let unsupported = false; // 存在候选渠道，但其服务商未实现 embeddings 透传
     let insufficientBalance = false;
-    const guards = this.balanceGuards(user.id);
+    const guards = this.balanceGuards(user.id, billingInfo.value);
 
     // 客户端断开时中止上游请求，避免连接泄漏
     const upstreamAbort = new AbortController();
@@ -578,7 +658,11 @@ export class GatewayController {
     });
 
     for (let i = 0; i < channels.length; i++) {
-      const { channel, apiKey: upstreamKey } = channels[i];
+      const { channel, apiKey: upstreamKey, upstreamModelName } = channels[i];
+      // 模型映射：对外规范名 → 上游真实名
+      const upstreamModel = upstreamModelName ?? model;
+      const upstreamBody =
+        upstreamModel === model ? body : { ...body, model: upstreamModel };
       const provider = this.providers.resolve(channel.provider);
       if (typeof provider.embeddingsNonStream !== 'function') {
         unsupported = true; // 如 anthropic/gemini 暂无兼容端点 → 换下一家
@@ -597,8 +681,8 @@ export class GatewayController {
       const attemptStart = Date.now();
       try {
         const result = await provider.embeddingsNonStream(channel, upstreamKey, {
-          model,
-          body,
+          model: upstreamModel,
+          body: upstreamBody,
           signal: upstreamAbort.signal,
           // timeoutMs 未传 → 默认 120s 上游总超时
         });
@@ -625,6 +709,8 @@ export class GatewayController {
             isStream: false,
             requestPreview,
             responsePreview: embeddingsResponsePreview(result.json),
+            multiplier: billingInfo.value,
+            multiplierSource: billingInfo.source,
           }),
           this.health.recordSuccess(channel.id),
           this.metrics.record(channel.id, model, 'ok', {
@@ -743,6 +829,9 @@ export class GatewayController {
       idleMs?: number;
       isClientClosed?: () => boolean;
       apiFormat?: 'openai' | 'anthropic';
+      /** 本次生效的售价倍率与来源（账单审计） */
+      multiplier?: number;
+      multiplierSource?: string;
       /** TPM 预扣上下文（guard 注入；流结束后回填实际用量） */
       tpm?: GatewayAuthContext['tpm'];
     },
@@ -828,6 +917,8 @@ export class GatewayController {
         isStream: true,
         requestPreview: meta.requestPreview,
         responsePreview: collector.text,
+        multiplier: meta.multiplier,
+        multiplierSource: meta.multiplierSource,
       }),
     ];
 

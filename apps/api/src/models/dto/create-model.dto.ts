@@ -2,6 +2,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsEnum,
   IsNumber,
   IsOptional,
   IsString,
@@ -9,6 +10,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { ModelOrigin } from '@prisma/client';
 
 export class CreateModelDto {
   @IsString()
@@ -57,6 +59,17 @@ export class CreateModelDto {
   @MaxLength(32, { each: true })
   @ArrayMaxSize(32)
   capabilities?: string[];
+
+  /** 模型产地：DOMESTIC=国产 / OVERSEAS=海外；留空按模型名自动推断 */
+  @IsOptional()
+  @IsEnum(ModelOrigin)
+  origin?: ModelOrigin;
+
+  /** 厂商规范名（留空按模型名自动推断） */
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  vendor?: string | null;
 
   /** 别名（如 gpt-5:latest）：请求命中时解析到本模型的规范名 */
   @IsOptional()

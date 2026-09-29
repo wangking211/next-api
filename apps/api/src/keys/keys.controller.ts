@@ -11,6 +11,7 @@ import {
 import { KeysService } from './keys.service';
 import { CreateKeyDto } from './dto/create-key.dto';
 import { UpdateKeyDto } from './dto/update-key.dto';
+import { Role } from '@prisma/client';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthUser } from '../common/interfaces/auth.interface';
@@ -27,7 +28,7 @@ export class KeysController {
 
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateKeyDto) {
-    return this.keys.create(user.id, dto);
+    return this.keys.create(user.id, dto, user.role === Role.ADMIN);
   }
 
   @Patch(':id')
@@ -36,7 +37,7 @@ export class KeysController {
     @Param('id') id: string,
     @Body() dto: UpdateKeyDto,
   ) {
-    return this.keys.update(user.id, id, dto);
+    return this.keys.update(user.id, id, dto, user.role === Role.ADMIN);
   }
 
   @Delete(':id')

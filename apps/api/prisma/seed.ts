@@ -9,6 +9,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { createCipheriv, createHash, randomBytes } from 'crypto';
 import { PrismaClient, ChannelOwnerType, ChannelStatus, Role } from '@prisma/client';
+import { inferVendorOrigin } from '../src/models/origin.util';
 import * as bcrypt from 'bcryptjs';
 import { COMMON_MODELS } from '../src/models/common-models';
 
@@ -101,13 +102,33 @@ async function seedAdmin() {
 
 async function seedModels() {
   for (const m of MODELS) {
+    const { vendor, origin } = inferVendorOrigin(m.name);
     await prisma.modelCatalog.upsert({
       where: { name: m.name },
       update: { displayName: m.displayName, provider: m.provider, inputPrice: m.inputPrice, outputPrice: m.outputPrice, enabled: true },
-      create: { ...m, enabled: true },
+      create: { ...m, enabled: true, vendor, origin },
     });
   }
   console.log(`= 模型目录已就绪 (${MODELS.length})`);
+}
+
+/** 默认模型分组：新用户/未指定分组的用户归属；不限制模型、不参与倍率（ratio=null） */
+async function seedDefaultGroup() {
+  const existing = await prisma.modelGroup.findFirst({ where: { isDefault: true } });
+  if (existing) {
+    console.log(`= 默认分组已存在: ${existing.name}`);
+    return;
+  }
+  await prisma.modelGroup.create({
+    data: {
+      name: 'default',
+      displayName: '默认分组',
+      description: '新用户默认归属；不限制可见模型，不参与倍率（回退用户/代理倍率）',
+      isDefault: true,
+      priority: 0,
+    },
+  });
+  console.log('+ 创建默认分组: default');
 }
 
 async function seedChannels() {
@@ -181,6 +202,7 @@ async function seedDemoUser() {
 
 async function main() {
   await seedAdmin();
+  await seedDefaultGroup();
   await seedModels();
   await seedChannels();
   await seedDemoUser();

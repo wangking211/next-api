@@ -12,6 +12,7 @@ import { ProviderRegistry } from '../gateway/providers/provider.registry';
 import { UpstreamError } from '../gateway/types';
 import { assertPublicHttpUrl, UnsafeUrlError } from '../common/url-safety';
 import { joinUrl } from '../gateway/providers/stream.util';
+import { GroupsService } from '../groups/groups.service';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
 import { ChannelModelPriceDto } from './dto/channel-model-price.dto';
@@ -86,6 +87,7 @@ export class ChannelsService {
     private readonly prisma: PrismaService,
     private readonly crypto: CryptoService,
     private readonly providers: ProviderRegistry,
+    private readonly groups: GroupsService,
   ) {}
 
   private async assertSafeBaseUrl(baseUrl: string): Promise<void> {
@@ -100,7 +102,10 @@ export class ChannelsService {
     }
   }
 
-  private view(c: Channel & { modelPrices?: ChannelModel[] }) {
+  private view(c: Channel & {
+    modelPrices?: ChannelModel[];
+    groups?: { id: string; name: string; displayName: string }[];
+  }) {
     let preview = '';
     try {
       const key = this.crypto.decrypt(c.apiKeyEnc);
@@ -108,13 +113,19 @@ export class ChannelsService {
     } catch {
       preview = '****';
     }
-    const { apiKeyEnc, modelPrices, ...rest } = c;
+    const { apiKeyEnc, modelPrices, groups, ...rest } = c;
     return {
       ...rest,
       apiKeyPreview: preview,
       hasApiKey: !!apiKeyEnc,
+      groups: (groups ?? []).map((g) => ({
+        id: g.id,
+        name: g.name,
+        displayName: g.displayName,
+      })),
       modelPrices: (modelPrices ?? []).map((m) => ({
         model: m.modelName,
+        upstreamModelName: m.upstreamModelName ?? null,
         costInput: m.costInput != null ? Number(m.costInput) : null,
         costOutput: m.costOutput != null ? Number(m.costOutput) : null,
         priceInput: m.priceInput != null ? Number(m.priceInput) : null,
@@ -142,6 +153,7 @@ export class ChannelsService {
     // 只覆盖客户端显式给出的字段：未传的字段（qualityScore / 绝对成本 / weight / enabled 等）
     // 保持原值，避免「只改折扣」的保存把其它配置重置为默认
     const OPTIONAL_FIELDS = [
+      'upstreamModelName',
       'costInput',
       'costOutput',
       'priceInput',
@@ -195,7 +207,7 @@ export class ChannelsService {
     const [items, total] = await Promise.all([
       this.prisma.channel.findMany({
         where,
-        include: { modelPrices: true },
+        include: { modelPrices: true, groups: { select: { id: true, name: true, displayName: true } } },
         orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -205,16 +217,22 @@ export class ChannelsService {
     return { items: items.map((c) => this.view(c)), total, page, pageSize };
   }
 
-  /** 当前用户可调用的模型，按渠道分组（自有 BYOK + 平台），用于控制台展示。 */
+  /** 当前用户可调用的模型，按渠道分组（自有 BYOK + 平台，按生效分组过滤），用于控制台展示。 */
   async availableModels(user: AuthUser) {
+    const group = await this.groups.effectiveGroup(user.id);
+    const groupWhere = this.groups.channelVisibilityWhere(group.id);
     const rows = await this.prisma.channelModel.findMany({
       where: {
         enabled: true,
         channel: {
           status: ChannelStatus.ENABLED,
-          OR: [
-            { ownerType: ChannelOwnerType.USER, ownerUserId: user.id },
-            { ownerType: ChannelOwnerType.PLATFORM },
+          AND: [
+            {
+              OR: [
+                { ownerType: ChannelOwnerType.USER, ownerUserId: user.id },
+                groupWhere,
+              ],
+            },
           ],
         },
       },
@@ -230,6 +248,8 @@ export class ChannelsService {
       { id: string; name: string; ownerType: string; provider: string; models: string[] }
     >();
     for (const r of rows) {
+      // 模型分组可见性：分组未配置可见模型 = 不限制
+      if (!this.groups.isModelVisible(group, r.modelName)) continue;
       flat.add(r.modelName);
       const ch = byChannel.get(r.channel.id) ?? { ...r.channel, models: [] };
       ch.models.push(r.modelName);
@@ -258,6 +278,11 @@ export class ChannelsService {
         baseUrl: dto.baseUrl,
         apiKeyEnc: this.crypto.encrypt(dto.apiKey),
         models: dto.models,
+        groups:
+          user.role === Role.ADMIN && dto.groups?.length
+            ? { connect: dto.groups.map((id) => ({ id })) }
+            : undefined,
+        upstreamGroup: dto.upstreamGroup ?? null,
         weight: dto.weight ?? 1,
         priority: dto.priority ?? 0,
         dailyRequestLimit: dto.dailyRequestLimit ?? null,
@@ -295,6 +320,11 @@ export class ChannelsService {
         provider: dto.provider,
         baseUrl: dto.baseUrl,
         models: dto.models,
+        groups:
+          user.role === Role.ADMIN && dto.groups !== undefined
+            ? { set: dto.groups.map((id) => ({ id })) }
+            : undefined,
+        upstreamGroup: dto.upstreamGroup,
         weight: dto.weight,
         priority: dto.priority,
         status: dto.status,

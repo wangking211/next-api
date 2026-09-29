@@ -4,6 +4,7 @@ import { CryptoService } from '../common/crypto.service';
 import { ConfigService } from '@nestjs/config';
 import { ChannelOwnerType, ChannelStatus } from '@prisma/client';
 import { RoutingMetricsService, RouteMetrics } from './routing-metrics.service';
+import { GroupsService } from '../groups/groups.service';
 import { fnv1a } from './routing-score';
 
 function makeChannel(overrides: Record<string, unknown>) {
@@ -90,11 +91,15 @@ function makeService(
     record: jest.fn(),
   };
   const config = { get: (_k: string, d?: string) => d } as unknown as ConfigService;
+  const groups = {
+    channelVisibilityWhere: jest.fn(() => ({})),
+  };
   return {
     service: new ChannelResolverService(
       prisma as unknown as PrismaService,
       crypto as unknown as CryptoService,
       metrics as unknown as RoutingMetricsService,
+      groups as unknown as GroupsService,
       config,
     ),
     prisma,
@@ -157,10 +162,12 @@ describe('ChannelResolverService', () => {
     const arg = prisma.channelModel.findMany.mock.calls[0][0];
     expect(arg.where.modelName).toBe('gpt-4o');
     expect(arg.where.enabled).toBe(true);
-    expect(arg.where.channel.OR).toHaveLength(2);
     // 可用性：启用，或自动禁用已过冷却期
     expect(arg.where.channel.AND[0].OR).toHaveLength(2);
     expect(arg.where.channel.AND[0].OR[0].status).toBe(ChannelStatus.ENABLED);
+    // 渠道分组隔离：自有 BYOK 渠道 + 分组过滤条件（未生效分组时为 {}，即不限制）
+    expect(arg.where.channel.AND[1].OR).toHaveLength(2);
+    expect(arg.where.channel.AND[1].OR[0].ownerType).toBe(ChannelOwnerType.USER);
   });
 
   it('honors the routing strategy option (CHEAPEST vs FASTEST)', async () => {

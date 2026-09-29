@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../redis/redis.service';
 
 /** 一次上游调用的结果类型（供指标记录） */
-export type RouteOutcome = 'ok' | 'error' | 'rate_limited' | 'refused';
+export type RouteOutcome = 'ok' | 'error' | 'rate_limited' | 'refused' | 'model_denied';
 
 export interface RouteRecordArgs {
   latencyMs: number;

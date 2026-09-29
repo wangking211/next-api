@@ -33,6 +33,12 @@ export class ModelsController {
   }
 
   @Roles(Role.ADMIN)
+  @Post('classify-origins')
+  classifyOrigins() {
+    return this.models.classifyOrigins();
+  }
+
+  @Roles(Role.ADMIN)
   @Post()
   create(@Body() dto: CreateModelDto) {
     return this.models.create(dto);

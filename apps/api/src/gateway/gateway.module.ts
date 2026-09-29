@@ -8,9 +8,10 @@ import { ChannelHealthService } from './channel-health.service';
 import { RoutingMetricsService } from './routing-metrics.service';
 import { UsageModule } from '../usage/usage.module';
 import { BillingModule } from '../billing/billing.module';
+import { GroupsModule } from '../groups/groups.module';
 
 @Module({
-  imports: [UsageModule, BillingModule, ProvidersModule],
+  imports: [UsageModule, BillingModule, ProvidersModule, GroupsModule],
   controllers: [GatewayController],
   providers: [
     ApiKeyGuard,

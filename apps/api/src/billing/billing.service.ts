@@ -123,6 +123,18 @@ export class BillingService {
 
   /** 用户的有效售价倍率 = 用户倍率 > 所属代理倍率 > 1（作用在渠道价之上） */
   async getUserMultiplier(userId: string): Promise<number> {
+    return (await this.getBillingMultiplier(userId)).value;
+  }
+
+  /**
+   * 解析有效售价倍率及其来源（互斥优先，不叠乘）：
+   * 用户个人倍率 > 分组倍率 > 所属代理倍率 > 1。
+   * groupRatio 由网关按「令牌分组 > 用户分组 > 默认分组」解析后传入。
+   */
+  async getBillingMultiplier(
+    userId: string,
+    groupRatio?: number | null,
+  ): Promise<{ value: number; source: 'user' | 'group' | 'agent' | 'default' }> {
     const u = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -130,14 +142,19 @@ export class BillingService {
         agent: { select: { priceMultiplier: true } },
       },
     });
-    if (!u) return 1;
-    const m =
-      u.priceMultiplier != null
-        ? Number(u.priceMultiplier)
-        : u.agent?.priceMultiplier != null
-          ? Number(u.agent.priceMultiplier)
-          : 1;
-    return m > 0 ? m : 1;
+    if (!u) return { value: 1, source: 'default' };
+    if (u.priceMultiplier != null) {
+      const v = Number(u.priceMultiplier);
+      if (v > 0) return { value: v, source: 'user' };
+    }
+    if (groupRatio != null && groupRatio > 0) {
+      return { value: groupRatio, source: 'group' };
+    }
+    if (u.agent?.priceMultiplier != null) {
+      const v = Number(u.agent.priceMultiplier);
+      if (v > 0) return { value: v, source: 'agent' };
+    }
+    return { value: 1, source: 'default' };
   }
 
   async listTransactions(

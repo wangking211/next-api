@@ -34,6 +34,9 @@ model User {
   agentId      String?
   agent        User?      @relation("AgentMembers", fields: [agentId], references: [id], onDelete: SetNull)
   members      User[]     @relation("AgentMembers")
+  /// 所属模型分组（决定可见模型与分组倍率）；null = 默认分组
+  groupId      String?
+  group        ModelGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -209,6 +212,9 @@ model ApiKey {
   tpmLimit   Int?
   /// 模型白名单（支持别名与 :latest）；空数组 = 不限制
   models     String[] @default([])
+  /// 令牌级分组覆盖（优先级高于用户所属分组）；null = 用用户分组
+  groupId    String?
+  group      ModelGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
   expiresAt  DateTime?
   lastUsedAt DateTime?
@@ -241,6 +247,12 @@ model Channel {
   baseUrl     String
   apiKeyEnc   String
   models      String[]
+  /// 渠道分组（多对多）：未配分组的渠道为公共渠道，任何分组均可见
+  groups      ModelGroup[]     @relation("ChannelGroups")
+  /// 上游接入地：DOMESTIC=国内直连，OVERSEAS=海外中转；null = 未标注
+  region      ModelOrigin?
+  /// 上游计费分组名（如 TokenFleet 的 group_test），仅用于成本核算与展示
+  upstreamGroup String?
   weight      Int              @default(1)
   priority    Int              @default(0)
   status      ChannelStatus    @default(ENABLED)
@@ -268,6 +280,8 @@ model ChannelModel {
   channelId   String
   channel     Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
   modelName   String
+  /// 上游真实模型名（对外规范名 → 上游名映射）；为空则用 modelName 原样请求上游
+  upstreamModelName String?
   /// 上游成本 USD/1M tokens（用于按成本路由与毛利统计）
   costInput   Decimal? @db.Decimal(18, 6)
   costOutput  Decimal? @db.Decimal(18, 6)
@@ -298,6 +312,10 @@ model ModelCatalog {
   name        String   @unique
   displayName String
   provider    String
+  /// 模型产地：DOMESTIC=国产，OVERSEAS=海外。默认海外（漏标的国产模型只会少暴露，不会误放行海外模型）
+  origin      ModelOrigin @default(OVERSEAS)
+  /// 厂商规范名（openai / anthropic / google / deepseek / moonshot / zhipu / alibaba / minimax / kuaishou / xai …）
+  vendor      String?
   inputPrice  Decimal  @default(0) @db.Decimal(18, 6)
   outputPrice Decimal  @default(0) @db.Decimal(18, 6)
   cacheReadPrice  Decimal @default(0) @db.Decimal(18, 6)
@@ -306,9 +324,48 @@ model ModelCatalog {
   capabilities String[] @default([])
   /// 别名列表：请求这些名字时解析到本模型（name 为规范名）
   aliases      String[] @default([])
+  /// 可见该模型的模型分组（多对多）；未加入任何分组 = 所有分组可见
+  groups       ModelGroup[] @relation("ModelGroupModels")
   enabled     Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+enum ModelGroupStatus {
+  ENABLED
+  DISABLED
+}
+
+/// 模型产地：DOMESTIC=国产模型，OVERSEAS=海外模型（合规判断以模型产地为准）
+enum ModelOrigin {
+  DOMESTIC
+  OVERSEAS
+}
+
+/// 模型分组：一组可见模型 + 分组倍率。用户/令牌绑定分组后决定其可见模型与价格档位
+model ModelGroup {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  displayName String
+  description String?
+  /// 分组倍率（作用在渠道用户价之上）：为空 = 不参与，回退用户/代理倍率
+  ratio       Decimal?         @db.Decimal(6, 4)
+  status      ModelGroupStatus @default(ENABLED)
+  /// 展示/路由优先级（越大越靠前）
+  priority    Int              @default(0)
+  /// 默认分组：未指定分组的用户归属（全局仅一个，由服务层保证）
+  isDefault   Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  /// 该分组可见的模型（多对多）；空 = 不限制（全部模型可见）
+  models   ModelCatalog[] @relation("ModelGroupModels")
+  users    User[]
+  apiKeys  ApiKey[]
+  /// 归属该分组的渠道（多对多）；渠道未配分组 = 公共
+  channels Channel[]      @relation("ChannelGroups")
+
+  @@index([status, priority])
 }
 
 model RequestLog {
@@ -332,6 +389,9 @@ model RequestLog {
   chargeable       Boolean  @default(true)
   /// 本次调用支付给各级代理的返点合计（USD）
   commission       Decimal  @default(0) @db.Decimal(18, 6)
+  /// 本次调用生效的售价倍率与来源（user / group / agent / default），用于账单审计
+  multiplierApplied Decimal? @db.Decimal(6, 4)
+  multiplierSource  String?
   latencyMs        Int?
   status           Int      @default(200)
   errorMessage     String?

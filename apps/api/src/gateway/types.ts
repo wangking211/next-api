@@ -61,6 +61,8 @@ export interface StreamResult {
 export interface ResolvedChannel {
   channel: Channel;
   apiKey: string;
+  /** 上游真实模型名（模型映射）；为空表示用请求的规范名 */
+  upstreamModelName?: string | null;
 }
 
 export interface Provider {

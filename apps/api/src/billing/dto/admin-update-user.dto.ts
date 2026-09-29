@@ -24,4 +24,9 @@ export class AdminUpdateUserDto {
   @Min(0)
   @Max(1)
   rebateRate?: number | null;
+
+  /** 所属模型分组（决定可见模型与分组倍率）；传 null 清空，回退默认分组 */
+  @IsOptional()
+  @IsString()
+  groupId?: string | null;
 }

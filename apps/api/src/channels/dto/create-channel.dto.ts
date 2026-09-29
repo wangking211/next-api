@@ -73,4 +73,17 @@ export class CreateChannelDto {
   @ValidateNested({ each: true })
   @Type(() => ChannelModelPriceDto)
   modelPrices?: ChannelModelPriceDto[];
+
+  /** 渠道分组 id 列表（仅管理员可设置）；空 = 公共渠道，任何分组可见 */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  groups?: string[];
+
+  /** 上游计费分组名（如 TokenFleet 的 group_test），仅用于成本核算与展示 */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  upstreamGroup?: string | null;
 }

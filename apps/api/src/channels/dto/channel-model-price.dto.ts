@@ -18,6 +18,12 @@ export class ChannelModelPriceDto {
   @MaxLength(128)
   model!: string;
 
+  /** 上游真实模型名（模型映射）：对外规范名 → 上游名；留空则用 model 原样请求 */
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  upstreamModelName?: string | null;
+
   /** 上游成本 USD/1M tokens */
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 6 })

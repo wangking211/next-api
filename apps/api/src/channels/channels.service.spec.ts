@@ -4,6 +4,7 @@ import { CryptoService } from '../common/crypto.service';
 import { ProviderRegistry } from '../gateway/providers/provider.registry';
 import { AuthUser } from '../common/interfaces/auth.interface';
 import { UpstreamError } from '../gateway/types';
+import { GroupsService } from '../groups/groups.service';
 import { ChannelOwnerType, Role } from '@prisma/client';
 
 const user: AuthUser = { id: 'u1', email: 'u@t.com', username: 'u', role: Role.USER };
@@ -23,10 +24,12 @@ function makeService(providerImpl: any, channelOverrides: Record<string, unknown
   const prisma = { channel: { findUnique: jest.fn().mockResolvedValue(channel) } };
   const crypto = { decrypt: jest.fn().mockReturnValue('upstream-key') };
   const providers = { resolve: jest.fn().mockReturnValue(providerImpl) };
+  const groups = { effectiveGroup: jest.fn(), channelVisibilityWhere: jest.fn(() => ({})) };
   const service = new ChannelsService(
     prisma as unknown as PrismaService,
     crypto as unknown as CryptoService,
     providers as unknown as ProviderRegistry,
+    groups as unknown as GroupsService,
   );
   return { service, providers };
 }

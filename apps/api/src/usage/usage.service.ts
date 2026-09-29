@@ -22,6 +22,10 @@ export interface UsageEntry {
   /** 是否从用户余额扣费（平台渠道为 true，BYOK 为 false） */
   chargeable?: boolean;
   isStream?: boolean;
+  /** 本次生效的售价倍率（网关已解析时直传，避免二次解析）；缺省则回退用户/代理倍率 */
+  multiplier?: number;
+  /** 倍率来源：user / group / agent / default，用于账单审计 */
+  multiplierSource?: string;
   /** 输入文本（messages 拍平），受 LOG_CONTENT 开关控制 */
   requestPreview?: string | null;
   /** 输出文本，受 LOG_CONTENT 开关控制 */
@@ -74,9 +78,11 @@ export class UsageService {
     userId?: string,
     cacheReadTokens = 0,
     cacheWriteTokens = 0,
+    multiplierOverride?: number,
   ): Promise<{ cost: number; upstreamCost: number }> {
     const pricing = await this.billing.getChannelPricing(channelId, model);
-    const multiplier = userId ? await this.billing.getUserMultiplier(userId) : 1;
+    const multiplier =
+      multiplierOverride ?? (userId ? await this.billing.getUserMultiplier(userId) : 1);
     const nonCached = Math.max(0, promptTokens - cacheReadTokens);
     const cost = round6(
       ((nonCached / 1_000_000) * pricing.priceInput +
@@ -96,6 +102,10 @@ export class UsageService {
 
   /** 记录一次调用：写明细、累计 key 用量、按天聚合。 */
   async record(entry: UsageEntry): Promise<void> {
+    // 倍率：网关已解析则直传（与预授权同一口径），否则回退用户/代理倍率
+    const multiplier =
+      entry.multiplier ??
+      (entry.userId ? await this.billing.getUserMultiplier(entry.userId) : 1);
     const { cost, upstreamCost } = await this.computeCosts(
       entry.channelId,
       entry.model,
@@ -104,6 +114,7 @@ export class UsageService {
       entry.userId,
       entry.cacheReadTokens ?? 0,
       entry.cacheWriteTokens ?? 0,
+      multiplier,
     );
     const date = utcDay();
 
@@ -124,6 +135,8 @@ export class UsageService {
             cost,
             upstreamCost,
             chargeable: entry.chargeable === true,
+            multiplierApplied: multiplier,
+            multiplierSource: entry.multiplierSource ?? null,
             latencyMs: entry.latencyMs,
             status: entry.status,
             errorMessage: entry.errorMessage ?? null,

@@ -351,6 +351,32 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 | `CHANNEL_FAILURE_THRESHOLD` / `CHANNEL_AUTO_REENABLE_MS` | `5` / `900000` | 渠道级失败禁用阈值 / 自动禁用冷却 |
 | `CHANNEL_LIMIT_DAY_OFFSET_HOURS` | `8` | 每日限额的自然日分界（UTC+8） |
 
+## 模型分组与产地（分组隔离 / 分组倍率 / 模型映射）
+
+以「分组」为核心做分档售卖与合规隔离（借鉴 new-api 的 GroupRatio / 渠道分组并做简化）：
+
+- **模型分组（`ModelGroup`）**：一组可见模型 + 一个分组倍率。
+  - `models` 为空 = 不限制（该分组可见全部模型）；`ratio` 为空 = 不参与倍率
+- **绑定（单组 + 令牌可覆盖）**：`User.groupId` 为用户所属分组，`ApiKey.groupId` 可覆盖（**仅管理员可设置**，普通用户创建/修改 Key 时该字段被忽略）；解析顺序：令牌分组 > 用户分组 > 默认分组 > 不限制
+- **渠道分组**：`Channel.groups` 为空 = 公共渠道；配了分组则仅同分组用户可见（自有 BYOK 渠道不受分组限制）
+- **分组倍率**：`用户个人倍率 > 分组倍率 > 所属代理倍率 > 1`（**互斥优先、不叠乘**）；每次调用的生效倍率与来源写入 `RequestLog.multiplierApplied` / `multiplierSource`，便于账单审计
+- **模型映射**：`ChannelModel.upstreamModelName` 支持「对外规范名 → 上游真实名」，同一模型可在不同上游使用不同 ID（解决大小写/连字符等命名差异）
+- **模型产地**：`ModelCatalog.origin`（`DOMESTIC`/`OVERSEAS`）+ `vendor`；`Channel.region` 记录上游接入地
+  - 产地以**模型厂商**为准，与调用链路无关；未知厂商默认按 `OVERSEAS`（保守：漏标国产只会少暴露，不会误放行海外模型）
+  - 控制台「一键归类」或 `POST /api/models/classify-origins` 按模型名批量补标
+  - 典型用法：建「国内组」只放 `origin=DOMESTIC` 的模型、只挂 `region=DOMESTIC` 的渠道，即可实现国内合规隔离
+
+### 相关接口
+
+| 方法与路径 | 权限 | 说明 |
+| --- | --- | --- |
+| `GET /api/groups` | 登录 | 分组列表（含可见模型与绑定数量） |
+| `POST /api/groups` | ADMIN | 创建分组 |
+| `PATCH /api/groups/:id` | ADMIN | 更新分组（`models` 传数组=替换，传 `[]`=不限制） |
+| `PUT /api/groups/:id/models` | ADMIN | 替换分组的可见模型集合 |
+| `DELETE /api/groups/:id` | ADMIN | 删除分组（默认分组不可删） |
+| `POST /api/models/classify-origins` | ADMIN | 按模型名一键归类厂商/产地 |
+
 ## 安全说明
 
 - 平台 key：仅存 SHA-256 哈希，明文只在创建时返回一次。
@@ -360,4 +386,5 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
   - `BOOTSTRAP_ADMIN_PASSWORD`：≥12 字符且非常见弱口令（`admin123456` 等会被拒绝）。
   - `ENCRYPTION_KEY`：32 字节非全零 hex。
 - 已启用 `helmet` 安全响应头、请求体大小限制（25MB）、按 key 的 RPM 限流。
+- API 文档 `/api/docs`（Swagger）生产默认**关闭**，需要时设 `SWAGGER_ENABLED=true` 显式开启。
 - 调用内容（输入/输出）默认不记录（`LOG_CONTENT=false`，仅保留元数据与 token）；设 `LOG_CONTENT=true` 时写入 `RequestLog`，单条上限 `LOG_CONTENT_MAX=20000` 字符（生产开启会显著增加磁盘与日志占用）。

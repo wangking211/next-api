@@ -76,4 +76,17 @@ export class UpdateChannelDto {
   @ValidateNested({ each: true })
   @Type(() => ChannelModelPriceDto)
   modelPrices?: ChannelModelPriceDto[];
+
+  /** 渠道分组 id 列表（仅管理员可设置）；空数组 = 转为公共渠道 */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  groups?: string[];
+
+  /** 上游计费分组名（仅用于成本核算与展示） */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  upstreamGroup?: string | null;
 }

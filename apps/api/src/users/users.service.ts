@@ -79,6 +79,8 @@ export class UsersService {
           rebateRate: true,
           agentId: true,
           agent: { select: { id: true, username: true, priceMultiplier: true } },
+          groupId: true,
+          group: { select: { id: true, name: true, displayName: true, ratio: true } },
           createdAt: true,
           _count: { select: { apiKeys: true, channels: true } },
         },
@@ -88,7 +90,7 @@ export class UsersService {
     return { items, total, page, pageSize };
   }
 
-  /** 管理员：更新用户角色/售价倍率/归属代理（可清空倍率与代理） */
+  /** 管理员：更新用户角色/售价倍率/归属代理/所属分组（可清空倍率与代理） */
   async updateUser(
     id: string,
     data: {
@@ -96,6 +98,7 @@ export class UsersService {
       priceMultiplier?: number | null;
       agentId?: string | null;
       rebateRate?: number | null;
+      groupId?: string | null;
     },
   ) {
     const user = await this.findById(id);
@@ -109,6 +112,7 @@ export class UsersService {
           : {}),
         ...(data.agentId !== undefined ? { agentId: data.agentId } : {}),
         ...(data.rebateRate !== undefined ? { rebateRate: data.rebateRate } : {}),
+        ...(data.groupId !== undefined ? { groupId: data.groupId } : {}),
       },
       select: {
         id: true,
@@ -120,6 +124,8 @@ export class UsersService {
         priceMultiplier: true,
         rebateRate: true,
         agentId: true,
+        groupId: true,
+        group: { select: { id: true, name: true, displayName: true, ratio: true } },
       },
     });
   }

@@ -61,4 +61,10 @@ export class UpdateKeyDto {
   @IsOptional()
   @IsEnum(RoutingStrategy)
   routingStrategy?: RoutingStrategy | null;
+
+  /** 令牌级分组（仅管理员可设置）；null = 清除，回退用户所属分组 */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  groupId?: string | null;
 }

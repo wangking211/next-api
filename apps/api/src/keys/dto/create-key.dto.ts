@@ -56,4 +56,10 @@ export class CreateKeyDto {
   @IsOptional()
   @IsEnum(RoutingStrategy)
   routingStrategy?: RoutingStrategy;
+
+  /** 令牌级分组（仅管理员可设置）；留空 = 用用户所属分组 */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  groupId?: string | null;
 }

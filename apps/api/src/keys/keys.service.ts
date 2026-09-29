@@ -16,6 +16,7 @@ export class KeysService {
     const keys = await this.prisma.apiKey.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
+      include: { group: { select: { id: true, name: true, displayName: true } } },
     });
     return keys.map((k) => this.publicView(k));
   }
@@ -33,6 +34,8 @@ export class KeysService {
     routingStrategy: RoutingStrategy | null;
     tpmLimit: number | null;
     models: string[];
+    groupId: string | null;
+    group?: { id: string; name: string; displayName: string } | null;
     expiresAt: Date | null;
     lastUsedAt: Date | null;
     createdAt: Date;
@@ -50,13 +53,15 @@ export class KeysService {
       routingStrategy: k.routingStrategy,
       tpmLimit: k.tpmLimit,
       models: k.models,
+      groupId: k.groupId,
+      group: k.group ?? null,
       expiresAt: k.expiresAt,
       lastUsedAt: k.lastUsedAt,
       createdAt: k.createdAt,
     };
   }
 
-  async create(userId: string, dto: CreateKeyDto) {
+  async create(userId: string, dto: CreateKeyDto, isAdmin = false) {
     const { plaintext, hash, prefix } = this.crypto.generateApiKey();
     const key = await this.prisma.apiKey.create({
       data: {
@@ -70,6 +75,8 @@ export class KeysService {
         routingStrategy: dto.routingStrategy ?? null,
         tpmLimit: dto.tpmLimit ?? null,
         models: dto.models ?? [],
+        // 分组只允许管理员指定，普通用户创建的 Key 一律继承用户分组
+        groupId: isAdmin ? (dto.groupId ?? null) : null,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
       },
     });
@@ -87,7 +94,7 @@ export class KeysService {
     return key;
   }
 
-  async update(userId: string, id: string, dto: UpdateKeyDto) {
+  async update(userId: string, id: string, dto: UpdateKeyDto, isAdmin = false) {
     await this.findOwned(userId, id);
     const data: Record<string, unknown> = {};
     if (dto.name !== undefined) data.name = dto.name;
@@ -98,6 +105,8 @@ export class KeysService {
     if (dto.routingStrategy !== undefined) data.routingStrategy = dto.routingStrategy;
     if (dto.tpmLimit !== undefined) data.tpmLimit = dto.tpmLimit;
     if (dto.models !== undefined) data.models = dto.models ?? [];
+    // 分组只允许管理员调整
+    if (isAdmin && dto.groupId !== undefined) data.groupId = dto.groupId;
     if (dto.expiresAt !== undefined) {
       data.expiresAt = dto.expiresAt ? new Date(dto.expiresAt) : null;
     }
