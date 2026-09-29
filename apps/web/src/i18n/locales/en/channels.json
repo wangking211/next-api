@@ -94,5 +94,7 @@
   "channels.form.upstreamGroup": "Upstream group name",
   "channels.form.upstreamGroupExtra": "Group parameter passed through to upstream (e.g. new-api group name); blank = not sent",
   "channels.form.upstreamGroupPlaceholder": "e.g. default",
-  "channels.pricing.upstreamModelName": "Upstream model name"
+  "channels.pricing.upstreamModelName": "Upstream model name",
+  "channels.pricing.costPerCall": "Per-call cost ($/call)",
+  "channels.pricing.pricePerCall": "Per-call price ($/call)"
 }

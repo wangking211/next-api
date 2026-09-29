@@ -94,5 +94,7 @@
   "channels.form.upstreamGroup": "上游分组名",
   "channels.form.upstreamGroupExtra": "透传给上游的分组参数（如 new-api 的分组名）；留空不传",
   "channels.form.upstreamGroupPlaceholder": "例如 default",
-  "channels.pricing.upstreamModelName": "上游模型名"
+  "channels.pricing.upstreamModelName": "上游模型名",
+  "channels.pricing.costPerCall": "按次成本($/次)",
+  "channels.pricing.pricePerCall": "按次售价($/次)"
 }

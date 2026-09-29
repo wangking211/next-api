@@ -41,5 +41,8 @@
   "models.classify.button": "一鍵歸類",
   "models.classify.confirm": "將按模型名重新推斷並覆蓋廠商/產地，確定繼續？",
   "models.classify.tip": "按模型名自動補標廠商與產地（會覆蓋已有值）",
-  "models.classify.success": "已歸類 {{updated}} / {{total}}"
+  "models.classify.success": "已歸類 {{updated}} / {{total}}",
+  "models.column.perCallPrice": "按次價格($/次)",
+  "models.form.perCallPriceLabel": "按次價格 ($/次)",
+  "models.perCall.tokenPriced": "按 token 計價"
 }

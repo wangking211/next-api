@@ -205,6 +205,7 @@ export const modelsApi = {
     outputPrice?: number;
     cacheReadPrice?: number;
     cacheWritePrice?: number;
+    perCallPrice?: number | null;
     enabled?: boolean;
   }) {
     const { data } = await api.post<ModelInfo>('/models', body);

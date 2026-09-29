@@ -37,12 +37,24 @@ export function PricingTable({
       onChange={(v) => setP(model, key, v as number)}
     />
   );
+  /** 按次计价（USD/次）：仅图片等非 token 计费模型需要，留空 = 按 token 计价 */
+  const perCall = (model: string, key: 'costPerCall' | 'pricePerCall') => (
+    <InputNumber
+      size="small"
+      min={0}
+      step={0.001}
+      style={{ width: 96 }}
+      value={pricing[model]?.[key]}
+      placeholder="—"
+      onChange={(v) => setP(model, key, v as number)}
+    />
+  );
   return (
     <Table
       size="small"
       rowKey="model"
       pagination={false}
-      scroll={{ y: 260, x: 880 }}
+      scroll={{ y: 260, x: 1120 }}
       style={{ marginTop: 6 }}
       dataSource={models.map((m) => ({ model: m }))}
       columns={[
@@ -80,6 +92,16 @@ export function PricingTable({
               onChange={(v) => setP(r.model, 'qualityScore', v as number)}
             />
           ),
+        },
+        {
+          title: t('channels.pricing.costPerCall'),
+          width: 120,
+          render: (_: unknown, r: { model: string }) => perCall(r.model, 'costPerCall'),
+        },
+        {
+          title: t('channels.pricing.pricePerCall'),
+          width: 120,
+          render: (_: unknown, r: { model: string }) => perCall(r.model, 'pricePerCall'),
         },
         {
           title: t('channels.pricing.cost'),

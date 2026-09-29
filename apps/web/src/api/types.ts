@@ -91,6 +91,9 @@ export interface ChannelModelPrice {
   costOutput: number | null;
   priceInput: number | null;
   priceOutput: number | null;
+  /** 按次成本/售价（USD/次）：图片等非 token 计费模型 */
+  costPerCall: number | null;
+  pricePerCall: number | null;
   discount: number | null;
   costDiscount: number | null;
   priceDiscount: number | null;
@@ -141,6 +144,8 @@ export interface ModelInfo {
   outputPrice: string;
   cacheReadPrice: string;
   cacheWritePrice: string;
+  /** 按次价格（USD/次）；null = 按 token 计价 */
+  perCallPrice: string | null;
   enabled: boolean;
   createdAt: string;
 }

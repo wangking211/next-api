@@ -72,6 +72,8 @@ export default function ChannelsPage() {
       if (r.priceDiscount != null) entry.priceDiscount = r.priceDiscount;
       if (r.qualityScore != null) entry.qualityScore = r.qualityScore;
       if (r.upstreamModelName) entry.upstreamModelName = r.upstreamModelName;
+      if (r.costPerCall != null) entry.costPerCall = r.costPerCall;
+      if (r.pricePerCall != null) entry.pricePerCall = r.pricePerCall;
       return entry;
     });
 
@@ -168,6 +170,8 @@ export default function ChannelsPage() {
         priceDiscount: mp.priceDiscount ?? mp.discount ?? undefined,
         qualityScore: mp.qualityScore ?? undefined,
         upstreamModelName: mp.upstreamModelName ?? undefined,
+        costPerCall: mp.costPerCall ?? undefined,
+        pricePerCall: mp.pricePerCall ?? undefined,
       };
     }
     setPricing(p);
@@ -258,6 +262,8 @@ export default function ChannelsPage() {
         priceDiscount: mp.priceDiscount ?? mp.discount ?? undefined,
         qualityScore: mp.qualityScore ?? undefined,
         upstreamModelName: mp.upstreamModelName ?? undefined,
+        costPerCall: mp.costPerCall ?? undefined,
+        pricePerCall: mp.pricePerCall ?? undefined,
       };
     }
     setPricing(p);

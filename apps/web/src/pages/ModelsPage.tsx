@@ -78,6 +78,7 @@ export default function ModelsPage() {
       outputPrice: 0,
       cacheReadPrice: 0,
       cacheWritePrice: 0,
+      perCallPrice: null,
     });
     setOpen(true);
   };
@@ -94,6 +95,7 @@ export default function ModelsPage() {
       outputPrice: Number(r.outputPrice),
       cacheReadPrice: Number(r.cacheReadPrice ?? 0),
       cacheWritePrice: Number(r.cacheWritePrice ?? 0),
+      perCallPrice: r.perCallPrice != null ? Number(r.perCallPrice) : null,
       enabled: r.enabled,
     });
     setOpen(true);
@@ -166,6 +168,12 @@ export default function ModelsPage() {
             title: t('models.column.cacheWrite'),
             dataIndex: 'cacheWritePrice',
             render: (v: string) => Number(v ?? 0).toFixed(4),
+          },
+          {
+            title: t('models.column.perCallPrice'),
+            dataIndex: 'perCallPrice',
+            render: (v: string | null) =>
+              v != null ? Number(v).toFixed(4) : t('models.perCall.tokenPriced'),
           },
           {
             title: t('models.column.enabled'),
@@ -252,6 +260,9 @@ export default function ModelsPage() {
             </Form.Item>
             <Form.Item name="cacheWritePrice" label={t('models.form.cacheWriteLabel')}>
               <InputNumber min={0} step={0.01} />
+            </Form.Item>
+            <Form.Item name="perCallPrice" label={t('models.form.perCallPriceLabel')}>
+              <InputNumber min={0} step={0.001} />
             </Form.Item>
           </Space>
           <Form.Item name="enabled" label={t('models.form.enabledLabel')} valuePropName="checked">

@@ -7,6 +7,9 @@ export type PriceRow = {
   qualityScore?: number;
   /** 上游实际模型名（本地模型名 → 上游模型名映射） */
   upstreamModelName?: string;
+  /** 按次成本 / 按次售价（USD/次）：图片等非 token 计费模型 */
+  costPerCall?: number;
+  pricePerCall?: number;
 };
 
 export type SetPrice = (model: string, key: keyof PriceRow, value: number | string | null) => void;

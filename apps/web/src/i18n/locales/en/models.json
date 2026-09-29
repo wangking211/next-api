@@ -41,5 +41,8 @@
   "models.classify.button": "Auto-classify",
   "models.classify.confirm": "Vendor/origin will be re-inferred from model names and overwritten. Continue?",
   "models.classify.tip": "Auto-tag vendor and origin by model name (overwrites existing values)",
-  "models.classify.success": "Classified {{updated}} / {{total}}"
+  "models.classify.success": "Classified {{updated}} / {{total}}",
+  "models.column.perCallPrice": "Per-call price ($/call)",
+  "models.form.perCallPriceLabel": "Per-call price ($/call)",
+  "models.perCall.tokenPriced": "Token-based"
 }
