@@ -17,6 +17,7 @@ import {
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { agentApi, billingApi, withdrawalsApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { formatCredits, formatDateTime, fromCredits } from '../utils/format';
@@ -24,6 +25,7 @@ import type { AgentMember, BalanceTransaction, Withdrawal } from '../api/types';
 
 export default function AgentPage() {
   const { message } = App.useApp();
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [rechargeTarget, setRechargeTarget] = useState<AgentMember | null>(null);
@@ -61,7 +63,7 @@ export default function AgentPage() {
       invalidate();
       setCreateOpen(false);
       createForm.resetFields();
-      message.success('成员已创建');
+      message.success(t('agent.member.createSuccess'));
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -73,7 +75,7 @@ export default function AgentPage() {
       invalidate();
       setRechargeTarget(null);
       rechargeForm.resetFields();
-      message.success('充值成功');
+      message.success(t('agent.recharge.success'));
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -84,7 +86,7 @@ export default function AgentPage() {
       invalidate();
       setWithdrawOpen(false);
       withdrawForm.resetFields();
-      message.success('提现申请已提交，等待管理员审批');
+      message.success(t('agent.withdraw.success'));
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -92,52 +94,55 @@ export default function AgentPage() {
   return (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
       <Card
-        title="代理中心"
+        title={t('agent.overview.title')}
         loading={isLoading}
         extra={
           <Space>
-            <Button onClick={() => setWithdrawOpen(true)}>提现</Button>
+            <Button onClick={() => setWithdrawOpen(true)}>{t('agent.withdraw.button')}</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-              新增成员
+              {t('agent.member.createBtn')}
             </Button>
           </Space>
         }
       >
         <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-          名下用户消耗的积分按「返点比例」计入你的余额；你可新建成员并用余额为其充值。
+          {t('agent.overview.desc')}
         </Typography.Paragraph>
         <Row gutter={16}>
           <Col xs={12} md={6}>
-            <Statistic title="我的余额" value={formatCredits(overview?.balance ?? 0)} />
-          </Col>
-          <Col xs={12} md={6}>
-            <Statistic title="累计返点" value={formatCredits(overview?.commissionTotal ?? 0)} />
-          </Col>
-          <Col xs={12} md={6}>
-            <Statistic title="名下成员" value={overview?.memberCount ?? 0} />
+            <Statistic title={t('agent.overview.balance')} value={formatCredits(overview?.balance ?? 0)} />
           </Col>
           <Col xs={12} md={6}>
             <Statistic
-              title="成员近 30 天消费"
+              title={t('agent.overview.commissionTotal')}
+              value={formatCredits(overview?.commissionTotal ?? 0)}
+            />
+          </Col>
+          <Col xs={12} md={6}>
+            <Statistic title={t('agent.overview.memberCount')} value={overview?.memberCount ?? 0} />
+          </Col>
+          <Col xs={12} md={6}>
+            <Statistic
+              title={t('agent.overview.membersUsage30d')}
               value={formatCredits(overview?.membersUsage30d?.cost ?? 0)}
             />
           </Col>
         </Row>
         <Space style={{ marginTop: 12 }} size={16}>
           <span>
-            返点比例：
+            {t('agent.overview.rebateRatio')}
             {overview?.rebateRate != null
               ? `${(overview.rebateRate * 100).toFixed(1)}%`
-              : '未设置'}
+              : t('agent.overview.notSet')}
           </span>
           <span>
-            我的用户倍率：
+            {t('agent.overview.multiplierLabel')}
             {overview?.priceMultiplier != null ? `×${overview.priceMultiplier}` : '×1'}
           </span>
         </Space>
       </Card>
 
-      <Card title="名下成员" size="small">
+      <Card title={t('agent.member.title')} size="small">
         <Table<AgentMember>
           rowKey="id"
           size="small"
@@ -146,41 +151,53 @@ export default function AgentPage() {
           pagination={false}
           scroll={{ x: 900 }}
           columns={[
-            { title: '用户名', dataIndex: 'username' },
-            { title: '邮箱', dataIndex: 'email' },
+            { title: t('agent.member.username'), dataIndex: 'username' },
+            { title: t('agent.member.email'), dataIndex: 'email' },
             {
-              title: '状态',
+              title: t('common.status'),
               dataIndex: 'status',
               width: 90,
               render: (v: string) =>
-                v === 'ACTIVE' ? <Tag color="green">正常</Tag> : <Tag color="red">封禁</Tag>,
+                v === 'ACTIVE' ? (
+                  <Tag color="green">{t('agent.member.statusActive')}</Tag>
+                ) : (
+                  <Tag color="red">{t('agent.member.statusBanned')}</Tag>
+                ),
             },
             {
-              title: '余额',
+              title: t('agent.member.balance'),
               dataIndex: 'balance',
               width: 130,
               render: (v: number) => formatCredits(v),
             },
             {
-              title: '倍率',
+              title: t('agent.member.multiplier'),
               dataIndex: 'priceMultiplier',
               width: 80,
               render: (v: number | null) => (v != null ? `×${v}` : '×1'),
             },
-            { title: '近30天请求', render: (_, r) => r.usage30d.requests, width: 100 },
-            { title: '近30天Token', render: (_, r) => r.usage30d.tokens, width: 120 },
             {
-              title: '近30天消费',
+              title: t('agent.member.requests30d'),
+              render: (_, r) => r.usage30d.requests,
+              width: 100,
+            },
+            {
+              title: t('agent.member.tokens30d'),
+              render: (_, r) => r.usage30d.tokens,
+              width: 120,
+            },
+            {
+              title: t('agent.member.cost30d'),
               width: 130,
               render: (_, r) => formatCredits(r.usage30d.cost),
             },
             {
-              title: '操作',
+              title: t('common.action'),
               fixed: 'right',
               width: 90,
               render: (_, r) => (
                 <Button size="small" onClick={() => setRechargeTarget(r)}>
-                  充值
+                  {t('agent.member.rechargeBtn')}
                 </Button>
               ),
             },
@@ -188,7 +205,7 @@ export default function AgentPage() {
         />
       </Card>
 
-      <Card title="返点流水" size="small">
+      <Card title={t('agent.commission.title')} size="small">
         <Table<BalanceTransaction>
           rowKey="id"
           size="small"
@@ -196,26 +213,30 @@ export default function AgentPage() {
           pagination={false}
           columns={[
             {
-              title: '时间',
+              title: t('common.time'),
               dataIndex: 'createdAt',
               width: 180,
               render: (v: string) => formatDateTime(v),
             },
             {
-              title: '返点金额',
+              title: t('agent.commission.amount'),
               dataIndex: 'amount',
               width: 140,
               render: (v: string) => (
                 <Typography.Text type="success">{formatCredits(v)}</Typography.Text>
               ),
             },
-            { title: '说明', dataIndex: 'description', render: (v) => v ?? '-' },
+            {
+              title: t('agent.commission.description'),
+              dataIndex: 'description',
+              render: (v) => v ?? '-',
+            },
           ]}
         />
       </Card>
 
       <Modal
-        title="新增成员"
+        title={t('agent.member.createModal.title')}
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
         onOk={() => createForm.submit()}
@@ -223,34 +244,44 @@ export default function AgentPage() {
         destroyOnClose
       >
         <Form form={createForm} layout="vertical" onFinish={(v) => createMut.mutate(v)} requiredMark={false}>
-          <Form.Item name="email" label="邮箱" rules={[{ required: true, type: 'email' }]}>
+          <Form.Item
+            name="email"
+            label={t('agent.member.email')}
+            rules={[{ required: true, type: 'email' }]}
+          >
             <Input placeholder="member@example.com" />
           </Form.Item>
           <Form.Item
             name="username"
-            label="用户名"
+            label={t('agent.member.username')}
             rules={[
               { required: true, min: 3 },
-              { pattern: /^[a-zA-Z0-9_]+$/, message: '仅字母数字下划线' },
+              {
+                pattern: /^[a-zA-Z0-9_]+$/,
+                message: t('agent.member.createModal.usernamePattern'),
+              },
             ]}
           >
             <Input placeholder="username" />
           </Form.Item>
           <Form.Item
             name="password"
-            label="密码"
+            label={t('agent.member.createModal.passwordLabel')}
             rules={[
-              { required: true, min: 8, message: '至少 8 位' },
-              { pattern: /(?=.*[A-Za-z])(?=.*\d)/, message: '需含字母和数字' },
+              { required: true, min: 8, message: t('agent.member.createModal.passwordMin') },
+              {
+                pattern: /(?=.*[A-Za-z])(?=.*\d)/,
+                message: t('agent.member.createModal.passwordPattern'),
+              },
             ]}
           >
-            <Input.Password placeholder="至少 8 位，含字母和数字" />
+            <Input.Password placeholder={t('agent.member.createModal.passwordPlaceholder')} />
           </Form.Item>
         </Form>
       </Modal>
 
       <Modal
-        title={`为成员充值 - ${rechargeTarget?.username ?? ''}`}
+        title={t('agent.recharge.modalTitle', { username: rechargeTarget?.username ?? '' })}
         open={!!rechargeTarget}
         onCancel={() => setRechargeTarget(null)}
         onOk={() => rechargeForm.submit()}
@@ -265,14 +296,14 @@ export default function AgentPage() {
         >
           <Form.Item
             name="amount"
-            label="充值积分（从我的余额转出）"
-            rules={[{ required: true, message: '请输入积分' }]}
+            label={t('agent.recharge.amountLabel')}
+            rules={[{ required: true, message: t('agent.form.enterCredits') }]}
           >
             <InputNumber min={1} step={100} style={{ width: '100%' }} />
           </Form.Item>
         </Form>
       </Modal>
-      <Card title="提现记录" size="small">
+      <Card title={t('agent.withdraw.recordsTitle')} size="small">
         <Table<Withdrawal>
           rowKey="id"
           size="small"
@@ -280,37 +311,41 @@ export default function AgentPage() {
           pagination={false}
           columns={[
             {
-              title: '时间',
+              title: t('common.time'),
               dataIndex: 'createdAt',
               width: 180,
               render: (v: string) => formatDateTime(v),
             },
             {
-              title: '金额',
+              title: t('common.amount'),
               dataIndex: 'amount',
               width: 130,
               render: (v: string) => formatCredits(v),
             },
             {
-              title: '状态',
+              title: t('common.status'),
               dataIndex: 'status',
               width: 100,
               render: (v: string) =>
                 v === 'APPROVED' ? (
-                  <Tag color="green">已通过</Tag>
+                  <Tag color="green">{t('common.approved')}</Tag>
                 ) : v === 'REJECTED' ? (
-                  <Tag color="red">已驳回</Tag>
+                  <Tag color="red">{t('common.rejected')}</Tag>
                 ) : (
-                  <Tag color="orange">待审批</Tag>
+                  <Tag color="orange">{t('common.pending')}</Tag>
                 ),
             },
-            { title: '备注', dataIndex: 'note', render: (v) => v ?? '-' },
+            {
+              title: t('common.remark'),
+              dataIndex: 'note',
+              render: (v) => v ?? '-',
+            },
           ]}
         />
       </Card>
 
       <Modal
-        title="申请提现"
+        title={t('agent.withdraw.modalTitle')}
         open={withdrawOpen}
         onCancel={() => setWithdrawOpen(false)}
         onOk={() => withdrawForm.submit()}
@@ -325,8 +360,8 @@ export default function AgentPage() {
         >
           <Form.Item
             name="amount"
-            label="提现积分（从我的余额冻结，等待审批）"
-            rules={[{ required: true, message: '请输入积分' }]}
+            label={t('agent.withdraw.amountLabel')}
+            rules={[{ required: true, message: t('agent.form.enterCredits') }]}
           >
             <InputNumber min={1} step={100} style={{ width: '100%' }} />
           </Form.Item>

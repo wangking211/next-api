@@ -1,10 +1,12 @@
 import { App, Card, Empty, Space, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { channelsApi } from '../api/endpoints';
 
 const { Paragraph, Text } = Typography;
 
 export default function AvailableModelsPage() {
+  const { t } = useTranslation();
   const { message } = App.useApp();
   const { data, isLoading } = useQuery({
     queryKey: ['available-models'],
@@ -14,17 +16,17 @@ export default function AvailableModelsPage() {
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      message.success(`已复制模型名：${text}`);
+      message.success(t('models.copiedName', { name: text }));
     } catch {
-      message.warning('复制失败，请手动选择复制');
+      message.warning(t('models.copyFailed'));
     }
   };
 
   return (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
-      <Card loading={isLoading} title="可用模型（全部）">
+      <Card loading={isLoading} title={t('models.available.title')}>
         <Paragraph type="secondary">
-          调用时只需填写模型名，网关会按「自有渠道优先 → 平台渠道」自动路由（含优先级/权重与故障转移）。点击标签即可复制。
+          {t('models.available.help')}
         </Paragraph>
         {data && data.models.length > 0 ? (
           <Space size={[8, 8]} wrap>
@@ -40,7 +42,7 @@ export default function AvailableModelsPage() {
             ))}
           </Space>
         ) : (
-          <Empty description="暂无可用模型，请先添加渠道或联系管理员" />
+          <Empty description={t('models.available.empty')} />
         )}
       </Card>
 
@@ -52,9 +54,9 @@ export default function AvailableModelsPage() {
             <Space>
               <Text strong>{ch.name}</Text>
               {ch.ownerType === 'PLATFORM' ? (
-                <Tag color="gold">平台</Tag>
+                <Tag color="gold">{t('models.platform')}</Tag>
               ) : (
-                <Tag color="blue">我的</Tag>
+                <Tag color="blue">{t('models.mine')}</Tag>
               )}
               <Tag>{ch.provider}</Tag>
             </Space>

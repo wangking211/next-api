@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && node scripts/i18n-check.mjs",
+    "check:i18n": "node scripts/i18n-check.mjs",
     "preview": "vite preview",
     "doctor": "npx react-doctor@latest"
   },
@@ -15,8 +16,10 @@
     "@tanstack/react-query": "^5.62.11",
     "antd": "^5.22.7",
     "axios": "^1.7.9",
+    "i18next": "^26.4.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-i18next": "^17.0.15",
     "react-router-dom": "^6.28.1"
   },
   "devDependencies": {

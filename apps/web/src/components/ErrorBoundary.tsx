@@ -1,7 +1,8 @@
 import { Component, type ReactNode } from 'react';
 import { Button, Result } from 'antd';
+import { withTranslation, type WithTranslation } from 'react-i18next';
 
-interface Props {
+interface Props extends WithTranslation {
   children: ReactNode;
 }
 
@@ -10,7 +11,7 @@ interface State {
 }
 
 /** 全局错误边界：渲染异常时避免整页白屏 */
-export default class ErrorBoundary extends Component<Props, State> {
+class ErrorBoundary extends Component<Props, State> {
   state: State = { hasError: false };
 
   static getDerivedStateFromError(): State {
@@ -26,11 +27,11 @@ export default class ErrorBoundary extends Component<Props, State> {
       return (
         <Result
           status="error"
-          title="页面出错了"
-          subTitle="请刷新页面重试；若问题持续，请联系管理员。"
+          title={this.props.t('layout.error.title')}
+          subTitle={this.props.t('layout.error.subTitle')}
           extra={
             <Button type="primary" onClick={() => window.location.reload()}>
-              刷新页面
+              {this.props.t('layout.error.refresh')}
             </Button>
           }
         />
@@ -39,3 +40,5 @@ export default class ErrorBoundary extends Component<Props, State> {
     return this.props.children;
   }
 }
+
+export default withTranslation()(ErrorBoundary);

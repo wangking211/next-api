@@ -19,6 +19,7 @@ import {
   Typography,
 } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { billingApi, paymentApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { getCreditsPerCny, getPayRate, isPayEnabled } from '../api/config';
@@ -31,39 +32,12 @@ import type {
   PaymentOrderCreated,
 } from '../api/types';
 
-const TYPE_META: Record<BalanceTxType, { color: string; label: string }> = {
-  RECHARGE: { color: 'green', label: '充值' },
-  CONSUME: { color: 'blue', label: '消费' },
-  ADJUST: { color: 'orange', label: '调整' },
-  COMMISSION: { color: 'purple', label: '返点' },
-  TRANSFER: { color: 'geekblue', label: '转账' },
-  WITHDRAW: { color: 'volcano', label: '提现' },
-};
-
-const PAY_STATUS_META: Record<PaymentOrder['status'], { color: string; label: string }> = {
-  PENDING: { color: 'processing', label: '待支付' },
-  PAID: { color: 'green', label: '已到账' },
-  CLOSED: { color: 'default', label: '已关闭' },
-  FAILED: { color: 'red', label: '失败' },
-};
-
 /** 充值档位（元）；也可自定义输入 */
 const PRESET_AMOUNTS = [1, 10, 50, 100, 500];
-const WAY_OPTIONS = [
-  { label: '通用收银台', value: 'QR_CASHIER' },
-  { label: '微信扫码', value: 'WX_NATIVE' },
-  { label: '支付宝扫码', value: 'ALI_QR' },
-];
-
-function creditsText(credits: number): string {
-  return `${Number(credits ?? 0).toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} 积分`;
-}
 
 export default function BillingPage() {
   const { message } = App.useApp();
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -80,6 +54,36 @@ export default function BillingPage() {
     () => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent),
     [],
   );
+
+  const TYPE_META: Record<BalanceTxType, { color: string; label: string }> = {
+    RECHARGE: { color: 'green', label: t('billing.txnType.recharge') },
+    CONSUME: { color: 'blue', label: t('billing.txnType.consume') },
+    ADJUST: { color: 'orange', label: t('billing.txnType.adjust') },
+    COMMISSION: { color: 'purple', label: t('billing.txnType.commission') },
+    TRANSFER: { color: 'geekblue', label: t('billing.txnType.transfer') },
+    WITHDRAW: { color: 'volcano', label: t('billing.txnType.withdraw') },
+  };
+
+  const PAY_STATUS_META: Record<PaymentOrder['status'], { color: string; label: string }> = {
+    PENDING: { color: 'processing', label: t('billing.payStatus.pending') },
+    PAID: { color: 'green', label: t('billing.payStatus.paid') },
+    CLOSED: { color: 'default', label: t('billing.payStatus.closed') },
+    FAILED: { color: 'red', label: t('billing.payStatus.failed') },
+  };
+
+  const WAY_OPTIONS = [
+    { label: t('billing.pay.way.cashier'), value: 'QR_CASHIER' },
+    { label: t('billing.pay.way.wechat'), value: 'WX_NATIVE' },
+    { label: t('billing.pay.way.alipay'), value: 'ALI_QR' },
+  ];
+
+  const creditsText = (credits: number): string =>
+    t('common.creditsValue', {
+      value: Number(credits ?? 0).toLocaleString('zh-CN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
+    });
 
   const { data: balance } = useQuery({
     queryKey: ['billing', 'me'],
@@ -101,7 +105,9 @@ export default function BillingPage() {
   const redeemMut = useMutation({
     mutationFn: billingApi.redeem,
     onSuccess: (res) => {
-      message.success(`兑换成功，入账 ${creditsText(toCredits(res.amount))}`);
+      message.success(
+        t('billing.redeem.success', { credits: creditsText(toCredits(res.amount)) }),
+      );
       setCode('');
       qc.invalidateQueries({ queryKey: ['billing'] });
     },
@@ -136,7 +142,7 @@ export default function BillingPage() {
     if (!status || status === 'PENDING') return;
     setCreated((c) => (c ? { ...c, status } : c));
     if (status === 'PAID') {
-      message.success('支付成功，积分已到账');
+      message.success(t('billing.pay.paidMsg'));
       qc.invalidateQueries({ queryKey: ['billing'] });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -147,13 +153,13 @@ export default function BillingPage() {
       <Col span={24}>
         <Card>
           <Statistic
-            title="账户余额"
+            title={t('billing.balance.title')}
             value={toCredits(balance?.balance).toFixed(2)}
-            suffix="积分"
+            suffix={t('billing.balance.suffix')}
           />
           <Space.Compact style={{ marginTop: 16, maxWidth: 420 }}>
             <Input
-              placeholder="输入兑换码，如 XXXX-XXXX-XXXX-XXXX"
+              placeholder={t('billing.redeem.placeholder')}
               value={code}
               onChange={(e) => setCode(e.target.value)}
               onPressEnter={() => code && redeemMut.mutate(code)}
@@ -164,7 +170,7 @@ export default function BillingPage() {
               loading={redeemMut.isPending}
               onClick={() => redeemMut.mutate(code)}
             >
-              兑换
+              {t('billing.redeem.button')}
             </Button>
           </Space.Compact>
           <Alert
@@ -173,8 +179,11 @@ export default function BillingPage() {
             showIcon
             message={
               payEnabled && creditsPerCny
-                ? `平台托管渠道按调用成本从余额扣费；BYOK（自带上游 Key）渠道不扣费。可通过在线充值（微信/支付宝）、兑换码充值。当前 1 元 = ${creditsPerCny} 积分${payRate ? `（1 美元 = ${payRate} 元）` : ''}。`
-                : '平台托管渠道按调用成本从余额扣费；BYOK（自带上游 Key）渠道不扣费。可通过兑换码或联系管理员充值。'
+                ? t('billing.notice.feeOnline', {
+                    per: creditsPerCny,
+                    rateNote: payRate ? t('billing.notice.rateNote', { rate: payRate }) : '',
+                  })
+                : t('billing.notice.feeRedeem')
             }
           />
         </Card>
@@ -182,12 +191,12 @@ export default function BillingPage() {
 
       {payEnabled && (
         <Col span={24}>
-          <Card title="在线充值（微信 / 支付宝）">
+          <Card title={t('billing.pay.title')}>
             {!creditsPerCny ? (
               <Alert
                 type="warning"
                 showIcon
-                message="实时汇率获取失败，暂时无法下单充值，请稍后重试（或联系管理员配置固定汇率）。"
+                message={t('billing.pay.rateError')}
               />
             ) : (
               <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -195,7 +204,10 @@ export default function BillingPage() {
                   <Segmented
                     value={amountYuan}
                     onChange={(v) => setAmountYuan(Number(v))}
-                    options={PRESET_AMOUNTS.map((a) => ({ label: `${a} 元`, value: a }))}
+                    options={PRESET_AMOUNTS.map((a) => ({
+                      label: t('billing.pay.denomination', { value: a }),
+                      value: a,
+                    }))}
                   />
                   <InputNumber
                     addonBefore="¥"
@@ -208,7 +220,7 @@ export default function BillingPage() {
                   />
                 </Space>
                 <Space wrap align="center">
-                  <Typography.Text type="secondary">支付方式</Typography.Text>
+                  <Typography.Text type="secondary">{t('billing.pay.method')}</Typography.Text>
                   <Segmented
                     value={wayCode}
                     onChange={(v) => setWayCode(String(v))}
@@ -221,11 +233,14 @@ export default function BillingPage() {
                     loading={createPayMut.isPending}
                     onClick={() => createPayMut.mutate()}
                   >
-                    立即充值 ¥{amountYuan}
+                    {t('billing.pay.submit', { value: amountYuan })}
                   </Button>
                   <Typography.Text type="secondary">
-                    预计到账 {creditsText(amountYuan * creditsPerCny)}（1 元 = {creditsPerCny} 积分
-                    {payRate ? `，实时汇率 1 美元 = ${payRate} 元` : ''}）
+                    {t('billing.pay.estimated', {
+                      credits: creditsText(amountYuan * creditsPerCny),
+                      per: creditsPerCny,
+                      rateNote: payRate ? t('billing.pay.rateNote', { rate: payRate }) : '',
+                    })}
                   </Typography.Text>
                 </Space>
               </Space>
@@ -236,7 +251,7 @@ export default function BillingPage() {
 
       {payEnabled && (orders?.items?.length ?? 0) > 0 && (
         <Col span={24}>
-          <Card title="充值订单（最近 8 笔）" size="small">
+          <Card title={t('billing.orders.title')} size="small">
             <Table<PaymentOrder>
               rowKey="id"
               size="small"
@@ -245,26 +260,26 @@ export default function BillingPage() {
               scroll={{ x: 720 }}
               columns={[
                 {
-                  title: '时间',
+                  title: t('common.time'),
                   dataIndex: 'createdAt',
                   width: 180,
                   render: (v: string) => formatDateTime(v),
                 },
                 {
-                  title: '金额',
+                  title: t('common.amount'),
                   dataIndex: 'amountCents',
                   width: 110,
                   render: (v: number) => `¥${(v / 100).toFixed(2)}`,
                 },
                 {
-                  title: '到账积分',
+                  title: t('billing.orders.credits'),
                   dataIndex: 'credits',
                   width: 140,
                   render: (v: number) => creditsText(v),
                 },
-                { title: '方式', dataIndex: 'wayCode', width: 130 },
+                { title: t('billing.orders.way'), dataIndex: 'wayCode', width: 130 },
                 {
-                  title: '状态',
+                  title: t('common.status'),
                   dataIndex: 'status',
                   width: 110,
                   render: (v: PaymentOrder['status']) => (
@@ -279,7 +294,7 @@ export default function BillingPage() {
 
       <Col span={24}>
         <Card
-          title="账单明细"
+          title={t('billing.txnTable.title')}
           extra={
             <Segmented
               value={type}
@@ -288,10 +303,10 @@ export default function BillingPage() {
                 setPage(1);
               }}
               options={[
-                { label: '全部', value: 'ALL' },
-                { label: '充值', value: 'RECHARGE' },
-                { label: '消费', value: 'CONSUME' },
-                { label: '调整', value: 'ADJUST' },
+                { label: t('common.all'), value: 'ALL' },
+                { label: t('billing.txnType.recharge'), value: 'RECHARGE' },
+                { label: t('billing.txnType.consume'), value: 'CONSUME' },
+                { label: t('billing.txnType.adjust'), value: 'ADJUST' },
               ]}
             />
           }
@@ -313,20 +328,20 @@ export default function BillingPage() {
             }}
             columns={[
               {
-                title: '时间',
+                title: t('common.time'),
                 dataIndex: 'createdAt',
                 width: 180,
                 render: (v: string) => formatDateTime(v),
               },
               {
-                title: '类型',
+                title: t('billing.txnTable.type'),
                 dataIndex: 'type',
                 render: (v: BalanceTxType) => (
                   <Tag color={TYPE_META[v].color}>{TYPE_META[v].label}</Tag>
                 ),
               },
               {
-                title: '金额 (积分)',
+                title: t('billing.txnTable.amount'),
                 dataIndex: 'amount',
                 render: (v: string) => {
                   const n = Number(v);
@@ -339,18 +354,22 @@ export default function BillingPage() {
                 },
               },
               {
-                title: '余额快照 (积分)',
+                title: t('billing.txnTable.balanceSnapshot'),
                 dataIndex: 'balanceAfter',
                 render: (v: string) => toCredits(v).toFixed(2),
               },
-              { title: '说明', dataIndex: 'description', render: (v) => v ?? '-' },
+              {
+                title: t('billing.txnTable.description'),
+                dataIndex: 'description',
+                render: (v) => v ?? '-',
+              },
             ]}
           />
         </Card>
       </Col>
 
       <Modal
-        title="扫码支付"
+        title={t('billing.payModal.title')}
         open={!!created}
         onCancel={() => setCreated(null)}
         footer={null}
@@ -360,8 +379,8 @@ export default function BillingPage() {
         {created?.status === 'PAID' ? (
           <Result
             status="success"
-            title="支付成功"
-            subTitle={`${creditsText(created.credits)}已到账`}
+            title={t('billing.payModal.successTitle')}
+            subTitle={t('billing.payModal.successSub', { credits: creditsText(created.credits) })}
           />
         ) : (
           <div style={{ textAlign: 'center' }}>
@@ -369,21 +388,25 @@ export default function BillingPage() {
               created.payDataType === 'codeImgUrl' ? (
                 <img
                   src={created.payData}
-                  alt="支付二维码"
+                  alt={t('billing.payModal.qrAlt')}
                   style={{ width: 220, height: 220 }}
                 />
               ) : (
                 <QRCode value={created.payData} size={220} />
               )
             ) : (
-              <Typography.Text type="warning">未获取到支付二维码，请重试</Typography.Text>
+              <Typography.Text type="warning">
+                {t('billing.payModal.qrMissing')}
+              </Typography.Text>
             )}
             <Typography.Paragraph style={{ marginTop: 12, marginBottom: 4 }}>
-              应付 <Typography.Text strong>¥{((created?.amountCents ?? 0) / 100).toFixed(2)}</Typography.Text>
-              ，到账 <Typography.Text strong>{creditsText(created?.credits ?? 0)}</Typography.Text>
+              {t('billing.payModal.payable')}{' '}
+              <Typography.Text strong>¥{((created?.amountCents ?? 0) / 100).toFixed(2)}</Typography.Text>
+              {t('billing.payModal.credited')}{' '}
+              <Typography.Text strong>{creditsText(created?.credits ?? 0)}</Typography.Text>
             </Typography.Paragraph>
             <Typography.Text type="secondary">
-              请用微信或支付宝扫码支付，到账后自动刷新（每 3 秒检测）
+              {t('billing.payModal.hint')}
             </Typography.Text>
           </div>
         )}

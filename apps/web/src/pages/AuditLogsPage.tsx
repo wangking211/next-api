@@ -2,12 +2,14 @@ import { useState } from 'react';
 import { Card, Input, Table, Tag, Tooltip, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { auditApi } from '../api/endpoints';
 import { formatDateTime } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
 import type { AuditLog } from '../api/types';
 
 export default function AuditLogsPage() {
+  const { t } = useTranslation();
   const [action, setAction] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -21,12 +23,12 @@ export default function AuditLogsPage() {
 
   return (
     <Card
-      title="操作审计"
+      title={t('admin.audit.title')}
       extra={
         <Input
           allowClear
           prefix={<SearchOutlined />}
-          placeholder="按操作过滤，如 channels"
+          placeholder={t('admin.audit.filterPlaceholder')}
           style={{ width: 240 }}
           onPressEnter={(e) => {
             setAction((e.target as HTMLInputElement).value);
@@ -52,37 +54,37 @@ export default function AuditLogsPage() {
         }}
         columns={[
           {
-            title: '时间',
+            title: t('common.time'),
             dataIndex: 'createdAt',
             width: 180,
             render: (v: string) => formatDateTime(v),
           },
           {
-            title: '操作者',
+            title: t('admin.audit.column.actor'),
             render: (_, r) =>
               r.actorName ? (
                 <span>
                   {r.actorName}
-                  {r.actorRole === 'ADMIN' && <Tag color="gold" style={{ marginLeft: 6 }}>管理员</Tag>}
+                  {r.actorRole === 'ADMIN' && <Tag color="gold" style={{ marginLeft: 6 }}>{t('admin.audit.adminTag')}</Tag>}
                 </span>
               ) : (
-                <Typography.Text type="secondary">匿名</Typography.Text>
+                <Typography.Text type="secondary">{t('admin.audit.anonymous')}</Typography.Text>
               ),
           },
           {
-            title: '操作',
+            title: t('common.action'),
             dataIndex: 'action',
             render: (v: string) => <code>{v}</code>,
           },
           {
-            title: '状态',
+            title: t('common.status'),
             dataIndex: 'statusCode',
             render: (v: number | null) =>
               v == null ? '-' : v < 400 ? <Tag color="green">{v}</Tag> : <Tag color="red">{v}</Tag>,
           },
-          { title: 'IP', dataIndex: 'ip', render: (v) => v ?? '-' },
+          { title: t('admin.audit.column.ip'), dataIndex: 'ip', render: (v) => v ?? '-' },
           {
-            title: '路径',
+            title: t('admin.audit.column.path'),
             dataIndex: 'path',
             ellipsis: true,
             render: (v: string | null) => (v ? <Tooltip title={v}>{v}</Tooltip> : '-'),

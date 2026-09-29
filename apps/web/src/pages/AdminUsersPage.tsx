@@ -17,6 +17,7 @@ import {
 } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { adminApi, usageApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { formatCredits, fromCredits } from '../utils/format';
@@ -27,6 +28,7 @@ type Mode = 'recharge' | 'adjust';
 
 export default function AdminUsersPage() {
   const { message } = App.useApp();
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
@@ -69,7 +71,7 @@ export default function AdminUsersPage() {
       qc.invalidateQueries({ queryKey: ['admin', 'users'] });
       setEditUser(null);
       editForm.resetFields();
-      message.success('已保存');
+      message.success(t('admin.users.saveSuccess'));
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -111,7 +113,7 @@ export default function AdminUsersPage() {
       qc.invalidateQueries({ queryKey: ['billing'] });
       setTarget(null);
       form.resetFields();
-      message.success(mode === 'recharge' ? '充值成功' : '调整成功');
+      message.success(mode === 'recharge' ? t('admin.users.rechargeSuccess') : t('admin.users.adjustSuccess'));
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -124,12 +126,12 @@ export default function AdminUsersPage() {
 
   return (
     <Card
-      title="用户管理"
+      title={t('admin.users.title')}
       extra={
         <Input
           allowClear
           prefix={<SearchOutlined />}
-          placeholder="搜索邮箱或用户名"
+          placeholder={t('admin.users.searchPlaceholder')}
           style={{ width: 240 }}
           onPressEnter={(e) => {
             setQ((e.target as HTMLInputElement).value);
@@ -154,70 +156,75 @@ export default function AdminUsersPage() {
           },
         }}
         columns={[
-          { title: '用户名', dataIndex: 'username' },
-          { title: '邮箱', dataIndex: 'email' },
+          { title: t('admin.users.column.username'), dataIndex: 'username' },
+          { title: t('admin.users.column.email'), dataIndex: 'email' },
           {
-            title: '角色',
+            title: t('admin.users.column.role'),
             dataIndex: 'role',
             render: (v: string) =>
               v === 'ADMIN' ? (
-                <Tag color="gold">管理员</Tag>
+                <Tag color="gold">{t('admin.users.roleAdmin')}</Tag>
               ) : v === 'AGENT' ? (
-                <Tag color="purple">代理</Tag>
+                <Tag color="purple">{t('admin.users.roleAgent')}</Tag>
               ) : (
-                <Tag>用户</Tag>
+                <Tag>{t('common.user')}</Tag>
               ),
           },
           {
-            title: '状态',
+            title: t('common.status'),
             dataIndex: 'status',
             render: (v: string) =>
-              v === 'ACTIVE' ? <Tag color="green">正常</Tag> : <Tag color="red">封禁</Tag>,
+              v === 'ACTIVE' ? (
+                <Tag color="green">{t('admin.users.statusActive')}</Tag>
+              ) : (
+                <Tag color="red">{t('admin.users.statusBanned')}</Tag>
+              ),
           },
           {
-            title: '余额 (积分)',
+            title: t('admin.users.column.balance'),
             dataIndex: 'balance',
             render: (v: string) => formatCredits(v),
           },
           {
-            title: '用户倍率',
+            title: t('admin.users.column.multiplier'),
             render: (_, r) => {
-              if (r.priceMultiplier != null) return `×${Number(r.priceMultiplier)}（自定义）`;
+              if (r.priceMultiplier != null)
+                return t('admin.users.multiplierCustom', { value: Number(r.priceMultiplier) });
               if (r.agent?.priceMultiplier != null)
-                return `×${Number(r.agent.priceMultiplier)}（代理）`;
+                return t('admin.users.multiplierAgent', { value: Number(r.agent.priceMultiplier) });
               return '×1';
             },
           },
           {
-            title: '返点',
+            title: t('admin.users.column.rebate'),
             render: (_, r) =>
               r.rebateRate != null ? `${(Number(r.rebateRate) * 100).toFixed(0)}%` : '-',
           },
           {
-            title: '代理',
+            title: t('admin.users.column.agent'),
             render: (_, r) => r.agent?.username ?? '-',
           },
           {
-            title: 'Key / 渠道',
+            title: t('admin.users.column.keyChannel'),
             render: (_, r) => `${r._count.apiKeys} / ${r._count.channels}`,
           },
           {
-            title: '操作',
+            title: t('common.action'),
             fixed: 'right',
             width: 240,
             render: (_, r) => (
               <Space>
                 <Button size="small" type="primary" onClick={() => openModal(r, 'recharge')}>
-                  充值
+                  {t('admin.users.recharge')}
                 </Button>
                 <Button size="small" onClick={() => openModal(r, 'adjust')}>
-                  调整
+                  {t('admin.users.adjust')}
                 </Button>
                 <Button size="small" onClick={() => openEdit(r)}>
-                  编辑
+                  {t('common.edit')}
                 </Button>
                 <Button size="small" onClick={() => setUsageUser(r)}>
-                  用量
+                  {t('admin.users.usage')}
                 </Button>
               </Space>
             ),
@@ -226,7 +233,7 @@ export default function AdminUsersPage() {
       />
 
       <Modal
-        title={`${mode === 'recharge' ? '充值' : '调整余额'} - ${target?.username ?? ''}`}
+        title={`${mode === 'recharge' ? t('admin.users.recharge') : t('admin.users.adjustBalance')} - ${target?.username ?? ''}`}
         open={!!target}
         onCancel={() => setTarget(null)}
         onOk={() => form.submit()}
@@ -236,8 +243,8 @@ export default function AdminUsersPage() {
         <Form form={form} layout="vertical" onFinish={(v) => mutate.mutate(v)} requiredMark={false}>
           <Form.Item
             name="amount"
-            label={mode === 'recharge' ? '充值积分' : '调整积分（可负）'}
-            rules={[{ required: true, message: '请输入金额' }]}
+            label={mode === 'recharge' ? t('admin.users.rechargeAmount') : t('admin.users.adjustAmount')}
+            rules={[{ required: true, message: t('admin.users.amountRequired') }]}
           >
             <InputNumber
               min={mode === 'recharge' ? 1 : undefined}
@@ -246,19 +253,19 @@ export default function AdminUsersPage() {
               style={{ width: '100%' }}
             />
           </Form.Item>
-          <Form.Item name="description" label="备注">
-            <Input placeholder="例如：微信充值 / 活动赠送" />
+          <Form.Item name="description" label={t('common.remark')}>
+            <Input placeholder={t('admin.users.remarkPlaceholder')} />
           </Form.Item>
         </Form>
       </Modal>
 
       <Modal
-        title={`用量（近 30 天）- ${usageUser?.username ?? ''}`}
+        title={`${t('admin.users.usageTitle')} - ${usageUser?.username ?? ''}`}
         open={!!usageUser}
         onCancel={() => setUsageUser(null)}
         footer={[
           <Button key="close" onClick={() => setUsageUser(null)}>
-            关闭
+            {t('common.close')}
           </Button>,
         ]}
         width={760}
@@ -266,17 +273,17 @@ export default function AdminUsersPage() {
         {uSummary && (
           <Row gutter={16} style={{ marginBottom: 12 }}>
             <Col span={6}>
-              <Statistic title="请求" value={uSummary.requests} />
+              <Statistic title={t('admin.users.statRequests')} value={uSummary.requests} />
             </Col>
             <Col span={6}>
               <Statistic title="Token" value={uSummary.totalTokens} />
             </Col>
             <Col span={6}>
-              <Statistic title="费用（实扣）" value={formatCredits(uSummary.billedCost ?? 0)} />
+              <Statistic title={t('admin.users.statCost')} value={formatCredits(uSummary.billedCost ?? 0)} />
             </Col>
             <Col span={6}>
               <Statistic
-                title="毛利"
+                title={t('admin.users.statMargin')}
                 value={formatCredits(uAnalytics?.totals?.margin ?? 0)}
                 valueStyle={{
                   color: (uAnalytics?.totals?.margin ?? 0) >= 0 ? 'var(--ok)' : 'var(--err)',
@@ -292,17 +299,17 @@ export default function AdminUsersPage() {
           loading={!uAnalytics}
           dataSource={uAnalytics?.byModel ?? []}
           columns={[
-            { title: '模型', dataIndex: 'model', ellipsis: true },
-            { title: '请求', dataIndex: 'requests', width: 80 },
+            { title: t('common.model'), dataIndex: 'model', ellipsis: true },
+            { title: t('admin.users.statRequests'), dataIndex: 'requests', width: 80 },
             { title: 'Token', dataIndex: 'tokens', width: 110 },
             {
-              title: '费用（实扣）',
+              title: t('admin.users.statCost'),
               dataIndex: 'billedCost',
               width: 130,
               render: (v: number) => formatCredits(v),
             },
             {
-              title: '毛利',
+              title: t('admin.users.statMargin'),
               dataIndex: 'margin',
               width: 130,
               render: (v: number) => formatCredits(v),
@@ -312,7 +319,7 @@ export default function AdminUsersPage() {
       </Modal>
 
       <Modal
-        title={`编辑用户 - ${editUser?.username ?? ''}`}
+        title={`${t('admin.users.editUser')} - ${editUser?.username ?? ''}`}
         open={!!editUser}
         onCancel={() => {
           setEditUser(null);
@@ -328,23 +335,23 @@ export default function AdminUsersPage() {
           onFinish={(v) => saveEditMut.mutate(v)}
           requiredMark={false}
         >
-          <Form.Item name="role" label="角色">
+          <Form.Item name="role" label={t('admin.users.column.role')}>
             <Select
               options={[
-                { value: 'USER', label: '用户' },
-                { value: 'AGENT', label: '代理/分销商' },
-                { value: 'ADMIN', label: '管理员' },
+                { value: 'USER', label: t('common.user') },
+                { value: 'AGENT', label: t('admin.users.roleAgentDistributor') },
+                { value: 'ADMIN', label: t('admin.users.roleAdmin') },
               ]}
             />
           </Form.Item>
           <Form.Item
             name="agentId"
-            label="归属代理（AGENT 用户）"
-            extra="用户继承代理折扣，除非设置了自定义折扣"
+            label={t('admin.users.agentField')}
+            extra={t('admin.users.agentExtra')}
           >
             <Select
               allowClear
-              placeholder="无"
+              placeholder={t('admin.users.agentNone')}
               options={(agents?.items ?? []).map((a) => ({
                 value: a.id,
                 label: a.username,
@@ -353,27 +360,27 @@ export default function AdminUsersPage() {
           </Form.Item>
           <Form.Item
             name="priceMultiplier"
-            label="用户倍率（×渠道价，1=相同，>1 加价）"
-            extra="留空=继承代理；用户价 = 渠道价 × 该倍率"
+            label={t('admin.users.multiplierLabel')}
+            extra={t('admin.users.multiplierExtra')}
           >
             <InputNumber
               min={0}
               step={0.05}
               style={{ width: '100%' }}
-              placeholder="留空=继承代理（默认 1）"
+              placeholder={t('admin.users.multiplierPlaceholder')}
             />
           </Form.Item>
           <Form.Item
             name="rebateRate"
-            label="代理返点比例（0-1）"
-            extra="名下用户消耗的积分按此比例返给该代理（如 0.1 = 10%）"
+            label={t('admin.users.rebateLabel')}
+            extra={t('admin.users.rebateExtra')}
           >
             <InputNumber
               min={0}
               max={1}
               step={0.05}
               style={{ width: '100%' }}
-              placeholder="例如 0.1"
+              placeholder={t('admin.users.rebatePlaceholder')}
             />
           </Form.Item>
         </Form>

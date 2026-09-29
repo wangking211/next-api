@@ -1,0 +1,23 @@
+{
+  "usage.title": "Usage stats",
+  "usage.viewAllUsers": "View all users",
+  "usage.exportCsv": "Export CSV",
+  "usage.help": "With no date range selected, stats cover the last 30 days. Requests, tokens and cost are aggregated per API Key. Cost (charged) uses the same basis as balance deduction; BYOK calls are not charged and their converted amount is shown separately.",
+  "usage.requests": "Requests",
+  "usage.successErrors": "Success / Errors",
+  "usage.costBilled": "Cost (charged)",
+  "usage.byokNotCharged": "BYOK conversion (not charged)",
+  "usage.costPaid": "Upstream cost (paid)",
+  "usage.margin": "Margin",
+  "usage.byApiKey": "By API Key",
+  "usage.byModel": "By model",
+  "usage.byChannel": "By channel",
+  "usage.column.channel": "Channel",
+  "usage.column.errors": "Errors",
+  "usage.column.avgLatency": "Avg latency",
+  "usage.csv.prefix": "Prefix",
+  "usage.csv.billedCost": "Cost-charged(credits)",
+  "usage.csv.byokCost": "BYOK-converted(not charged, credits)",
+  "usage.csv.upstreamCost": "Cost-paid(credits)",
+  "usage.csv.margin": "Margin(credits)"
+}

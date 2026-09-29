@@ -15,12 +15,14 @@ import {
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { modelsApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import type { ModelInfo } from '../api/types';
 
 export default function ModelsPage() {
+  const { t } = useTranslation();
   const { message } = App.useApp();
   const { user } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
@@ -42,7 +44,7 @@ export default function ModelsPage() {
       setOpen(false);
       setEditing(null);
       form.resetFields();
-      message.success(editing ? '模型已更新' : '模型已创建');
+      message.success(editing ? t('models.msg.updated') : t('models.msg.created'));
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -51,7 +53,7 @@ export default function ModelsPage() {
     mutationFn: modelsApi.remove,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['models'] });
-      message.success('已删除');
+      message.success(t('models.msg.deleted'));
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -80,11 +82,11 @@ export default function ModelsPage() {
 
   return (
     <Card
-      title="模型目录与官方价"
+      title={t('models.title')}
       extra={
         isAdmin && (
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            添加模型
+            {t('models.add')}
           </Button>
         )
       }
@@ -96,48 +98,48 @@ export default function ModelsPage() {
         pagination={{ pageSize: 20 }}
         scroll={{ x: 1000 }}
         columns={[
-          { title: '模型名', dataIndex: 'name', render: (v: string) => <code>{v}</code> },
-          { title: '显示名', dataIndex: 'displayName' },
-          { title: '服务商', dataIndex: 'provider', render: (v: string) => <Tag>{v}</Tag> },
+          { title: t('models.column.name'), dataIndex: 'name', render: (v: string) => <code>{v}</code> },
+          { title: t('models.column.displayName'), dataIndex: 'displayName' },
+          { title: t('models.column.provider'), dataIndex: 'provider', render: (v: string) => <Tag>{v}</Tag> },
           {
-            title: '输入官方价 ($/1M)',
+            title: t('models.column.inputPrice'),
             dataIndex: 'inputPrice',
             render: (v: string) => Number(v).toFixed(4),
           },
           {
-            title: '输出官方价 ($/1M)',
+            title: t('models.column.outputPrice'),
             dataIndex: 'outputPrice',
             render: (v: string) => Number(v).toFixed(4),
           },
           {
-            title: '缓存读 ($/1M)',
+            title: t('models.column.cacheRead'),
             dataIndex: 'cacheReadPrice',
             render: (v: string) => Number(v ?? 0).toFixed(4),
           },
           {
-            title: '缓存写 ($/1M)',
+            title: t('models.column.cacheWrite'),
             dataIndex: 'cacheWritePrice',
             render: (v: string) => Number(v ?? 0).toFixed(4),
           },
           {
-            title: '启用',
+            title: t('models.column.enabled'),
             dataIndex: 'enabled',
-            render: (v: boolean) => (v ? <Tag color="green">是</Tag> : <Tag>否</Tag>),
+            render: (v: boolean) => (v ? <Tag color="green">{t('common.yes')}</Tag> : <Tag>{t('common.no')}</Tag>),
           },
           ...(isAdmin
             ? [
                 {
-                  title: '操作',
+                  title: t('common.action'),
                   fixed: 'right' as const,
                   width: 150,
                   render: (_: unknown, r: ModelInfo) => (
                     <Space>
                       <Button size="small" onClick={() => openEdit(r)}>
-                        编辑
+                        {t('common.edit')}
                       </Button>
-                      <Popconfirm title="确定删除该模型？" onConfirm={() => removeMut.mutate(r.id)}>
+                      <Popconfirm title={t('models.confirmDelete')} onConfirm={() => removeMut.mutate(r.id)}>
                         <Button size="small" danger>
-                          删除
+                          {t('common.delete')}
                         </Button>
                       </Popconfirm>
                     </Space>
@@ -149,7 +151,7 @@ export default function ModelsPage() {
       />
 
       <Modal
-        title={editing ? `编辑模型：${editing.name}` : '添加模型'}
+        title={editing ? t('models.editTitle', { name: editing.name }) : t('models.add')}
         open={open}
         onCancel={() => {
           setOpen(false);
@@ -167,32 +169,32 @@ export default function ModelsPage() {
         >
           <Form.Item
             name="name"
-            label="模型名（上游实际名称）"
-            rules={[{ required: true, message: '请输入模型名' }]}
+            label={t('models.form.nameLabel')}
+            rules={[{ required: true, message: t('models.form.nameRequired') }]}
           >
             <Input placeholder="gpt-4o-mini" disabled={!!editing} />
           </Form.Item>
-          <Form.Item name="displayName" label="显示名" rules={[{ required: true }]}>
+          <Form.Item name="displayName" label={t('models.form.displayNameLabel')} rules={[{ required: true }]}>
             <Input placeholder="GPT-4o mini" />
           </Form.Item>
-          <Form.Item name="provider" label="服务商" rules={[{ required: true }]}>
+          <Form.Item name="provider" label={t('models.form.providerLabel')} rules={[{ required: true }]}>
             <Input placeholder="openai" />
           </Form.Item>
           <Space size={16} wrap>
-            <Form.Item name="inputPrice" label="输入官方价 ($/1M)">
+            <Form.Item name="inputPrice" label={t('models.form.inputPriceLabel')}>
               <InputNumber min={0} step={0.01} />
             </Form.Item>
-            <Form.Item name="outputPrice" label="输出官方价 ($/1M)">
+            <Form.Item name="outputPrice" label={t('models.form.outputPriceLabel')}>
               <InputNumber min={0} step={0.01} />
             </Form.Item>
-            <Form.Item name="cacheReadPrice" label="缓存读 ($/1M)">
+            <Form.Item name="cacheReadPrice" label={t('models.form.cacheReadLabel')}>
               <InputNumber min={0} step={0.01} />
             </Form.Item>
-            <Form.Item name="cacheWritePrice" label="缓存写 ($/1M)">
+            <Form.Item name="cacheWritePrice" label={t('models.form.cacheWriteLabel')}>
               <InputNumber min={0} step={0.01} />
             </Form.Item>
           </Space>
-          <Form.Item name="enabled" label="启用" valuePropName="checked">
+          <Form.Item name="enabled" label={t('models.form.enabledLabel')} valuePropName="checked">
             <Switch />
           </Form.Item>
         </Form>

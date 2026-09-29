@@ -1,0 +1,23 @@
+{
+  "usage.title": "使用统计",
+  "usage.viewAllUsers": "查看全部用户",
+  "usage.exportCsv": "导出 CSV",
+  "usage.help": "不选时间段默认统计近 30 天。按 API Key 汇总每个 Key 的累计请求、Token 与费用。 「费用（实扣）」与余额扣款同口径；BYOK 自带密钥的调用不扣积分，其折算金额单列显示。",
+  "usage.requests": "请求",
+  "usage.successErrors": "成功 / 失败",
+  "usage.costBilled": "费用（实扣）",
+  "usage.byokNotCharged": "BYOK 折算（不扣费）",
+  "usage.costPaid": "成本（实付）",
+  "usage.margin": "毛利",
+  "usage.byApiKey": "按 API Key",
+  "usage.byModel": "按模型",
+  "usage.byChannel": "按渠道",
+  "usage.column.channel": "渠道",
+  "usage.column.errors": "错误",
+  "usage.column.avgLatency": "平均延迟",
+  "usage.csv.prefix": "前缀",
+  "usage.csv.billedCost": "费用-实扣(积分)",
+  "usage.csv.byokCost": "BYOK折算-不扣费(积分)",
+  "usage.csv.upstreamCost": "成本-实付(积分)",
+  "usage.csv.margin": "毛利(积分)"
+}

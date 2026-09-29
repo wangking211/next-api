@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Empty, Input, Spin } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import type { PublicModel } from '../../api/types';
 
 const ALL = '__all__';
@@ -19,6 +20,7 @@ export default function PricingSection({
   data?: { items: PublicModel[]; providers: string[]; count: number };
   loading: boolean;
 }) {
+  const { t } = useTranslation();
   const [q, setQ] = useState('');
   const [provider, setProvider] = useState(ALL);
 
@@ -44,10 +46,10 @@ export default function PricingSection({
           className="lp-search"
           allowClear
           prefix={<SearchOutlined style={{ color: 'var(--text-3)' }} />}
-          placeholder="搜索模型 / 提供商"
+          placeholder={t('landing.pricing.searchPlaceholder')}
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          aria-label="搜索模型"
+          aria-label={t('landing.pricing.searchAria')}
         />
         <div className="lp-chips">
           <button
@@ -56,7 +58,7 @@ export default function PricingSection({
             data-active={provider === ALL}
             onClick={() => setProvider(ALL)}
           >
-            全部
+            {t('common.all')}
           </button>
           {(data?.providers ?? []).map((p) => (
             <button
@@ -76,11 +78,15 @@ export default function PricingSection({
         {loading ? (
           <div className="lp-empty">
             <Spin />
-            <div style={{ marginTop: 14 }}>正在加载模型定价…</div>
+            <div style={{ marginTop: 14 }}>{t('landing.pricing.loading')}</div>
           </div>
         ) : filtered.length === 0 ? (
           <div className="lp-empty">
-            <Empty description={items.length === 0 ? '暂未配置可用模型' : '没有匹配的模型'} />
+            <Empty
+              description={
+                items.length === 0 ? t('landing.pricing.empty') : t('landing.pricing.noMatch')
+              }
+            />
           </div>
         ) : (
           <>
@@ -88,11 +94,11 @@ export default function PricingSection({
               <table className="lp-table">
                 <thead>
                   <tr>
-                    <th>模型</th>
-                    <th>提供商</th>
-                    <th className="r">输入 $/1M</th>
-                    <th className="r">输出 $/1M</th>
-                    <th className="r">缓存读 $/1M</th>
+                    <th>{t('common.model')}</th>
+                    <th>{t('landing.pricing.colProvider')}</th>
+                    <th className="r">{t('landing.pricing.colInput')}</th>
+                    <th className="r">{t('landing.pricing.colOutput')}</th>
+                    <th className="r">{t('landing.pricing.colCacheRead')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -118,7 +124,7 @@ export default function PricingSection({
               </table>
             </div>
             <div className="lp-table-foot">
-              共 {filtered.length} 个模型 · 价格为上游官方价（美元 / 100 万 tokens），实际扣费按渠道折扣与账号倍率结算。
+              {t('landing.pricing.footer', { total: filtered.length })}
             </div>
           </>
         )}

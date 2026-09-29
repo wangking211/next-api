@@ -17,29 +17,45 @@ import {
 } from 'antd';
 import { PlusOutlined, CopyOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { keysApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { formatDateTime, formatCredits } from '../utils/format';
 import type { ApiKeyCreated, ApiKeyInfo, RoutingStrategy } from '../api/types';
 
+type StrategyOptionKey =
+  | 'keys.strategyOption.balanced'
+  | 'keys.strategyOption.cheapest'
+  | 'keys.strategyOption.fastest'
+  | 'keys.strategyOption.stable'
+  | 'keys.strategyOption.qualityFirst';
+
+type StrategyLabelKey =
+  | 'keys.strategyLabel.balanced'
+  | 'keys.strategyLabel.cheapest'
+  | 'keys.strategyLabel.fastest'
+  | 'keys.strategyLabel.stable'
+  | 'keys.strategyLabel.qualityFirst';
+
 /** 智能路由策略选项：评分权重预设（价格/速度/稳定性/质量/分流噪声） */
-const STRATEGY_OPTIONS: { value: RoutingStrategy; label: string }[] = [
-  { value: 'BALANCED', label: '均衡 BALANCED' },
-  { value: 'CHEAPEST', label: '最省 CHEAPEST' },
-  { value: 'FASTEST', label: '最快 FASTEST' },
-  { value: 'STABLE', label: '最稳 STABLE' },
-  { value: 'QUALITY_FIRST', label: '质量优先 QUALITY_FIRST' },
+const STRATEGY_OPTIONS: { value: RoutingStrategy; labelKey: StrategyOptionKey }[] = [
+  { value: 'BALANCED', labelKey: 'keys.strategyOption.balanced' },
+  { value: 'CHEAPEST', labelKey: 'keys.strategyOption.cheapest' },
+  { value: 'FASTEST', labelKey: 'keys.strategyOption.fastest' },
+  { value: 'STABLE', labelKey: 'keys.strategyOption.stable' },
+  { value: 'QUALITY_FIRST', labelKey: 'keys.strategyOption.qualityFirst' },
 ];
 
-const STRATEGY_LABEL: Record<RoutingStrategy, string> = {
-  BALANCED: '均衡',
-  CHEAPEST: '最省',
-  FASTEST: '最快',
-  STABLE: '最稳',
-  QUALITY_FIRST: '质量优先',
+const STRATEGY_LABEL: Record<RoutingStrategy, StrategyLabelKey> = {
+  BALANCED: 'keys.strategyLabel.balanced',
+  CHEAPEST: 'keys.strategyLabel.cheapest',
+  FASTEST: 'keys.strategyLabel.fastest',
+  STABLE: 'keys.strategyLabel.stable',
+  QUALITY_FIRST: 'keys.strategyLabel.qualityFirst',
 };
 
 export default function KeysPage() {
+  const { t } = useTranslation();
   const { message } = App.useApp();
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
@@ -67,7 +83,7 @@ export default function KeysPage() {
       keysApi.update(id, { status }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['keys'] });
-      message.success('已更新');
+      message.success(t('keys.toast.updated'));
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -76,7 +92,7 @@ export default function KeysPage() {
     mutationFn: keysApi.remove,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['keys'] });
-      message.success('已删除');
+      message.success(t('keys.toast.deleted'));
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -84,9 +100,9 @@ export default function KeysPage() {
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      message.success('已复制到剪贴板');
+      message.success(t('keys.toast.copied'));
     } catch {
-      message.warning('复制失败，请手动选择复制');
+      message.warning(t('keys.toast.copyFailed'));
     }
   };
 
@@ -95,7 +111,7 @@ export default function KeysPage() {
       title="API Key"
       extra={
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-          创建 Key
+          {t('keys.create')}
         </Button>
       }
     >
@@ -106,10 +122,10 @@ export default function KeysPage() {
         pagination={false}
         scroll={{ x: 900 }}
         columns={[
-          { title: '名称', dataIndex: 'name' },
+          { title: t('keys.table.name'), dataIndex: 'name' },
           { title: 'Key', dataIndex: 'keyPrefix', render: (v: string) => <code>{v}</code> },
           {
-            title: '状态',
+            title: t('common.status'),
             dataIndex: 'status',
             render: (v: string) => {
               const color = v === 'ACTIVE' ? 'green' : v === 'DISABLED' ? 'orange' : 'red';
@@ -117,13 +133,13 @@ export default function KeysPage() {
             },
           },
           {
-            title: 'Token 用量',
+            title: t('keys.table.tokenUsage'),
             render: (_, r) => (r.quotaLimit ? `${r.quotaUsed} / ${r.quotaLimit}` : `${r.quotaUsed} / ∞`),
           },
           {
             title: (
-              <Tooltip title="仅累计实际扣费的调用；BYOK 自带密钥的调用不消耗费用额度">
-                费用用量
+              <Tooltip title={t('keys.table.costUsageTooltip')}>
+                {t('keys.table.costUsage')}
               </Tooltip>
             ),
             render: (_, r) =>
@@ -138,14 +154,14 @@ export default function KeysPage() {
           },
           {
             title: (
-              <Tooltip title="同一模型多渠道时的评分偏好：价格 / 速度 / 稳定性 / 质量加权；留空跟随全局默认">
-                路由策略
+              <Tooltip title={t('keys.table.strategyTooltip')}>
+                {t('keys.table.routingStrategy')}
               </Tooltip>
             ),
             dataIndex: 'routingStrategy',
             width: 100,
             render: (v: RoutingStrategy | null) =>
-              v ? <Tag color="blue">{STRATEGY_LABEL[v]}</Tag> : <Tag>默认</Tag>,
+              v ? <Tag color="blue">{t(STRATEGY_LABEL[v])}</Tag> : <Tag>{t('keys.strategyLabel.default')}</Tag>,
           },
           {
             title: 'TPM',
@@ -153,7 +169,7 @@ export default function KeysPage() {
             render: (v: number | null) => (v ?? '∞'),
           },
           {
-            title: '模型白名单',
+            title: t('keys.table.modelWhitelist'),
             dataIndex: 'models',
             width: 180,
             render: (v: string[]) =>
@@ -165,35 +181,35 @@ export default function KeysPage() {
                   {v.length > 3 ? <Tag>+{v.length - 3}</Tag> : null}
                 </Space>
               ) : (
-                '不限'
+                t('keys.table.unlimited')
               ),
           },
           {
-            title: '最近使用',
+            title: t('keys.table.lastUsed'),
             dataIndex: 'lastUsedAt',
-            render: (v: string | null) => (v ? formatDateTime(v) : '从未'),
+            render: (v: string | null) => (v ? formatDateTime(v) : t('keys.table.never')),
           },
           {
-            title: '操作',
+            title: t('common.action'),
             fixed: 'right',
             width: 170,
             render: (_, r) => (
               <Space>
                 {r.status === 'ACTIVE' ? (
                   <Button size="small" onClick={() => updateMut.mutate({ id: r.id, status: 'DISABLED' })}>
-                    停用
+                    {t('keys.disable')}
                   </Button>
                 ) : (
                   <Button size="small" onClick={() => updateMut.mutate({ id: r.id, status: 'ACTIVE' })}>
-                    启用
+                    {t('keys.enable')}
                   </Button>
                 )}
                 <Popconfirm
-                  title="确定删除该 Key？"
+                  title={t('keys.confirmDeleteKey')}
                   onConfirm={() => removeMut.mutate(r.id)}
                 >
                   <Button size="small" danger>
-                    删除
+                    {t('common.delete')}
                   </Button>
                 </Popconfirm>
               </Space>
@@ -203,7 +219,7 @@ export default function KeysPage() {
       />
 
       <Modal
-        title="创建 API Key"
+        title={t('keys.createModal.title')}
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
         onOk={() => form.submit()}
@@ -216,40 +232,44 @@ export default function KeysPage() {
           onFinish={(v) => createMut.mutate(v)}
           requiredMark={false}
         >
-          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
-            <Input placeholder="例如：生产环境" />
+          <Form.Item name="name" label={t('keys.form.name')} rules={[{ required: true, message: t('keys.form.nameRequired') }]}>
+            <Input placeholder={t('keys.form.namePlaceholder')} />
           </Form.Item>
-          <Form.Item name="quotaLimit" label="Token 额度（留空不限）">
-            <InputNumber min={1} style={{ width: '100%' }} placeholder="例如 1000000" />
+          <Form.Item name="quotaLimit" label={t('keys.form.quotaLimit')}>
+            <InputNumber min={1} style={{ width: '100%' }} placeholder={t('keys.form.example', { value: 1000000 })} />
           </Form.Item>
           <Form.Item
             name="costLimit"
-            label="费用额度 USD（留空不限，仅计实际扣费，BYOK 不占用）"
+            label={t('keys.form.costLimit')}
           >
-            <InputNumber min={0} step={0.1} style={{ width: '100%' }} placeholder="例如 10" />
+            <InputNumber min={0} step={0.1} style={{ width: '100%' }} placeholder={t('keys.form.example', { value: 10 })} />
           </Form.Item>
-          <Form.Item name="rpmLimit" label="每分钟请求上限 RPM（留空不限）">
-            <InputNumber min={1} style={{ width: '100%' }} placeholder="例如 60" />
+          <Form.Item name="rpmLimit" label={t('keys.form.rpmLimit')}>
+            <InputNumber min={1} style={{ width: '100%' }} placeholder={t('keys.form.example', { value: 60 })} />
           </Form.Item>
           <Form.Item
             name="routingStrategy"
-            label="路由策略（留空 = 全局默认）"
-            tooltip="按价格、响应速度、稳定性、回答质量综合打分选渠道"
+            label={t('keys.form.strategy')}
+            tooltip={t('keys.form.strategyTooltip')}
           >
-            <Select allowClear placeholder="均衡 BALANCED" options={STRATEGY_OPTIONS} />
+            <Select
+              allowClear
+              placeholder={t('keys.strategyOption.balanced')}
+              options={STRATEGY_OPTIONS.map(({ value, labelKey }) => ({ value, label: t(labelKey) }))}
+            />
           </Form.Item>
-          <Form.Item name="tpmLimit" label="每分钟 Token 上限 TPM（留空不限）">
-            <InputNumber min={1} style={{ width: '100%' }} placeholder="例如 100000" />
+          <Form.Item name="tpmLimit" label={t('keys.form.tpmLimit')}>
+            <InputNumber min={1} style={{ width: '100%' }} placeholder={t('keys.form.example', { value: 100000 })} />
           </Form.Item>
           <Form.Item
             name="models"
-            label="模型白名单（留空不限，可输入任意模型名后回车）"
+            label={t('keys.form.models')}
             normalize={(v: unknown) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : v)}
           >
             <Select
               mode="tags"
               tokenSeparators={[',', ' ']}
-              placeholder="例如 gpt-4o-mini，回车添加"
+              placeholder={t('keys.form.modelsPlaceholder')}
               open={false}
               suffixIcon={null}
             />
@@ -258,12 +278,12 @@ export default function KeysPage() {
       </Modal>
 
       <Modal
-        title="Key 创建成功"
+        title={t('keys.createdModal.title')}
         open={!!created}
         onCancel={() => setCreated(null)}
         footer={[
           <Button key="close" type="primary" onClick={() => setCreated(null)}>
-            我已保存
+            {t('keys.createdModal.saved')}
           </Button>,
         ]}
       >
@@ -272,7 +292,7 @@ export default function KeysPage() {
         </Typography.Paragraph>
         <Space.Compact style={{ width: '100%' }}>
           <Input readOnly value={created?.plaintext} />
-          <Tooltip title="复制">
+          <Tooltip title={t('common.copy')}>
             <Button icon={<CopyOutlined />} onClick={() => copy(created!.plaintext)} />
           </Tooltip>
         </Space.Compact>

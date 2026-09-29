@@ -10,26 +10,29 @@ import {
   UserOutlined,
 } from '@ant-design/icons';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { useAuth } from '../auth/AuthContext';
 import { errorMessage } from '../api/client';
 import Logo from '../components/Logo';
+import { LangSwitch } from '../components/LangSwitch';
 import useDocumentTitle from '../hooks/useDocumentTitle';
 
-const BRAND_POINTS = [
+const BRAND_POINTS = (t: TFunction) => [
   {
     icon: <ThunderboltOutlined />,
-    title: 'OpenAI 兼容接口',
-    desc: '一行 base_url 替换即可接入现有 SDK，流式 SSE 原生支持。',
+    title: t('auth.brand.points.compatible.title'),
+    desc: t('auth.brand.points.compatible.desc'),
   },
   {
     icon: <SwapOutlined />,
-    title: '多渠道自动故障转移',
-    desc: '上游异常自动切换下一渠道，按优先级与权重路由。',
+    title: t('auth.brand.points.failover.title'),
+    desc: t('auth.brand.points.failover.desc'),
   },
   {
     icon: <SafetyCertificateOutlined />,
-    title: '按 token 精确结算',
-    desc: '输入 / 输出 / 缓存读写分列计价，账单逐笔可查、可导出。',
+    title: t('auth.brand.points.metering.title'),
+    desc: t('auth.brand.points.metering.desc'),
   },
 ];
 
@@ -40,6 +43,7 @@ function safeRedirect(raw: string | null): string {
 }
 
 export default function LoginPage() {
+  const { t } = useTranslation();
   const { user, loading: authLoading, login, register } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -54,7 +58,7 @@ export default function LoginPage() {
   const [loginForm] = Form.useForm();
   const [registerForm] = Form.useForm();
 
-  useDocumentTitle(activeKey === 'login' ? '登录' : '注册');
+  useDocumentTitle(activeKey === 'login' ? t('auth.docTitle.login') : t('auth.docTitle.register'));
 
   const target = safeRedirect(new URLSearchParams(location.search).get('redirect'));
 
@@ -81,7 +85,7 @@ export default function LoginPage() {
     } catch (e) {
       const status = (e as any)?.response?.status;
       if (status === 429) {
-        setLoginError('登录失败次数过多，请稍后再试。');
+        setLoginError(t('auth.login.errorTooManyAttempts'));
       } else {
         setLoginError(errorMessage(e));
       }
@@ -99,12 +103,12 @@ export default function LoginPage() {
     setRegisterError(null);
     try {
       await register(values.email, values.username, values.password);
-      message.success('注册成功');
+      message.success(t('auth.register.success'));
       navigate(target, { replace: true });
     } catch (e) {
       const status = (e as any)?.response?.status;
       if (status === 409) {
-        setLoginNotice('该邮箱或用户名已被注册，请直接登录。');
+        setLoginNotice(t('auth.register.alreadyExists'));
         loginForm.setFieldValue('identifier', values.email || values.username);
         setActiveKey('login');
       } else {
@@ -126,14 +130,12 @@ export default function LoginPage() {
 
         <div>
           <h1>
-            一个 API，<em>接入全部主流大模型</em>
+            {t('auth.brand.titleLead')}
+            <em>{t('auth.brand.titleAccent')}</em>
           </h1>
-          <p>
-            OpenAI 兼容协议，聚合多家上游服务商，自动故障转移，按 token
-            精确计量与结算。登录后即可创建 Key、查看账单与调用日志。
-          </p>
+          <p>{t('auth.brand.desc')}</p>
           <div className="auth-points">
-            {BRAND_POINTS.map((p) => (
+            {BRAND_POINTS(t).map((p) => (
               <div className="auth-point" key={p.title}>
                 <span>
                   <CheckCircleFilled />
@@ -148,7 +150,7 @@ export default function LoginPage() {
         </div>
 
         <div className="auth-brand-foot">
-          © {new Date().getFullYear()} AI Gateway · <Link to="/">返回首页</Link>
+          © {new Date().getFullYear()} AI Gateway · <Link to="/">{t('auth.brand.backHome')}</Link>
         </div>
       </aside>
 
@@ -161,11 +163,11 @@ export default function LoginPage() {
           </Link>
 
           <div className="auth-head">
-            <h2>{activeKey === 'login' ? '登录控制台' : '创建账号'}</h2>
+            <h2>
+              {activeKey === 'login' ? t('auth.head.loginTitle') : t('auth.head.registerTitle')}
+            </h2>
             <p>
-              {activeKey === 'login'
-                ? '使用邮箱或用户名继续，登录后跳转到你原本要访问的页面。'
-                : '注册即用，无需商务对接；创建 Key 后一分钟内发出第一条请求。'}
+              {activeKey === 'login' ? t('auth.head.loginDesc') : t('auth.head.registerDesc')}
             </p>
           </div>
 
@@ -181,7 +183,7 @@ export default function LoginPage() {
             items={[
               {
                 key: 'login',
-                label: '登录',
+                label: t('auth.tab.login'),
                 children: (
                   <>
                     {loginNotice && (
@@ -209,23 +211,23 @@ export default function LoginPage() {
                     >
                       <Form.Item
                         name="identifier"
-                        label="邮箱或用户名"
-                        rules={[{ required: true, message: '请输入邮箱或用户名' }]}
+                        label={t('auth.form.identifierLabel')}
+                        rules={[{ required: true, message: t('auth.form.identifierRequired') }]}
                       >
                         <Input
                           prefix={<UserOutlined />}
-                          placeholder="admin 或 admin@aigw.local"
+                          placeholder={t('auth.form.identifierPlaceholder')}
                           autoComplete="username"
                         />
                       </Form.Item>
                       <Form.Item
                         name="password"
-                        label="密码"
-                        rules={[{ required: true, message: '请输入密码' }]}
+                        label={t('auth.form.passwordLabel')}
+                        rules={[{ required: true, message: t('auth.form.passwordRequired') }]}
                       >
                         <Input.Password
                           prefix={<LockOutlined />}
-                          placeholder="密码"
+                          placeholder={t('auth.form.passwordPlaceholder')}
                           autoComplete="current-password"
                         />
                       </Form.Item>
@@ -236,7 +238,7 @@ export default function LoginPage() {
                         loading={loginLoading}
                         size="large"
                       >
-                        登录
+                        {t('auth.form.loginButton')}
                       </Button>
                     </Form>
                   </>
@@ -244,7 +246,7 @@ export default function LoginPage() {
               },
               {
                 key: 'register',
-                label: '注册',
+                label: t('auth.tab.register'),
                 children: (
                   <>
                     {registerError && (
@@ -264,10 +266,10 @@ export default function LoginPage() {
                     >
                       <Form.Item
                         name="email"
-                        label="邮箱"
+                        label={t('auth.form.emailLabel')}
                         rules={[
-                          { required: true, message: '请输入邮箱' },
-                          { type: 'email', message: '邮箱格式不正确' },
+                          { required: true, message: t('auth.form.emailRequired') },
+                          { type: 'email', message: t('auth.form.emailInvalid') },
                         ]}
                       >
                         <Input
@@ -278,11 +280,14 @@ export default function LoginPage() {
                       </Form.Item>
                       <Form.Item
                         name="username"
-                        label="用户名"
+                        label={t('auth.form.usernameLabel')}
                         rules={[
-                          { required: true, message: '请输入用户名' },
-                          { min: 3, message: '至少 3 个字符' },
-                          { pattern: /^[a-zA-Z0-9_]+$/, message: '只能包含字母、数字和下划线' },
+                          { required: true, message: t('auth.form.usernameRequired') },
+                          { min: 3, message: t('auth.form.usernameMinLength') },
+                          {
+                            pattern: /^[a-zA-Z0-9_]+$/,
+                            message: t('auth.form.usernamePattern'),
+                          },
                         ]}
                       >
                         <Input
@@ -293,20 +298,20 @@ export default function LoginPage() {
                       </Form.Item>
                       <Form.Item
                         name="password"
-                        label="密码"
-                        extra="至少 8 位，且同时包含字母和数字"
+                        label={t('auth.form.passwordLabel')}
+                        extra={t('auth.form.passwordExtra')}
                         rules={[
-                          { required: true, message: '请输入密码' },
-                          { min: 8, message: '至少 8 个字符' },
+                          { required: true, message: t('auth.form.passwordRequired') },
+                          { min: 8, message: t('auth.form.passwordMinLength') },
                           {
                             pattern: /(?=.*[A-Za-z])(?=.*\d)/,
-                            message: '需同时包含字母和数字',
+                            message: t('auth.form.passwordComplexity'),
                           },
                         ]}
                       >
                         <Input.Password
                           prefix={<LockOutlined />}
-                          placeholder="至少 8 位，含字母和数字"
+                          placeholder={t('auth.form.passwordRegisterPlaceholder')}
                           autoComplete="new-password"
                         />
                       </Form.Item>
@@ -317,7 +322,7 @@ export default function LoginPage() {
                         loading={registerLoading}
                         size="large"
                       >
-                        注册
+                        {t('auth.form.registerButton')}
                       </Button>
                     </Form>
                   </>
@@ -327,9 +332,11 @@ export default function LoginPage() {
           />
 
           <div className="auth-foot">
-            遇到问题可联系管理员开通账号。
+            <LangSwitch />
             <br />
-            <Link to="/">← 返回首页</Link>
+            {t('auth.foot.help')}
+            <br />
+            <Link to="/">{t('auth.foot.backHome')}</Link>
           </div>
         </div>
       </main>

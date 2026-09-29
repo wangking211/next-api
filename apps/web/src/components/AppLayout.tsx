@@ -17,35 +17,38 @@ import {
   ApartmentOutlined,
 } from '@ant-design/icons';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/AuthContext';
 import Logo from './Logo';
+import { LangSwitch } from './LangSwitch';
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
-
-/** 控制台各页的 document.title（SPA 无路由级标题管理，在外壳统一维护） */
-const PAGE_TITLES: Record<string, string> = {
-  '/dashboard': '总览',
-  '/keys': 'API Key',
-  '/channels': '渠道',
-  '/available-models': '可用模型',
-  '/models': '模型定价',
-  '/logs': '调用日志',
-  '/usage-stats': '使用统计',
-  '/billing': '余额与账单',
-  '/agent': '代理中心',
-  '/users': '用户管理',
-  '/redeem-codes': '兑换码',
-  '/audit-logs': '操作审计',
-  '/withdrawals': '提现管理',
-};
 
 export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
+  const { t, i18n } = useTranslation();
 
   const isAdmin = user?.role === 'ADMIN';
+
+  /** 控制台各页的 document.title（SPA 无路由级标题管理，在外壳统一维护） */
+  const PAGE_TITLES: Record<string, string> = {
+    '/dashboard': t('layout.title.dashboard'),
+    '/keys': 'API Key',
+    '/channels': t('layout.title.channels'),
+    '/available-models': t('layout.title.availableModels'),
+    '/models': t('layout.title.models'),
+    '/logs': t('layout.title.logs'),
+    '/usage-stats': t('layout.title.usageStats'),
+    '/billing': t('layout.title.billing'),
+    '/agent': t('layout.title.agent'),
+    '/users': t('layout.title.users'),
+    '/redeem-codes': t('layout.title.redeemCodes'),
+    '/audit-logs': t('layout.title.auditLogs'),
+    '/withdrawals': t('layout.title.withdrawals'),
+  };
 
   const selectedKey = useMemo(() => {
     const match = ['/keys', '/channels', '/available-models', '/models', '/logs', '/usage-stats', '/billing', '/agent', '/users', '/redeem-codes', '/audit-logs', '/withdrawals'].find((p) =>
@@ -57,30 +60,34 @@ export default function AppLayout() {
   useEffect(() => {
     const title =
       (selectedKey === '/channels' && !isAdmin
-        ? '我的渠道'
-        : PAGE_TITLES[selectedKey]) ?? '控制台';
+        ? t('layout.title.myChannels')
+        : PAGE_TITLES[selectedKey]) ?? t('layout.title.fallback');
     document.title = `${title} · AI Gateway`;
-  }, [selectedKey, isAdmin]);
+  }, [selectedKey, isAdmin, i18n.language]);
 
   const items = [
-    { key: '/dashboard', icon: <DashboardOutlined />, label: '总览' },
+    { key: '/dashboard', icon: <DashboardOutlined />, label: t('layout.menu.overview') },
     { key: '/keys', icon: <KeyOutlined />, label: 'API Key' },
     // 普通用户只看得到自己的 BYOK 渠道，改名避免误认为平台管理后台
-    { key: '/channels', icon: <ApiOutlined />, label: isAdmin ? '渠道' : '我的渠道' },
-    { key: '/available-models', icon: <TagsOutlined />, label: '可用模型' },
-    { key: '/models', icon: <AppstoreOutlined />, label: '模型' },
-    { key: '/logs', icon: <FileTextOutlined />, label: '调用日志' },
-    { key: '/usage-stats', icon: <BarChartOutlined />, label: '使用统计' },
-    { key: '/billing', icon: <WalletOutlined />, label: '余额与账单' },
+    {
+      key: '/channels',
+      icon: <ApiOutlined />,
+      label: isAdmin ? t('layout.menu.channels') : t('layout.menu.myChannels'),
+    },
+    { key: '/available-models', icon: <TagsOutlined />, label: t('layout.menu.availableModels') },
+    { key: '/models', icon: <AppstoreOutlined />, label: t('layout.menu.models') },
+    { key: '/logs', icon: <FileTextOutlined />, label: t('layout.menu.logs') },
+    { key: '/usage-stats', icon: <BarChartOutlined />, label: t('layout.menu.usageStats') },
+    { key: '/billing', icon: <WalletOutlined />, label: t('layout.menu.billing') },
     ...(user?.role === 'AGENT' || user?.role === 'ADMIN'
-      ? [{ key: '/agent', icon: <ApartmentOutlined />, label: '代理中心' }]
+      ? [{ key: '/agent', icon: <ApartmentOutlined />, label: t('layout.menu.agent') }]
       : []),
     ...(user?.role === 'ADMIN'
       ? [
-          { key: '/users', icon: <TeamOutlined />, label: '用户管理' },
-          { key: '/redeem-codes', icon: <GiftOutlined />, label: '兑换码' },
-          { key: '/audit-logs', icon: <AuditOutlined />, label: '操作审计' },
-          { key: '/withdrawals', icon: <WalletOutlined />, label: '提现管理' },
+          { key: '/users', icon: <TeamOutlined />, label: t('layout.menu.users') },
+          { key: '/redeem-codes', icon: <GiftOutlined />, label: t('layout.menu.redeemCodes') },
+          { key: '/audit-logs', icon: <AuditOutlined />, label: t('layout.menu.auditLogs') },
+          { key: '/withdrawals', icon: <WalletOutlined />, label: t('layout.menu.withdrawals') },
         ]
       : []),
   ];
@@ -104,13 +111,14 @@ export default function AppLayout() {
       </Sider>
       <Layout>
         <Header className="app-header">
+          <LangSwitch />
           <Dropdown
             menu={{
               items: [
                 {
                   key: 'logout',
                   icon: <LogoutOutlined />,
-                  label: '退出登录',
+                  label: t('layout.user.signOut'),
                   onClick: () => {
                     logout();
                     navigate('/login');
@@ -122,7 +130,7 @@ export default function AppLayout() {
             <div className="app-user">
               <Avatar size="small" icon={<UserOutlined />} />
               <Text>{user?.username}</Text>
-              {user?.role === 'ADMIN' && <Tag color="gold">管理员</Tag>}
+              {user?.role === 'ADMIN' && <Tag color="gold">{t('layout.user.adminTag')}</Tag>}
             </div>
           </Dropdown>
         </Header>

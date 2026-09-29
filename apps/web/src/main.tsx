@@ -16,20 +16,27 @@ if (import.meta.env.DEV) {
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { ConfigProvider, App as AntApp, theme } from 'antd';
+import type { ReactNode } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import zhCN from 'antd/locale/zh_CN';
+import zhTW from 'antd/locale/zh_TW';
+import enUS from 'antd/locale/en_US';
+import { useTranslation } from 'react-i18next';
+import './i18n';
 import App from './App';
 import { queryClient } from './api/queryClient';
 import { loadConfig } from './api/config';
 import './index.css';
 
-loadConfig().finally(() => {
-  ReactDOM.createRoot(document.getElementById('root')!).render(
-    <React.StrictMode>
-      <ConfigProvider
-        locale={zhCN}
-        theme={{
+/** 外壳：antd 内置文案（日期选择器/分页/空状态等）跟随 i18n 语言切换 */
+function LocaleShell({ children }: { children: ReactNode }) {
+  const { i18n } = useTranslation();
+  const lang = i18n.language;
+  return (
+    <ConfigProvider
+      locale={lang === 'en' ? enUS : lang === 'zh-Hant' ? zhTW : zhCN}
+      theme={{
           algorithm: theme.darkAlgorithm,
           token: {
             colorPrimary: '#22d3ee',
@@ -71,6 +78,15 @@ loadConfig().finally(() => {
           },
         }}
       >
+        {children}
+      </ConfigProvider>
+    );
+}
+
+loadConfig().finally(() => {
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <LocaleShell>
         <AntApp>
           <QueryClientProvider client={queryClient}>
             <BrowserRouter>
@@ -78,7 +94,7 @@ loadConfig().finally(() => {
             </BrowserRouter>
           </QueryClientProvider>
         </AntApp>
-      </ConfigProvider>
+      </LocaleShell>
     </React.StrictMode>,
   );
 });

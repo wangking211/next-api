@@ -1,5 +1,6 @@
 import { Button, Form, Input, Select, Space } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import { PROVIDERS, type Filters } from './constants';
 
 export function ChannelFilterForm({
@@ -11,6 +12,7 @@ export function ChannelFilterForm({
   onSearch: (v: Filters) => void;
   onReset: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Form
       layout="inline"
@@ -18,27 +20,27 @@ export function ChannelFilterForm({
       onFinish={(v: Filters) => onSearch(v)}
     >
       <Form.Item name="name">
-        <Input allowClear placeholder="渠道名称" style={{ width: 150 }} />
+        <Input allowClear placeholder={t('channels.filter.name')} style={{ width: 150 }} />
       </Form.Item>
       <Form.Item name="provider">
         <Select
           allowClear
-          placeholder="服务商"
+          placeholder={t('channels.filter.provider')}
           style={{ width: 150 }}
-          options={PROVIDERS.map((p) => ({ value: p.value, label: p.label }))}
+          options={PROVIDERS.map((p) => ({ value: p.value, label: p.label() }))}
         />
       </Form.Item>
       <Form.Item name="model">
-        <Input allowClear placeholder="模型名" style={{ width: 150 }} />
+        <Input allowClear placeholder={t('channels.filter.modelName')} style={{ width: 150 }} />
       </Form.Item>
       <Form.Item name="status">
         <Select
           allowClear
-          placeholder="状态"
+          placeholder={t('common.status')}
           style={{ width: 120 }}
           options={[
-            { value: 'ENABLED', label: '启用' },
-            { value: 'DISABLED', label: '停用' },
+            { value: 'ENABLED', label: t('channels.status.enabled') },
+            { value: 'DISABLED', label: t('channels.status.disabled') },
           ]}
         />
       </Form.Item>
@@ -46,11 +48,11 @@ export function ChannelFilterForm({
         <Form.Item name="ownerType">
           <Select
             allowClear
-            placeholder="归属"
+            placeholder={t('channels.form.ownerType')}
             style={{ width: 120 }}
             options={[
-              { value: 'PLATFORM', label: '平台' },
-              { value: 'USER', label: '用户' },
+              { value: 'PLATFORM', label: t('channels.status.platform') },
+              { value: 'USER', label: t('common.user') },
             ]}
           />
         </Form.Item>
@@ -58,10 +60,10 @@ export function ChannelFilterForm({
       <Form.Item>
         <Space>
           <Button type="primary" htmlType="submit">
-            查询
+            {t('channels.filter.query')}
           </Button>
           <Button icon={<ReloadOutlined />} onClick={onReset}>
-            重置
+            {t('channels.filter.reset')}
           </Button>
         </Space>
       </Form.Item>

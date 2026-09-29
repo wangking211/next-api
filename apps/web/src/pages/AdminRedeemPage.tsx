@@ -17,27 +17,31 @@ import {
 } from 'antd';
 import { PlusOutlined, CopyOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { redeemCodesApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { formatCredits, formatDateTime, fromCredits } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
 import type { RedeemCode, RedeemCodeStatus } from '../api/types';
 
-const STATUS_META: Record<RedeemCodeStatus, { color: string; label: string }> = {
-  UNUSED: { color: 'green', label: '未使用' },
-  USED: { color: 'default', label: '已使用' },
-  DISABLED: { color: 'red', label: '已作废' },
-};
+const getStatusMeta = (
+  t: TFunction,
+): Record<RedeemCodeStatus, { color: string; label: string }> => ({
+  UNUSED: { color: 'green', label: t('admin.redeem.statusUnused') },
+  USED: { color: 'default', label: t('admin.redeem.statusUsed') },
+  DISABLED: { color: 'red', label: t('admin.redeem.statusVoid') },
+});
 
 /** 有效期快速选择：常用时长一键生成，免去每次手选日期 */
-const EXPIRY_PRESETS = [
-  { label: '永久有效', value: 'forever' },
-  { label: '7 天', value: '7d' },
-  { label: '1 个月', value: '1m' },
-  { label: '3 个月', value: '3m' },
-  { label: '6 个月', value: '6m' },
-  { label: '1 年', value: '1y' },
-  { label: '自定义时间', value: 'custom' },
+const getExpiryPresets = (t: TFunction): Array<{ label: string; value: string }> => [
+  { label: t('admin.redeem.expiryForever'), value: 'forever' },
+  { label: t('admin.redeem.expiry7d'), value: '7d' },
+  { label: t('admin.redeem.expiry1m'), value: '1m' },
+  { label: t('admin.redeem.expiry3m'), value: '3m' },
+  { label: t('admin.redeem.expiry6m'), value: '6m' },
+  { label: t('admin.redeem.expiry1y'), value: '1y' },
+  { label: t('admin.redeem.expiryCustom'), value: 'custom' },
 ];
 
 /** 按快捷时长计算截止时间（ISO）；forever 返回 undefined，custom 由日期选择器提供 */
@@ -67,7 +71,9 @@ function expiryFromPreset(preset: string): string | undefined {
 
 export default function AdminRedeemPage() {
   const { message } = App.useApp();
+  const { t } = useTranslation();
   const qc = useQueryClient();
+  const statusMeta = getStatusMeta(t);
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -114,7 +120,7 @@ export default function AdminRedeemPage() {
     mutationFn: redeemCodesApi.disable,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['redeem-codes'] });
-      message.success('已作废');
+      message.success(t('admin.redeem.voidSuccess'));
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -122,18 +128,18 @@ export default function AdminRedeemPage() {
   const copyAll = async () => {
     try {
       await navigator.clipboard.writeText((generated ?? []).join('\n'));
-      message.success('已复制全部兑换码');
+      message.success(t('admin.redeem.copyAllSuccess'));
     } catch {
-      message.warning('复制失败，请手动选择复制');
+      message.warning(t('admin.redeem.copyAllFail'));
     }
   };
 
   return (
     <Card
-      title="兑换码"
+      title={t('admin.redeem.title')}
       extra={
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
-          生成兑换码
+          {t('admin.redeem.generate')}
         </Button>
       }
     >
@@ -145,10 +151,10 @@ export default function AdminRedeemPage() {
             setPage(1);
           }}
           options={[
-            { label: '全部', value: 'ALL' },
-            { label: '未使用', value: 'UNUSED' },
-            { label: '已使用', value: 'USED' },
-            { label: '已作废', value: 'DISABLED' },
+            { label: t('common.all'), value: 'ALL' },
+            { label: t('admin.redeem.statusUnused'), value: 'UNUSED' },
+            { label: t('admin.redeem.statusUsed'), value: 'USED' },
+            { label: t('admin.redeem.statusVoid'), value: 'DISABLED' },
           ]}
         />
       </div>
@@ -169,39 +175,39 @@ export default function AdminRedeemPage() {
           },
         }}
         columns={[
-          { title: '兑换码', dataIndex: 'code', render: (v: string) => <code>{v}</code> },
+          { title: t('admin.redeem.column.code'), dataIndex: 'code', render: (v: string) => <code>{v}</code> },
           {
-            title: '面值 (积分)',
+            title: t('admin.redeem.column.denomination'),
             dataIndex: 'amount',
             render: (v: string) => formatCredits(v),
           },
           {
-            title: '状态',
+            title: t('common.status'),
             dataIndex: 'status',
             render: (v: RedeemCodeStatus) => (
-              <Tag color={STATUS_META[v].color}>{STATUS_META[v].label}</Tag>
+              <Tag color={statusMeta[v].color}>{statusMeta[v].label}</Tag>
             ),
           },
-          { title: '备注', dataIndex: 'note', render: (v) => v ?? '-' },
+          { title: t('common.remark'), dataIndex: 'note', render: (v) => v ?? '-' },
           {
-            title: '过期时间',
+            title: t('admin.redeem.column.expires'),
             dataIndex: 'expiresAt',
-            render: (v: string | null) => (v ? formatDateTime(v) : '永久'),
+            render: (v: string | null) => (v ? formatDateTime(v) : t('admin.redeem.permanent')),
           },
           {
-            title: '使用时间',
+            title: t('admin.redeem.column.usedAt'),
             dataIndex: 'usedAt',
             render: (v: string | null) => (v ? formatDateTime(v) : '-'),
           },
           {
-            title: '操作',
+            title: t('common.action'),
             fixed: 'right',
             width: 100,
             render: (_, r) =>
               r.status === 'UNUSED' ? (
-                <Popconfirm title="确定作废该兑换码？" onConfirm={() => disableMut.mutate(r.id)}>
+                <Popconfirm title={t('admin.redeem.voidConfirm')} onConfirm={() => disableMut.mutate(r.id)}>
                   <Button size="small" danger>
-                    作废
+                    {t('admin.redeem.void')}
                   </Button>
                 </Popconfirm>
               ) : null,
@@ -210,7 +216,7 @@ export default function AdminRedeemPage() {
       />
 
       <Modal
-        title="生成兑换码"
+        title={t('admin.redeem.generate')}
         open={open}
         onCancel={() => setOpen(false)}
         onOk={() => form.submit()}
@@ -224,23 +230,23 @@ export default function AdminRedeemPage() {
           requiredMark={false}
           initialValues={{ quantity: 10, expiryPreset: 'forever' }}
         >
-          <Form.Item name="amount" label="单个面值（积分）" rules={[{ required: true, message: '请输入面值' }]}>
-            <InputNumber min={1} step={100} style={{ width: '100%' }} placeholder="例如 1000" />
+          <Form.Item name="amount" label={t('admin.redeem.amountLabel')} rules={[{ required: true, message: t('admin.redeem.amountRequired') }]}>
+            <InputNumber min={1} step={100} style={{ width: '100%' }} placeholder={t('admin.redeem.amountPlaceholder')} />
           </Form.Item>
-          <Form.Item name="quantity" label="数量" rules={[{ required: true }]}>
+          <Form.Item name="quantity" label={t('admin.redeem.quantityLabel')} rules={[{ required: true }]}>
             <InputNumber min={1} max={1000} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="note" label="备注（批次说明）">
-            <Input placeholder="例如：双十一活动" />
+          <Form.Item name="note" label={t('admin.redeem.noteLabel')}>
+            <Input placeholder={t('admin.redeem.notePlaceholder')} />
           </Form.Item>
-          <Form.Item name="expiryPreset" label="有效期">
-            <Select options={EXPIRY_PRESETS} />
+          <Form.Item name="expiryPreset" label={t('admin.redeem.expiryLabel')}>
+            <Select options={getExpiryPresets(t)} />
           </Form.Item>
           {expiryPreset === 'custom' && (
             <Form.Item
               name="expiresAt"
-              label="自定义截止时间"
-              rules={[{ required: true, message: '请选择截止时间' }]}
+              label={t('admin.redeem.customExpiryLabel')}
+              rules={[{ required: true, message: t('admin.redeem.customExpiryRequired') }]}
             >
               <DatePicker showTime style={{ width: '100%' }} />
             </Form.Item>
@@ -249,21 +255,21 @@ export default function AdminRedeemPage() {
       </Modal>
 
       <Modal
-        title="兑换码已生成"
+        title={t('admin.redeem.generatedTitle')}
         open={!!generated}
         width={560}
         onCancel={() => setGenerated(null)}
         footer={[
           <Button key="copy" icon={<CopyOutlined />} onClick={copyAll}>
-            复制全部
+            {t('admin.redeem.copyAll')}
           </Button>,
           <Button key="close" type="primary" onClick={() => setGenerated(null)}>
-            完成
+            {t('admin.redeem.done')}
           </Button>,
         ]}
       >
         <Typography.Paragraph type="secondary">
-          共 {generated?.length ?? 0} 个，请及时复制保存。
+          {t('admin.redeem.generatedCount', { total: generated?.length ?? 0 })}
         </Typography.Paragraph>
         <Input.TextArea
           readOnly

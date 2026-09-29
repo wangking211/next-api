@@ -1,6 +1,7 @@
 import { Button, Popconfirm, Space, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { ChannelInfo } from '../../api/types';
+import i18n from '../../i18n';
 
 export type ChannelColumnDeps = {
   testingId: string | null;
@@ -19,18 +20,24 @@ export function buildChannelColumns({
   onToggle,
   onRemove,
 }: ChannelColumnDeps): ColumnsType<ChannelInfo> {
+  // i18n.t 于每次渲染调用本函数时求值，语言切换后随父组件重渲染而更新
+  const t = i18n.t.bind(i18n);
   return [
-    { title: '名称', dataIndex: 'name' },
+    { title: t('channels.table.name'), dataIndex: 'name' },
     {
-      title: '归属',
+      title: t('channels.table.ownerType'),
       dataIndex: 'ownerType',
       render: (v: string) =>
-        v === 'PLATFORM' ? <Tag color="gold">平台</Tag> : <Tag color="blue">我的</Tag>,
+        v === 'PLATFORM' ? (
+          <Tag color="gold">{t('channels.status.platform')}</Tag>
+        ) : (
+          <Tag color="blue">{t('channels.status.mine')}</Tag>
+        ),
     },
-    { title: '服务商', dataIndex: 'provider' },
+    { title: t('channels.table.provider'), dataIndex: 'provider' },
     { title: 'Base URL', dataIndex: 'baseUrl', ellipsis: true },
     {
-      title: '模型',
+      title: t('common.model'),
       dataIndex: 'models',
       render: (models: string[]) => (
         <Space size={[0, 4]} wrap>
@@ -41,29 +48,29 @@ export function buildChannelColumns({
         </Space>
       ),
     },
-    { title: '优先级', dataIndex: 'priority' },
-    { title: '权重', dataIndex: 'weight' },
+    { title: t('channels.table.priority'), dataIndex: 'priority' },
+    { title: t('channels.table.weight'), dataIndex: 'weight' },
     {
       title: 'Key',
       dataIndex: 'apiKeyPreview',
       render: (v: string) => <code>{v}</code>,
     },
     {
-      title: '状态',
+      title: t('common.status'),
       dataIndex: 'status',
       render: (v: string, r) =>
         v === 'ENABLED' ? (
-          <Tag color="green">启用</Tag>
+          <Tag color="green">{t('channels.status.enabled')}</Tag>
         ) : r.autoDisabled ? (
-          <Tooltip title={r.lastErrorMsg ?? '因连续失败自动禁用'}>
-            <Tag color="red">自动禁用</Tag>
+          <Tooltip title={r.lastErrorMsg ?? t('channels.status.autoDisabledReason')}>
+            <Tag color="red">{t('channels.status.autoDisabled')}</Tag>
           </Tooltip>
         ) : (
-          <Tag color="default">停用</Tag>
+          <Tag color="default">{t('channels.status.disabled')}</Tag>
         ),
     },
     {
-      title: '价格 / 折扣',
+      title: t('channels.table.priceDiscount'),
       render: (_: unknown, r: ChannelInfo) => {
         const rows = r.modelPrices ?? [];
         const priced = rows.filter(
@@ -75,19 +82,19 @@ export function buildChannelColumns({
         return (
           <Space size={4} wrap>
             {priced ? (
-              <Tag color="blue">{priced} 个售价</Tag>
+              <Tag color="blue">{t('channels.table.pricedCount', { count: priced })}</Tag>
             ) : (
-              <Typography.Text type="secondary">默认价</Typography.Text>
+              <Typography.Text type="secondary">{t('channels.table.defaultPrice')}</Typography.Text>
             )}
             {discounts.length > 0 && (
-              <Tag color="orange">折扣 {Math.min(...discounts)}</Tag>
+              <Tag color="orange">{t('channels.table.discountTag', { value: Math.min(...discounts) })}</Tag>
             )}
           </Space>
         );
       },
     },
     {
-      title: '操作',
+      title: t('common.action'),
       fixed: 'right',
       width: 340,
       render: (_, r) => (
@@ -97,23 +104,23 @@ export function buildChannelColumns({
             loading={testingId === r.id}
             onClick={() => onTest(r)}
           >
-            测试
+            {t('channels.action.test')}
           </Button>
           {/* BYOK 不由平台扣费，无定价意义 → 隐藏入口 */}
           {r.ownerType !== 'USER' && (
             <Button size="small" onClick={() => onPricing(r)}>
-              定价
+              {t('channels.action.pricing')}
             </Button>
           )}
           <Button size="small" onClick={() => onEdit(r)}>
-            编辑
+            {t('common.edit')}
           </Button>
           <Button size="small" onClick={() => onToggle(r)}>
-            {r.status === 'ENABLED' ? '停用' : '启用'}
+            {r.status === 'ENABLED' ? t('channels.status.disabled') : t('channels.status.enabled')}
           </Button>
-          <Popconfirm title="确定删除该渠道？" onConfirm={() => onRemove(r.id)}>
+          <Popconfirm title={t('channels.action.confirmDelete')} onConfirm={() => onRemove(r.id)}>
             <Button size="small" danger>
-              删除
+              {t('common.delete')}
             </Button>
           </Popconfirm>
         </Space>

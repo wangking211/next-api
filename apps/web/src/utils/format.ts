@@ -1,6 +1,7 @@
 /** 统一的金额/时间格式化，避免各页面各写一份、精度不一致 */
 
 import { getCreditsPerUsd } from '../api/config';
+import i18n from '../i18n';
 
 export { getCreditsPerUsd };
 
@@ -15,13 +16,14 @@ export function fromCredits(credits: number | null | undefined): number {
   return Number.isFinite(n) ? n / getCreditsPerUsd() : 0;
 }
 
-/** 按积分展示（2 位小数） */
+/** 按积分展示（2 位小数），单位后缀随界面语言 */
 export function formatCredits(usd: string | number | null | undefined): string {
   const c = toCredits(usd);
-  return `${c.toLocaleString('zh-CN', {
+  const value = c.toLocaleString('zh-CN', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })} 积分`;
+  });
+  return i18n.t('common.creditsValue', { value });
 }
 
 /** 官方价等仍以 USD 展示 */

@@ -1,0 +1,23 @@
+{
+  "usage.title": "使用統計",
+  "usage.viewAllUsers": "檢視全部用戶",
+  "usage.exportCsv": "匯出 CSV",
+  "usage.help": "不選時間段預設統計近30天。按 API Key 彙總每個 Key 的累計請求、Token 與費用。 「費用（實扣）」與餘額扣款同口徑；BYOK 自帶金鑰的呼叫不扣積分，其折算金額單獨顯示。",
+  "usage.requests": "請求",
+  "usage.successErrors": "成功 / 失敗",
+  "usage.costBilled": "費用（實扣）",
+  "usage.byokNotCharged": "BYOK 折算（不扣費）",
+  "usage.costPaid": "成本（實付）",
+  "usage.margin": "毛利",
+  "usage.byApiKey": "按 API Key",
+  "usage.byModel": "按模型",
+  "usage.byChannel": "按渠道",
+  "usage.column.channel": "渠道",
+  "usage.column.errors": "錯誤",
+  "usage.column.avgLatency": "平均延遲",
+  "usage.csv.prefix": "前綴",
+  "usage.csv.billedCost": "費用-實扣(積分)",
+  "usage.csv.byokCost": "BYOK折算-不扣費(積分)",
+  "usage.csv.upstreamCost": "成本-實付(積分)",
+  "usage.csv.margin": "毛利(積分)"
+}

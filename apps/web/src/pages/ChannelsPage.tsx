@@ -14,6 +14,7 @@ import {
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { channelsApi, modelsApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
@@ -26,6 +27,7 @@ import { ChannelFilterForm } from './channels/ChannelFilterForm';
 import { buildChannelColumns } from './channels/ChannelTableColumns';
 
 export default function ChannelsPage() {
+  const { t } = useTranslation();
   const { message } = App.useApp();
   const { user } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
@@ -122,7 +124,9 @@ export default function ChannelsPage() {
       setEditing(null);
       setModalTest(null);
       form.resetFields();
-      message.success(editing ? '渠道已更新' : '渠道已创建');
+      message.success(
+        editing ? t('channels.message.channelUpdated') : t('channels.message.channelCreated'),
+      );
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -171,7 +175,7 @@ export default function ChannelsPage() {
     }
     const models: string[] = values.models ?? [];
     if (!models.length) {
-      message.warning('请先填写支持模型');
+      message.warning(t('channels.message.fillModels'));
       return;
     }
     setModalTesting(true);
@@ -211,7 +215,7 @@ export default function ChannelsPage() {
         channelId: editing?.id,
       });
       form.setFieldValue('models', r.models);
-      message.success(`上游返回 ${r.models.length} 个模型，已填入`);
+      message.success(t('channels.message.upstreamModels', { count: r.models.length }));
     } catch (e) {
       message.error(errorMessage(e));
     } finally {
@@ -224,7 +228,7 @@ export default function ChannelsPage() {
       channelsApi.update(id, { status }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['channels'] });
-      message.success('已更新');
+      message.success(t('channels.message.updated'));
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -233,7 +237,7 @@ export default function ChannelsPage() {
     mutationFn: channelsApi.remove,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['channels'] });
-      message.success('已删除');
+      message.success(t('channels.message.removed'));
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -257,7 +261,7 @@ export default function ChannelsPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['channels'] });
       setPriceChannel(null);
-      message.success('定价已保存');
+      message.success(t('channels.message.pricingSaved'));
     },
     onError: (e) => message.error(errorMessage(e)),
   });
@@ -276,10 +280,10 @@ export default function ChannelsPage() {
 
   return (
     <Card
-      title={isAdmin ? '上游渠道' : '我的渠道（BYOK）'}
+      title={isAdmin ? t('channels.page.upstreamTitle') : t('channels.page.byokTitle')}
       extra={
         <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          添加渠道
+          {t('channels.addChannel')}
         </Button>
       }
     >
@@ -302,7 +306,7 @@ export default function ChannelsPage() {
           pageSize,
           total: data?.total ?? 0,
           showSizeChanger: true,
-          showTotal: (t) => `共 ${t} 条`,
+          showTotal: (total) => t('channels.table.total', { count: total }),
           onChange: (p, ps) => {
             setPage(p);
             setPageSize(ps);
@@ -326,7 +330,9 @@ export default function ChannelsPage() {
       />
 
       <Modal
-        title={editing ? `编辑渠道：${editing.name}` : '添加渠道'}
+        title={
+          editing ? t('channels.modal.editTitle', { name: editing.name }) : t('channels.addChannel')
+        }
         open={modalOpen}
         onCancel={() => {
           setModalOpen(false);
@@ -335,7 +341,7 @@ export default function ChannelsPage() {
         }}
         footer={[
           <Button key="test" loading={modalTesting} onClick={testInModal}>
-            测试连通性
+            {t('channels.action.testConnection')}
           </Button>,
           <Button
             key="cancel"
@@ -345,10 +351,10 @@ export default function ChannelsPage() {
               setModalTest(null);
             }}
           >
-            取消
+            {t('common.cancel')}
           </Button>,
           <Button key="save" type="primary" loading={saveMut.isPending} onClick={() => form.submit()}>
-            保存
+            {t('common.save')}
           </Button>,
         ]}
         destroyOnClose
@@ -369,22 +375,26 @@ export default function ChannelsPage() {
           requiredMark={false}
           initialValues={{ provider: 'openai', weight: 1, priority: 0, ownerType: 'USER' }}
         >
-          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
-            <Input placeholder="例如：我的 OpenAI" />
+          <Form.Item
+            name="name"
+            label={t('channels.form.name')}
+            rules={[{ required: true, message: t('channels.form.nameRequired') }]}
+          >
+            <Input placeholder={t('channels.form.namePlaceholder')} />
           </Form.Item>
           {isAdmin && !editing && (
-            <Form.Item name="ownerType" label="归属">
+            <Form.Item name="ownerType" label={t('channels.form.ownerType')}>
               <Select
                 options={[
-                  { value: 'USER', label: '我的 (BYOK)' },
-                  { value: 'PLATFORM', label: '平台托管' },
+                  { value: 'USER', label: t('channels.form.ownerUser') },
+                  { value: 'PLATFORM', label: t('channels.form.ownerPlatform') },
                 ]}
               />
             </Form.Item>
           )}
-          <Form.Item name="provider" label="服务商" rules={[{ required: true }]}>
+          <Form.Item name="provider" label={t('channels.form.provider')} rules={[{ required: true }]}>
             <Select
-              options={PROVIDERS.map((p) => ({ value: p.value, label: p.label }))}
+              options={PROVIDERS.map((p) => ({ value: p.value, label: p.label() }))}
               onChange={(v) => {
                 const p = PROVIDERS.find((x) => x.value === v);
                 if (p) form.setFieldValue('baseUrl', p.placeholder);
@@ -395,26 +405,30 @@ export default function ChannelsPage() {
           <Form.Item
             name="baseUrl"
             label="Base URL"
-            rules={[{ required: true, message: '请输入 Base URL' }]}
+            rules={[{ required: true, message: t('channels.form.baseUrlRequired') }]}
           >
             <Input placeholder="https://api.openai.com/v1" />
           </Form.Item>
           <Form.Item
             name="apiKey"
-            label="上游 API Key"
-            rules={editing ? [] : [{ required: true, message: '请输入上游 Key' }]}
-            extra={editing ? '留空则不修改已保存的密钥' : undefined}
+            label={t('channels.form.apiKey')}
+            rules={editing ? [] : [{ required: true, message: t('channels.form.apiKeyRequired') }]}
+            extra={editing ? t('channels.form.apiKeyExtra') : undefined}
           >
-            <Input.Password placeholder={editing ? '留空则不修改' : 'sk-... / 上游密钥（加密存储）'} />
+            <Input.Password
+              placeholder={
+                editing ? t('channels.form.apiKeyPlaceholderKeep') : t('channels.form.apiKeyPlaceholderNew')
+              }
+            />
           </Form.Item>
           <Form.Item
             name="models"
-            label="支持的模型"
-            rules={[{ required: true, message: '至少填写一个模型' }]}
+            label={t('channels.form.models')}
+            rules={[{ required: true, message: t('channels.form.modelsRequired') }]}
           >
             <Select
               mode="tags"
-              placeholder="可搜索/多选，也可直接输入模型名后回车"
+              placeholder={t('channels.form.modelsPlaceholder')}
               options={modelOptions}
               optionFilterProp="label"
             />
@@ -422,15 +436,15 @@ export default function ChannelsPage() {
           <div style={{ marginTop: -12, marginBottom: 12 }}>
             <Space size={8} wrap>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                快捷：
+                {t('channels.form.quick')}
               </Typography.Text>
               <Button
                 size="small"
                 loading={fetchingModels}
                 onClick={fetchUpstreamModels}
-                title="调用上游 /models 接口拉取全部可用模型"
+                title={t('channels.form.fetchModelsTooltip')}
               >
-                获取上游模型
+                {t('channels.form.fetchModels')}
               </Button>
               <Button
                 size="small"
@@ -438,13 +452,13 @@ export default function ChannelsPage() {
                   form.setFieldValue('models', providerModelNames(form.getFieldValue('provider')))
                 }
               >
-                选本服务商全部
+                {t('channels.form.selectAllProvider')}
               </Button>
               <Button size="small" onClick={() => form.setFieldValue('models', allModelNames)}>
-                选全部推荐
+                {t('channels.form.selectAllRecommended')}
               </Button>
               <Button size="small" onClick={() => form.setFieldValue('models', [])}>
-                清空
+                {t('channels.form.clear')}
               </Button>
             </Space>
           </div>
@@ -452,31 +466,31 @@ export default function ChannelsPage() {
           {selectedModels.length > 0 && !isByok && (
             <div style={{ marginBottom: 12 }}>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                逐模型定价（可选，USD/1M tokens；留空则用模型目录默认价 × 折扣）
+                {t('channels.form.pricingHint')}
               </Typography.Text>
               <PricingTable models={selectedModels} pricing={pricing} setP={setP} catalog={catalog} />
             </div>
           )}
           <Space size={16} wrap>
-            <Form.Item name="priority" label="优先级（越大越优先）">
+            <Form.Item name="priority" label={t('channels.form.priority')}>
               <InputNumber min={0} />
             </Form.Item>
-            <Form.Item name="weight" label="权重（同级负载）">
+            <Form.Item name="weight" label={t('channels.form.weight')}>
               <InputNumber min={1} />
             </Form.Item>
             <Form.Item
               name="dailyRequestLimit"
-              label="每日调用限额"
-              tooltip="按自然日（UTC+8）计数，超限后智能路由自动排除该渠道；留空不限"
+              label={t('channels.form.dailyRequestLimit')}
+              tooltip={t('channels.form.dailyRequestLimitTip')}
             >
-              <InputNumber min={0} placeholder="不限" style={{ width: 130 }} />
+              <InputNumber min={0} placeholder={t('channels.form.unlimited')} style={{ width: 130 }} />
             </Form.Item>
             <Form.Item
               name="dailyTokenLimit"
-              label="每日 Token 限额"
-              tooltip="prompt+completion 累计，超限后排除该渠道；留空不限"
+              label={t('channels.form.dailyTokenLimit')}
+              tooltip={t('channels.form.dailyTokenLimitTip')}
             >
-              <InputNumber min={0} placeholder="不限" style={{ width: 150 }} />
+              <InputNumber min={0} placeholder={t('channels.form.unlimited')} style={{ width: 150 }} />
             </Form.Item>
           </Space>
         </Form>
@@ -489,10 +503,10 @@ export default function ChannelsPage() {
       </Modal>
 
       <Modal
-        title={`测试渠道：${testPick?.name ?? ''}`}
+        title={t('channels.testModal.title', { name: testPick?.name ?? '' })}
         open={!!testPick}
         onCancel={() => setTestPick(null)}
-        okText="开始测试"
+        okText={t('channels.testModal.start')}
         confirmLoading={!!testPick && testingId === testPick.id}
         onOk={() => {
           if (testPick && pickModels.length > 0) runTest(testPick, pickModels);
@@ -501,24 +515,27 @@ export default function ChannelsPage() {
         width={560}
       >
         <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
-          选择要测试的模型（默认全部）。模型较多时，可只测单个或部分。
+          {t('channels.testModal.hint')}
         </Typography.Paragraph>
         <Space size={8} style={{ marginBottom: 8 }}>
           <Button size="small" onClick={() => setPickModels(testPick?.models ?? [])}>
-            全选
+            {t('channels.testModal.selectAll')}
           </Button>
           <Button size="small" onClick={() => setPickModels([])}>
-            清空
+            {t('channels.form.clear')}
           </Button>
           <Typography.Text type="secondary">
-            已选 {pickModels.length} / {testPick?.models.length ?? 0}
+            {t('channels.testModal.selected', {
+              selected: pickModels.length,
+              total: testPick?.models.length ?? 0,
+            })}
           </Typography.Text>
         </Space>
         <Select
           mode="multiple"
           allowClear
           style={{ width: '100%' }}
-          placeholder="选择模型"
+          placeholder={t('channels.testModal.modelPlaceholder')}
           value={pickModels}
           onChange={setPickModels}
           optionFilterProp="label"
@@ -527,12 +544,12 @@ export default function ChannelsPage() {
       </Modal>
 
       <Modal
-        title={`测试渠道：${testResult?.channel.name ?? ''}`}
+        title={t('channels.testModal.title', { name: testResult?.channel.name ?? '' })}
         open={!!testResult}
         onCancel={() => setTestResult(null)}
         footer={[
           <Button key="close" type="primary" onClick={() => setTestResult(null)}>
-            关闭
+            {t('common.close')}
           </Button>,
         ]}
       >
@@ -540,13 +557,13 @@ export default function ChannelsPage() {
       </Modal>
 
       <Modal
-        title={`渠道定价：${priceChannel?.name ?? ''}`}
+        title={t('channels.pricing.title', { name: priceChannel?.name ?? '' })}
         open={!!priceChannel}
         onCancel={() => setPriceChannel(null)}
         width={720}
         footer={[
           <Button key="cancel" onClick={() => setPriceChannel(null)}>
-            取消
+            {t('common.cancel')}
           </Button>,
           <Button
             key="save"
@@ -554,13 +571,12 @@ export default function ChannelsPage() {
             loading={savePricingMut.isPending}
             onClick={() => priceChannel && savePricingMut.mutate(priceChannel)}
           >
-            保存
+            {t('common.save')}
           </Button>,
         ]}
       >
         <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 8 }}>
-          成本 USD/1M tokens（用于按成本路由与毛利统计）；售价留空则用模型目录默认价 ×
-          折扣。清空某项将恢复为默认。
+          {t('channels.pricing.hint')}
         </Typography.Paragraph>
         {priceChannel && (
           <PricingTable models={priceChannel.models} pricing={pricing} setP={setP} catalog={catalog} />

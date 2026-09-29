@@ -13,6 +13,7 @@ import {
   Typography,
 } from 'antd';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { usageApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
 import { formatCredits } from '../utils/format';
@@ -31,6 +32,7 @@ const costCol = (title: string, dataIndex: string, width = 120) => ({
 });
 
 export default function UsageStatsPage() {
+  const { t: tr } = useTranslation();
   const { user } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
   const [all, setAll] = useState(false);
@@ -51,18 +53,18 @@ export default function UsageStatsPage() {
     const csv = toCsv<KeyRow>(
       [
         { label: 'Key', value: (r) => r.name },
-        { label: '前缀', value: (r) => r.keyPrefix },
-        { label: '请求', value: (r) => r.requests },
+        { label: tr('usage.csv.prefix'), value: (r) => r.keyPrefix },
+        { label: tr('usage.requests'), value: (r) => r.requests },
         { label: 'Token', value: (r) => r.tokens },
-        { label: '费用-实扣(积分)', value: (r) => (r.billedCost * 100).toFixed(2) },
-        { label: 'BYOK折算-不扣费(积分)', value: (r) => ((r.cost - r.billedCost) * 100).toFixed(2) },
+        { label: tr('usage.csv.billedCost'), value: (r) => (r.billedCost * 100).toFixed(2) },
+        { label: tr('usage.csv.byokCost'), value: (r) => ((r.cost - r.billedCost) * 100).toFixed(2) },
         ...(isAdmin
           ? [
               {
-                label: '成本-实付(积分)',
+                label: tr('usage.csv.upstreamCost'),
                 value: (r: KeyRow) => (r.billedUpstreamCost * 100).toFixed(2),
               },
-              { label: '毛利(积分)', value: (r: KeyRow) => (r.margin * 100).toFixed(2) },
+              { label: tr('usage.csv.margin'), value: (r: KeyRow) => (r.margin * 100).toFixed(2) },
             ]
           : []),
       ],
@@ -74,7 +76,7 @@ export default function UsageStatsPage() {
   return (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
       <Card
-        title="使用统计"
+        title={tr('usage.title')}
         extra={
           <Space>
             <DatePicker.RangePicker
@@ -91,33 +93,32 @@ export default function UsageStatsPage() {
             />
             {isAdmin && (
               <span>
-                查看全部用户 <Switch checked={all} onChange={setAll} />
+                {tr('usage.viewAllUsers')} <Switch checked={all} onChange={setAll} />
               </span>
             )}
-            <Button onClick={exportKeys}>导出 CSV</Button>
+            <Button onClick={exportKeys}>{tr('usage.exportCsv')}</Button>
           </Space>
         }
       >
         <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-          不选时间段默认统计近 30 天。按 API Key 汇总每个 Key 的累计请求、Token 与费用。
-          「费用（实扣）」与余额扣款同口径；BYOK 自带密钥的调用不扣积分，其折算金额单列显示。
+          {tr('usage.help')}
         </Typography.Paragraph>
         <Row gutter={16}>
           <Col xs={12} md={4}>
-            <Statistic title="请求" value={t?.requests ?? 0} loading={isLoading} />
+            <Statistic title={tr('usage.requests')} value={t?.requests ?? 0} loading={isLoading} />
           </Col>
           <Col xs={12} md={4}>
-            <Statistic title="成功 / 失败" value={`${t?.success ?? 0} / ${t?.errors ?? 0}`} />
+            <Statistic title={tr('usage.successErrors')} value={`${t?.success ?? 0} / ${t?.errors ?? 0}`} />
           </Col>
           <Col xs={12} md={4}>
             <Statistic title="Token" value={t?.tokens ?? 0} />
           </Col>
           <Col xs={12} md={4}>
-            <Statistic title="费用（实扣）" value={formatCredits(t?.billedCost ?? 0)} />
+            <Statistic title={tr('usage.costBilled')} value={formatCredits(t?.billedCost ?? 0)} />
           </Col>
           <Col xs={12} md={4}>
             <Statistic
-              title="BYOK 折算（不扣费）"
+              title={tr('usage.byokNotCharged')}
               value={formatCredits((t?.cost ?? 0) - (t?.billedCost ?? 0))}
               valueStyle={{ color: 'var(--text-3)' }}
             />
@@ -125,11 +126,11 @@ export default function UsageStatsPage() {
           {isAdmin && (
             <>
               <Col xs={12} md={4}>
-                <Statistic title="成本（实付）" value={formatCredits(t?.billedUpstreamCost ?? 0)} />
+                <Statistic title={tr('usage.costPaid')} value={formatCredits(t?.billedUpstreamCost ?? 0)} />
               </Col>
               <Col xs={12} md={4}>
                 <Statistic
-                  title="毛利"
+                  title={tr('usage.margin')}
                   value={formatCredits(t?.margin ?? 0)}
                   valueStyle={{ color: (t?.margin ?? 0) >= 0 ? 'var(--ok)' : 'var(--err)' }}
                 />
@@ -139,7 +140,7 @@ export default function UsageStatsPage() {
         </Row>
       </Card>
 
-      <Card title="按 API Key" size="small">
+      <Card title={tr('usage.byApiKey')} size="small">
         <Table<KeyRow>
           rowKey={(r) => r.apiKeyId ?? r.name}
           size="small"
@@ -157,11 +158,11 @@ export default function UsageStatsPage() {
                 </Space>
               ),
             },
-            { title: '请求', dataIndex: 'requests', width: 90 },
+            { title: tr('usage.requests'), dataIndex: 'requests', width: 90 },
             { title: 'Token', dataIndex: 'tokens', width: 130 },
-                        costCol('费用（实扣）', 'billedCost'),
+                        costCol(tr('usage.costBilled'), 'billedCost'),
             ...(isAdmin
-              ? [costCol('成本（实付）', 'billedUpstreamCost'), costCol('毛利', 'margin')]
+              ? [costCol(tr('usage.costPaid'), 'billedUpstreamCost'), costCol(tr('usage.margin'), 'margin')]
               : []),
           ]}
         />
@@ -169,7 +170,7 @@ export default function UsageStatsPage() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} md={12}>
-          <Card title="按模型" size="small">
+          <Card title={tr('usage.byModel')} size="small">
             <Table<ModelRow>
               rowKey={(r) => r.model}
               size="small"
@@ -178,17 +179,17 @@ export default function UsageStatsPage() {
               pagination={false}
               scroll={{ x: 560 }}
               columns={[
-                { title: '模型', dataIndex: 'model', ellipsis: true },
-                { title: '请求', dataIndex: 'requests', width: 80 },
+                { title: tr('common.model'), dataIndex: 'model', ellipsis: true },
+                { title: tr('usage.requests'), dataIndex: 'requests', width: 80 },
                 { title: 'Token', dataIndex: 'tokens', width: 120 },
-                            costCol('费用（实扣）', 'billedCost'),
-                ...(isAdmin ? [costCol('毛利', 'margin')] : []),
+                            costCol(tr('usage.costBilled'), 'billedCost'),
+                ...(isAdmin ? [costCol(tr('usage.margin'), 'margin')] : []),
               ]}
             />
           </Card>
         </Col>
         <Col xs={24} md={12}>
-          <Card title="按渠道" size="small">
+          <Card title={tr('usage.byChannel')} size="small">
             <Table<ChannelRow>
               rowKey={(r) => r.channelId ?? r.name}
               size="small"
@@ -197,24 +198,24 @@ export default function UsageStatsPage() {
               pagination={false}
               scroll={{ x: 740 }}
               columns={[
-                { title: '渠道', dataIndex: 'name', ellipsis: true },
-                { title: '请求', dataIndex: 'requests', width: 80 },
+                { title: tr('usage.column.channel'), dataIndex: 'name', ellipsis: true },
+                { title: tr('usage.requests'), dataIndex: 'requests', width: 80 },
                 { title: 'Token', dataIndex: 'tokens', width: 120 },
                 {
-                  title: '错误',
+                  title: tr('usage.column.errors'),
                   dataIndex: 'errors',
                   width: 70,
                   render: (v: number) =>
                     v > 0 ? <span style={{ color: '#cf1322' }}>{v}</span> : v,
                 },
                 {
-                  title: '平均延迟',
+                  title: tr('usage.column.avgLatency'),
                   dataIndex: 'avgLatency',
                   width: 95,
                   render: (v: number) => `${v}ms`,
                 },
-                            costCol('费用（实扣）', 'billedCost'),
-                ...(isAdmin ? [costCol('毛利', 'margin')] : []),
+                            costCol(tr('usage.costBilled'), 'billedCost'),
+                ...(isAdmin ? [costCol(tr('usage.margin'), 'margin')] : []),
               ]}
             />
           </Card>

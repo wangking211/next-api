@@ -1,4 +1,5 @@
 import { Card, Empty } from 'antd';
+import { useTranslation } from 'react-i18next';
 
 const mono =
   "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace";
@@ -61,11 +62,12 @@ function RankBar({ item, max }: { item: RankBarItem; max: number }) {
 }
 
 export function RankList({ title, items }: { title: string; items: RankBarItem[] }) {
+  const { t } = useTranslation();
   const max = Math.max(...items.map((i) => i.value), 1);
   return (
     <Card title={title} size="small" style={{ height: '100%' }}>
       {items.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据" />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('dashboard.rank.empty')} />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {items.map((it) => (

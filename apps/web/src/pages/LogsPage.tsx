@@ -19,6 +19,7 @@ import {
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { adminApi, usageApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
@@ -28,6 +29,7 @@ import { usePageClamp } from '../hooks/usePageClamp';
 import type { LogFilters, RequestLogRow } from '../api/types';
 
 function TextBlock({ title, text }: { title: string; text: string | null }) {
+  const { t } = useTranslation();
   return (
     <div style={{ marginTop: 12 }}>
       <Typography.Text strong>{title}</Typography.Text>
@@ -46,13 +48,14 @@ function TextBlock({ title, text }: { title: string; text: string | null }) {
           fontSize: 13,
         }}
       >
-        {text || '（无）'}
+        {text || t('logs.detail.none')}
       </pre>
     </div>
   );
 }
 
 export default function LogsPage() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const { message } = App.useApp();
   const isAdmin = user?.role === 'ADMIN';
@@ -111,38 +114,38 @@ export default function LogsPage() {
 
   return (
     <Card
-      title="调用日志"
+      title={t('logs.title')}
       extra={
         isAdmin && (
           <span>
-            查看全部用户 <Switch checked={all} onChange={setAll} />
+            {t('logs.viewAllUsers')} <Switch checked={all} onChange={setAll} />
           </span>
         )
       }
     >
       <Form form={form} layout="inline" style={{ marginBottom: 16, rowGap: 8 }} onFinish={apply}>
         <Form.Item name="model">
-          <Input allowClear placeholder="模型名" style={{ width: 140 }} />
+          <Input allowClear placeholder={t('logs.filter.model')} style={{ width: 140 }} />
         </Form.Item>
         <Form.Item name="status">
           <Select
             allowClear
-            placeholder="状态"
+            placeholder={t('common.status')}
             style={{ width: 110 }}
             options={[
-              { value: 'success', label: '成功' },
-              { value: 'error', label: '失败' },
+              { value: 'success', label: t('logs.filter.success') },
+              { value: 'error', label: t('logs.filter.error') },
             ]}
           />
         </Form.Item>
         <Form.Item name="stream">
           <Select
             allowClear
-            placeholder="类型"
+            placeholder={t('logs.filter.type')}
             style={{ width: 110 }}
             options={[
-              { value: true, label: '流式' },
-              { value: false, label: '非流式' },
+              { value: true, label: t('logs.stream') },
+              { value: false, label: t('logs.nonStream') },
             ]}
           />
         </Form.Item>
@@ -152,7 +155,7 @@ export default function LogsPage() {
               allowClear
               showSearch
               optionFilterProp="label"
-              placeholder="用户"
+              placeholder={t('common.user')}
               style={{ width: 160 }}
               options={(userList?.items ?? []).map((u) => ({
                 value: u.id,
@@ -162,7 +165,7 @@ export default function LogsPage() {
           </Form.Item>
         )}
         <Form.Item name="q">
-          <Input allowClear placeholder="内容关键词" style={{ width: 160 }} />
+          <Input allowClear placeholder={t('logs.filter.keyword')} style={{ width: 160 }} />
         </Form.Item>
         <Form.Item name="range">
           <DatePicker.RangePicker showTime style={{ width: 340 }} />
@@ -170,12 +173,12 @@ export default function LogsPage() {
         <Form.Item>
           <Space>
             <Button type="primary" htmlType="submit">
-              查询
+              {t('logs.filter.submit')}
             </Button>
             <Button icon={<ReloadOutlined />} onClick={reset}>
-              重置
+              {t('logs.filter.reset')}
             </Button>
-            <Button onClick={exportCsv}>导出 CSV</Button>
+            <Button onClick={exportCsv}>{t('logs.exportCsv')}</Button>
           </Space>
         </Form.Item>
       </Form>
@@ -197,45 +200,45 @@ export default function LogsPage() {
         }}
         columns={[
           {
-            title: '时间',
+            title: t('common.time'),
             dataIndex: 'createdAt',
             width: 170,
             render: (v: string) => formatDateTime(v),
           },
-          { title: '模型', dataIndex: 'model' },
-          { title: '服务商', dataIndex: 'provider', render: (v: string | null) => v ?? '-' },
+          { title: t('common.model'), dataIndex: 'model' },
+          { title: t('logs.column.provider'), dataIndex: 'provider', render: (v: string | null) => v ?? '-' },
           { title: 'Key', render: (_, r) => r.apiKey?.name ?? '-' },
-          { title: '渠道', render: (_, r) => r.channel?.name ?? '-' },
+          { title: t('logs.column.channel'), render: (_, r) => r.channel?.name ?? '-' },
           {
-            title: '类型',
+            title: t('logs.column.type'),
             dataIndex: 'isStream',
             width: 70,
-            render: (v: boolean) => (v ? <Tag>流式</Tag> : <Tag>非流式</Tag>),
+            render: (v: boolean) => (v ? <Tag>{t('logs.stream')}</Tag> : <Tag>{t('logs.nonStream')}</Tag>),
           },
           {
             title: 'Tokens',
             render: (_, r) => (
-              <Tooltip title={`输入 ${r.promptTokens} / 输出 ${r.completionTokens}`}>
+              <Tooltip title={t('logs.tokensInOut', { prompt: r.promptTokens, completion: r.completionTokens })}>
                 {r.totalTokens}
               </Tooltip>
             ),
           },
           {
-            title: '费用',
+            title: t('logs.column.cost'),
             dataIndex: 'cost',
             width: 130,
             render: (v: string, r) =>
               r.chargeable ? (
                 formatCredits(v)
               ) : (
-                <Tooltip title={`BYOK 自带密钥，不扣积分；折算 ${formatCredits(v)}`}>
-                  <Tag>未计费</Tag>
+                <Tooltip title={t('logs.byokTip', { value: formatCredits(v) })}>
+                  <Tag>{t('logs.notBilled')}</Tag>
                 </Tooltip>
               ),
           },
-          { title: '延迟', dataIndex: 'latencyMs', render: (v: number | null) => (v != null ? `${v}ms` : '-') },
+          { title: t('logs.column.latency'), dataIndex: 'latencyMs', render: (v: number | null) => (v != null ? `${v}ms` : '-') },
           {
-            title: '状态',
+            title: t('common.status'),
             dataIndex: 'status',
             render: (v: number, r) =>
               v < 400 ? (
@@ -247,62 +250,62 @@ export default function LogsPage() {
               ),
           },
           {
-            title: '操作',
+            title: t('common.action'),
             fixed: 'right',
             width: 80,
             render: (_, r) => (
               <Button size="small" onClick={() => setDetailId(r.id)}>
-                详情
+                {t('logs.detail.open')}
               </Button>
             ),
           },
         ]}
       />
 
-      <Drawer title="调用详情" width={760} open={!!detailId} onClose={() => setDetailId(null)}>
+      <Drawer title={t('logs.detail.title')} width={760} open={!!detailId} onClose={() => setDetailId(null)}>
         {detailLoading || !detail ? (
           <Spin />
         ) : (
           <>
             <Descriptions column={2} size="small" bordered>
-              <Descriptions.Item label="时间">
+              <Descriptions.Item label={t('common.time')}>
                 {formatDateTime(detail.createdAt)}
               </Descriptions.Item>
-              <Descriptions.Item label="模型">{detail.model}</Descriptions.Item>
-              <Descriptions.Item label="服务商">{detail.provider ?? '-'}</Descriptions.Item>
-              <Descriptions.Item label="渠道">{detail.channel?.name ?? '-'}</Descriptions.Item>
+              <Descriptions.Item label={t('common.model')}>{detail.model}</Descriptions.Item>
+              <Descriptions.Item label={t('logs.detail.provider')}>{detail.provider ?? '-'}</Descriptions.Item>
+              <Descriptions.Item label={t('logs.detail.channel')}>{detail.channel?.name ?? '-'}</Descriptions.Item>
               <Descriptions.Item label="Key">{detail.apiKey?.name ?? '-'}</Descriptions.Item>
-              <Descriptions.Item label="类型">
-                {detail.isStream ? '流式' : '非流式'}
+              <Descriptions.Item label={t('logs.detail.type')}>
+                {detail.isStream ? t('logs.stream') : t('logs.nonStream')}
               </Descriptions.Item>
-              <Descriptions.Item label="输入/输出 Tokens">
+              <Descriptions.Item label={t('logs.detail.ioTokens')}>
                 {detail.promptTokens} / {detail.completionTokens}
               </Descriptions.Item>
-              <Descriptions.Item label="总 Tokens">{detail.totalTokens}</Descriptions.Item>
-              <Descriptions.Item label="费用">
+              <Descriptions.Item label={t('logs.detail.totalTokens')}>{detail.totalTokens}</Descriptions.Item>
+              <Descriptions.Item label={t('logs.detail.cost')}>
                 {detail.chargeable ? (
                   formatCredits(detail.cost)
                 ) : (
-                  <Tooltip title={`BYOK 自带密钥，不扣积分；折算 ${formatCredits(detail.cost)}`}>
-                    <Tag>未计费</Tag>
+                  <Tooltip title={t('logs.byokTip', { value: formatCredits(detail.cost) })}>
+                    <Tag>{t('logs.notBilled')}</Tag>
                   </Tooltip>
                 )}
               </Descriptions.Item>
-              <Descriptions.Item label="延迟">
+              <Descriptions.Item label={t('logs.detail.latency')}>
                 {detail.latencyMs != null ? `${detail.latencyMs}ms` : '-'}
               </Descriptions.Item>
-              <Descriptions.Item label="状态">
+              <Descriptions.Item label={t('common.status')}>
                 {detail.status < 400 ? (
                   <Tag color="green">{detail.status}</Tag>
                 ) : (
                   <Tag color="red">{detail.status}</Tag>
                 )}
               </Descriptions.Item>
-              <Descriptions.Item label="日志 ID">{detail.id}</Descriptions.Item>
+              <Descriptions.Item label={t('logs.detail.id')}>{detail.id}</Descriptions.Item>
             </Descriptions>
-            {detail.errorMessage && <TextBlock title="错误信息" text={detail.errorMessage} />}
-            <TextBlock title="输入（请求 messages）" text={detail.requestPreview} />
-            <TextBlock title="输出（模型回复）" text={detail.responsePreview} />
+            {detail.errorMessage && <TextBlock title={t('logs.detail.error')} text={detail.errorMessage} />}
+            <TextBlock title={t('logs.detail.request')} text={detail.requestPreview} />
+            <TextBlock title={t('logs.detail.response')} text={detail.responsePreview} />
           </>
         )}
       </Drawer>

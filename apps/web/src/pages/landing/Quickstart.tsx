@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 
 type Lang = 'curl' | 'python' | 'node';
 
@@ -8,7 +10,7 @@ const TABS: { key: Lang; label: string }[] = [
   { key: 'node', label: 'Node.js' },
 ];
 
-function buildSamples(origin: string, model: string) {
+function buildSamples(origin: string, model: string, prompt: string) {
   const url = `${origin}/v1/chat/completions`;
   return {
     curl: `curl ${url} \\
@@ -16,7 +18,7 @@ function buildSamples(origin: string, model: string) {
   -H "Content-Type: application/json" \\
   -d '{
     "model": "${model}",
-    "messages": [{ "role": "user", "content": "用一句话介绍你自己" }],
+    "messages": [{ "role": "user", "content": "${prompt}" }],
     "stream": true
   }'`,
     python: `from openai import OpenAI
@@ -28,7 +30,7 @@ client = OpenAI(
 
 resp = client.chat.completions.create(
     model="${model}",
-    messages=[{"role": "user", "content": "用一句话介绍你自己"}],
+    messages=[{"role": "user", "content": "${prompt}"}],
 )
 print(resp.choices[0].message.content)`,
     node: `import OpenAI from 'openai';
@@ -40,13 +42,14 @@ const client = new OpenAI({
 
 const resp = await client.chat.completions.create({
   model: '${model}',
-  messages: [{ role: 'user', content: '用一句话介绍你自己' }],
+  messages: [{ role: 'user', content: '${prompt}' }],
 });
 console.log(resp.choices[0].message.content);`,
   };
 }
 
 function CopyButton({ code }: { code: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -59,7 +62,7 @@ function CopyButton({ code }: { code: string }) {
   };
   return (
     <button type="button" className="lp-code-copy" onClick={copy}>
-      {copied ? '已复制' : '复制'}
+      {copied ? t('common.copied') : t('common.copy')}
     </button>
   );
 }
@@ -76,37 +79,42 @@ function CodeBody({ code }: { code: string }) {
   );
 }
 
-const STEPS = [
+const STEPS = (t: TFunction) => [
   {
-    title: '注册并登录',
-    desc: '创建账号即可进入控制台，管理员可自助充值或发放兑换码。',
+    title: t('landing.quickstart.steps.register.title'),
+    desc: t('landing.quickstart.steps.register.desc'),
     meta: '/login',
   },
   {
-    title: '充值余额',
-    desc: '按需充值积分，余额实时入账，账单逐笔可查，支持导出 CSV。',
-    meta: '余额与账单',
+    title: t('landing.quickstart.steps.topup.title'),
+    desc: t('landing.quickstart.steps.topup.desc'),
+    meta: t('landing.quickstart.steps.topup.meta'),
   },
   {
-    title: '创建 API Key',
-    desc: 'Key 明文只展示一次，可设置额度、费用上限、RPM 与过期时间。',
+    title: t('landing.quickstart.steps.createKey.title'),
+    desc: t('landing.quickstart.steps.createKey.desc'),
     meta: 'sk-••••••••',
   },
   {
-    title: '设置 base_url',
-    desc: '把现有 SDK 的 base_url 指向网关地址，模型名原样透传即可。',
+    title: t('landing.quickstart.steps.baseUrl.title'),
+    desc: t('landing.quickstart.steps.baseUrl.desc'),
     meta: '{origin}/v1',
   },
 ];
 
 export default function Quickstart({ origin, model }: { origin: string; model: string }) {
+  const { t } = useTranslation();
   const [lang, setLang] = useState<Lang>('curl');
-  const samples = useMemo(() => buildSamples(origin, model), [origin, model]);
+  const samplePrompt = t('landing.quickstart.samplePrompt');
+  const samples = useMemo(
+    () => buildSamples(origin, model, samplePrompt),
+    [origin, model, samplePrompt],
+  );
 
   return (
     <>
       <div className="lp-steps">
-        {STEPS.map((s, i) => (
+        {STEPS(t).map((s, i) => (
           <div className="lp-step" key={s.title}>
             <div className="lp-step-num">{i + 1}</div>
             <h3>{s.title}</h3>
@@ -118,15 +126,15 @@ export default function Quickstart({ origin, model }: { origin: string; model: s
 
       <div className="lp-code">
         <div className="lp-code-bar">
-          {TABS.map((t) => (
+          {TABS.map((tab) => (
             <button
-              key={t.key}
+              key={tab.key}
               type="button"
               className="lp-code-tab"
-              data-active={lang === t.key}
-              onClick={() => setLang(t.key)}
+              data-active={lang === tab.key}
+              onClick={() => setLang(tab.key)}
             >
-              {t.label}
+              {tab.label}
             </button>
           ))}
           <CopyButton code={samples[lang]} />

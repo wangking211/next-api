@@ -1,21 +1,31 @@
 import { Button, Result } from 'antd';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/AuthContext';
+import { LangSwitch } from '../components/LangSwitch';
 import useDocumentTitle from '../hooks/useDocumentTitle';
 
 /** 未知路径：不再静默重定向，明确告知未找到并给出返回入口 */
 export default function NotFoundPage() {
   const { user } = useAuth();
-  useDocumentTitle('页面不存在');
+  const { t } = useTranslation();
+  useDocumentTitle(t('landing.notFound.title'));
   return (
     <Result
       status="404"
       title="404"
-      subTitle="你访问的页面不存在或已被移动。"
+      subTitle={t('landing.notFound.subTitle')}
       extra={
-        <Link to={user ? '/dashboard' : '/'}>
-          <Button type="primary">{user ? '返回控制台' : '返回首页'}</Button>
-        </Link>
+        <>
+          <Link to={user ? '/dashboard' : '/'}>
+            <Button type="primary">
+              {user ? t('landing.notFound.backToConsole') : t('landing.notFound.backHome')}
+            </Button>
+          </Link>
+          <div style={{ marginTop: 16 }}>
+            <LangSwitch />
+          </div>
+        </>
       }
     />
   );

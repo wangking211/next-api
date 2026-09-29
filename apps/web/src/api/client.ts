@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { queryClient } from './queryClient';
+import i18n from '../i18n';
 
 export const TOKEN_KEY = 'aigw_token';
 
@@ -45,5 +46,5 @@ export function errorMessage(error: unknown): string {
   if (typeof data?.message === 'string') return data.message;
   if (Array.isArray(data?.message)) return data.message.join(', ');
   if (typeof data?.error?.message === 'string') return data.error.message;
-  return anyErr?.message ?? '请求失败';
+  return anyErr?.message ?? i18n.t('api.requestFailed');
 }

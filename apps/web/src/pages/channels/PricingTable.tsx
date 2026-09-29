@@ -1,4 +1,5 @@
 import { InputNumber, Table, Tooltip, Typography } from 'antd';
+import { useTranslation } from 'react-i18next';
 import { getCreditsPerUsd } from '../../utils/format';
 import type { ModelInfo } from '../../api/types';
 import type { PriceRow, SetPrice } from './constants';
@@ -15,6 +16,7 @@ export function PricingTable({
   setP: SetPrice;
   catalog: ModelInfo[];
 }) {
+  const { t } = useTranslation();
   const official = (name: string) => {
     const m = catalog.find((c) => c.name === name);
     return m ? { in: Number(m.inputPrice), out: Number(m.outputPrice) } : { in: 0, out: 0 };
@@ -43,13 +45,13 @@ export function PricingTable({
       style={{ marginTop: 6 }}
       dataSource={models.map((m) => ({ model: m }))}
       columns={[
-        { title: '模型', dataIndex: 'model', width: 150, ellipsis: true },
-        { title: '上游折扣', width: 100, render: (_: unknown, r: { model: string }) => num(r.model, 'costDiscount') },
-        { title: '下游折扣', width: 100, render: (_: unknown, r: { model: string }) => num(r.model, 'priceDiscount') },
+        { title: t('common.model'), dataIndex: 'model', width: 150, ellipsis: true },
+        { title: t('channels.pricing.costDiscount'), width: 100, render: (_: unknown, r: { model: string }) => num(r.model, 'costDiscount') },
+        { title: t('channels.pricing.priceDiscount'), width: 100, render: (_: unknown, r: { model: string }) => num(r.model, 'priceDiscount') },
         {
           title: (
-            <Tooltip title="人工质量分 0~2（1=正常）：官方直连 1.0、可用中转 0.85、疑似降智/蒸馏 0.6；参与智能路由评分">
-              质量分
+            <Tooltip title={t('channels.pricing.qualityTip')}>
+              {t('channels.pricing.qualityScore')}
             </Tooltip>
           ),
           width: 90,
@@ -67,7 +69,7 @@ export function PricingTable({
           ),
         },
         {
-          title: '成本(积分/1M)',
+          title: t('channels.pricing.cost'),
           width: 150,
           render: (_: unknown, r: { model: string }) => {
             const o = official(r.model);
@@ -76,7 +78,7 @@ export function PricingTable({
           },
         },
         {
-          title: '售价(积分/1M)',
+          title: t('channels.pricing.salePrice'),
           width: 150,
           render: (_: unknown, r: { model: string }) => {
             const o = official(r.model);
