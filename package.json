@@ -19,7 +19,8 @@
     "prisma:migrate": "pnpm --filter @ai-gateway/api prisma:migrate",
     "prisma:studio": "pnpm --filter @ai-gateway/api prisma:studio",
     "seed": "pnpm --filter @ai-gateway/api prisma:seed",
-    "cleanup": "pnpm --filter @ai-gateway/api prisma:cleanup"
+    "cleanup": "pnpm --filter @ai-gateway/api prisma:cleanup",
+  "audit:models": "node scripts/model-audit.mjs"
   },
   "devDependencies": {
     "react-doctor": "^0.9.14"

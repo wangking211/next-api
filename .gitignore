@@ -10,6 +10,7 @@ build/
 coverage/
 .vite/
 .hops-audit/
+.model-audit/
 .codegraph/
 
 # local agent tool artifacts
