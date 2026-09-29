@@ -365,9 +365,26 @@ export const paymentApi = {
 };
 
 export const adminApi = {
-  async users(q?: string, page = 1, pageSize = 20, signal?: AbortSignal, role?: string) {
+  async users(
+    params: {
+      q?: string;
+      page?: number;
+      pageSize?: number;
+      role?: string;
+      status?: string;
+      groupId?: string;
+      agentId?: string;
+      balanceMin?: number;
+      balanceMax?: number;
+      createdFrom?: string;
+      createdTo?: string;
+      sortBy?: 'createdAt' | 'balance' | 'username';
+      sortOrder?: 'asc' | 'desc';
+    } = {},
+    signal?: AbortSignal,
+  ) {
     const { data } = await api.get<Paginated<AdminUser>>('/admin/users', {
-      params: { q, page, pageSize, role },
+      params,
       signal,
     });
     return data;

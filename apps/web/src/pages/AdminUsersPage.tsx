@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Col,
+  DatePicker,
   Form,
   Input,
   InputNumber,
@@ -33,6 +34,17 @@ export default function AdminUsersPage() {
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [role, setRole] = useState<string | undefined>();
+  const [status, setStatus] = useState<string | undefined>();
+  const [groupId, setGroupId] = useState<string | undefined>();
+  const [agentId, setAgentId] = useState<string | undefined>();
+  const [balanceMin, setBalanceMin] = useState<number | undefined>();
+  const [balanceMax, setBalanceMax] = useState<number | undefined>();
+  // RangePicker 的 dayjs 区间（避免额外引入 dayjs 类型）
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [range, setRange] = useState<any>(null);
+  const [sortBy, setSortBy] = useState<'createdAt' | 'balance' | 'username'>('createdAt');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [target, setTarget] = useState<AdminUser | null>(null);
   const [mode, setMode] = useState<Mode>('recharge');
   const [usageUser, setUsageUser] = useState<AdminUser | null>(null);
@@ -40,16 +52,44 @@ export default function AdminUsersPage() {
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
 
+  const filters = {
+    q: q || undefined,
+    role,
+    status,
+    groupId,
+    agentId,
+    balanceMin,
+    balanceMax,
+    createdFrom: range?.[0] ? range[0].toISOString() : undefined,
+    createdTo: range?.[1] ? range[1].toISOString() : undefined,
+    sortBy,
+    sortOrder,
+  };
+
+  const resetFilters = () => {
+    setQ('');
+    setRole(undefined);
+    setStatus(undefined);
+    setGroupId(undefined);
+    setAgentId(undefined);
+    setBalanceMin(undefined);
+    setBalanceMax(undefined);
+    setRange(null);
+    setSortBy('createdAt');
+    setSortOrder('desc');
+    setPage(1);
+  };
+
   const { data, isLoading } = useQuery({
-    queryKey: ['admin', 'users', q, page, pageSize],
-    queryFn: ({ signal }) => adminApi.users(q || undefined, page, pageSize, signal),
+    queryKey: ['admin', 'users', filters, page, pageSize],
+    queryFn: ({ signal }) => adminApi.users({ ...filters, page, pageSize }, signal),
   });
 
   usePageClamp(page, setPage, data);
 
   const { data: agents } = useQuery({
     queryKey: ['admin', 'agents'],
-    queryFn: ({ signal }) => adminApi.users(undefined, 1, 100, signal, 'AGENT'),
+    queryFn: ({ signal }) => adminApi.users({ role: 'AGENT', page: 1, pageSize: 100 }, signal),
   });
 
   const { data: groups = [] } = useQuery({
@@ -133,21 +173,157 @@ export default function AdminUsersPage() {
   };
 
   return (
-    <Card
-      title={t('admin.users.title')}
-      extra={
-        <Input
-          allowClear
-          prefix={<SearchOutlined />}
-          placeholder={t('admin.users.searchPlaceholder')}
-          style={{ width: 240 }}
-          onPressEnter={(e) => {
-            setQ((e.target as HTMLInputElement).value);
-            setPage(1);
-          }}
-        />
-      }
-    >
+    <Card title={t('admin.users.title')}>
+      <Row gutter={[10, 10]} style={{ marginBottom: 12 }}>
+        <Col>
+          <Input
+            allowClear
+            prefix={<SearchOutlined />}
+            placeholder={t('admin.users.searchPlaceholder')}
+            style={{ width: 220 }}
+            onPressEnter={(e) => {
+              setQ((e.target as HTMLInputElement).value);
+              setPage(1);
+            }}
+            onChange={(e) => {
+              if (!e.target.value) {
+                setQ('');
+                setPage(1);
+              }
+            }}
+          />
+        </Col>
+        <Col>
+          <Select
+            allowClear
+            placeholder={t('admin.users.column.role')}
+            style={{ width: 130 }}
+            value={role}
+            onChange={(v) => {
+              setRole(v);
+              setPage(1);
+            }}
+            options={[
+              { value: 'ADMIN', label: t('admin.users.roleAdmin') },
+              { value: 'AGENT', label: t('admin.users.roleAgentDistributor') },
+              { value: 'USER', label: t('admin.users.roleUser') },
+            ]}
+          />
+        </Col>
+        <Col>
+          <Select
+            allowClear
+            placeholder={t('admin.users.filter.status')}
+            style={{ width: 120 }}
+            value={status}
+            onChange={(v) => {
+              setStatus(v);
+              setPage(1);
+            }}
+            options={[
+              { value: 'ACTIVE', label: t('admin.users.statusActive') },
+              { value: 'BANNED', label: t('admin.users.statusBanned') },
+            ]}
+          />
+        </Col>
+        <Col>
+          <Select
+            allowClear
+            placeholder={t('admin.users.filter.group')}
+            style={{ width: 160 }}
+            value={groupId}
+            onChange={(v) => {
+              setGroupId(v);
+              setPage(1);
+            }}
+            options={groups.map((g) => ({ value: g.id, label: g.displayName || g.name }))}
+          />
+        </Col>
+        <Col>
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder={t('admin.users.filter.agent')}
+            style={{ width: 170 }}
+            value={agentId}
+            onChange={(v) => {
+              setAgentId(v);
+              setPage(1);
+            }}
+            options={(agents?.items ?? []).map((u) => ({ value: u.id, label: u.username }))}
+          />
+        </Col>
+        <Col>
+          <Space>
+            <InputNumber
+              min={0}
+              style={{ width: 118 }}
+              placeholder={t('admin.users.filter.balanceMin')}
+              value={balanceMin}
+              onChange={(v) => {
+                setBalanceMin((v as number) ?? undefined);
+                setPage(1);
+              }}
+            />
+            <InputNumber
+              min={0}
+              style={{ width: 118 }}
+              placeholder={t('admin.users.filter.balanceMax')}
+              value={balanceMax}
+              onChange={(v) => {
+                setBalanceMax((v as number) ?? undefined);
+                setPage(1);
+              }}
+            />
+          </Space>
+        </Col>
+        <Col>
+          <DatePicker.RangePicker
+            value={range}
+            placeholder={[
+              t('admin.users.filter.createdFrom'),
+              t('admin.users.filter.createdTo'),
+            ]}
+            onChange={(v) => {
+              setRange(v);
+              setPage(1);
+            }}
+          />
+        </Col>
+        <Col>
+          <Space>
+            <Select
+              style={{ width: 130 }}
+              value={sortBy}
+              onChange={(v) => {
+                setSortBy(v as 'createdAt' | 'balance' | 'username');
+                setPage(1);
+              }}
+              options={[
+                { value: 'createdAt', label: t('admin.users.sort.createdAt') },
+                { value: 'balance', label: t('admin.users.sort.balance') },
+                { value: 'username', label: t('admin.users.sort.username') },
+              ]}
+            />
+            <Select
+              style={{ width: 104 }}
+              value={sortOrder}
+              onChange={(v) => {
+                setSortOrder(v as 'asc' | 'desc');
+                setPage(1);
+              }}
+              options={[
+                { value: 'desc', label: t('admin.users.sort.desc') },
+                { value: 'asc', label: t('admin.users.sort.asc') },
+              ]}
+            />
+          </Space>
+        </Col>
+        <Col>
+          <Button onClick={resetFilters}>{t('admin.users.filter.reset')}</Button>
+        </Col>
+      </Row>
       <Table<AdminUser>
         rowKey="id"
         loading={isLoading}

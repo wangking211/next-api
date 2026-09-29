@@ -8,7 +8,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { Role, UserStatus } from '@prisma/client';
 import { BillingService } from './billing.service';
 import { UsersService } from '../users/users.service';
 import { RechargeDto } from './dto/recharge.dto';
@@ -40,9 +40,47 @@ export class AdminUsersController {
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
     @Query('role') role?: string,
+    @Query('status') status?: string,
+    @Query('groupId') groupId?: string,
+    @Query('agentId') agentId?: string,
+    @Query('balanceMin') balanceMin?: string,
+    @Query('balanceMax') balanceMax?: string,
+    @Query('createdFrom') createdFrom?: string,
+    @Query('createdTo') createdTo?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string,
   ) {
     const roleFilter = role && role in Role ? (role as Role) : undefined;
-    return this.users.list(q, toInt(page, 1), Math.min(toInt(pageSize, 20), 100), roleFilter);
+    const statusFilter =
+      status && status in UserStatus ? (status as UserStatus) : undefined;
+    const num = (v?: string): number | undefined => {
+      if (v == null || v.trim() === '') return undefined;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const date = (v?: string): Date | undefined => {
+      if (!v) return undefined;
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? undefined : d;
+    };
+    const sortFields = ['createdAt', 'balance', 'username'] as const;
+    return this.users.list({
+      q,
+      page: toInt(page, 1),
+      pageSize: Math.min(toInt(pageSize, 20), 100),
+      role: roleFilter,
+      status: statusFilter,
+      groupId: groupId?.trim() || undefined,
+      agentId: agentId?.trim() || undefined,
+      balanceMin: num(balanceMin),
+      balanceMax: num(balanceMax),
+      createdFrom: date(createdFrom),
+      createdTo: date(createdTo),
+      sortBy: sortFields.includes(sortBy as (typeof sortFields)[number])
+        ? (sortBy as (typeof sortFields)[number])
+        : undefined,
+      sortOrder: sortOrder === 'asc' ? 'asc' : sortOrder === 'desc' ? 'desc' : undefined,
+    });
   }
 
   @Patch(':id')

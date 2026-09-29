@@ -1,10 +1,28 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, Role, User } from '@prisma/client';
+import { Prisma, Role, User, UserStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
+/** 用户列表筛选项（全部可选，未提供即不过滤） */
+export interface UserListFilters {
+  q?: string;
+  page?: number;
+  pageSize?: number;
+  role?: Role;
+  status?: UserStatus;
+  groupId?: string;
+  agentId?: string;
+  /** 余额区间（USD） */
+  balanceMin?: number;
+  balanceMax?: number;
+  /** 注册时间区间 */
+  createdFrom?: Date;
+  createdTo?: Date;
+  sortBy?: 'createdAt' | 'balance' | 'username';
+  sortOrder?: 'asc' | 'desc';
+}
+
 @Injectable()
-export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+export class UsersService {  constructor(private readonly prisma: PrismaService) {}
 
   findById(id: string): Promise<User | null> {
     return this.prisma.user.findUnique({ where: { id } });
@@ -50,22 +68,49 @@ export class UsersService {
     return this.prisma.user.delete({ where: { id } });
   }
 
-  async list(query?: string, page = 1, pageSize = 20, role?: Role) {
+  /**
+   * 用户列表（管理员）：关键词 + 角色/状态/分组/代理/余额区间/注册时间区间 + 排序。
+   * 所有筛选项均为可选，未提供即不过滤。
+   */
+  async list(f: UserListFilters = {}) {
+    const page = f.page ?? 1;
+    const pageSize = f.pageSize ?? 20;
     const where: Prisma.UserWhereInput = {
-      ...(role ? { role } : {}),
-      ...(query
+      ...(f.role ? { role: f.role } : {}),
+      ...(f.status ? { status: f.status } : {}),
+      ...(f.groupId ? { groupId: f.groupId } : {}),
+      ...(f.agentId ? { agentId: f.agentId } : {}),
+      ...(f.balanceMin != null || f.balanceMax != null
+        ? {
+            balance: {
+              ...(f.balanceMin != null ? { gte: f.balanceMin } : {}),
+              ...(f.balanceMax != null ? { lte: f.balanceMax } : {}),
+            },
+          }
+        : {}),
+      ...(f.createdFrom || f.createdTo
+        ? {
+            createdAt: {
+              ...(f.createdFrom ? { gte: f.createdFrom } : {}),
+              ...(f.createdTo ? { lte: f.createdTo } : {}),
+            },
+          }
+        : {}),
+      ...(f.q
         ? {
             OR: [
-              { email: { contains: query, mode: 'insensitive' as const } },
-              { username: { contains: query, mode: 'insensitive' as const } },
+              { email: { contains: f.q, mode: 'insensitive' as const } },
+              { username: { contains: f.q, mode: 'insensitive' as const } },
             ],
           }
         : {}),
     };
+    const sortBy = f.sortBy ?? 'createdAt';
+    const sortOrder = f.sortOrder ?? 'desc';
     const [items, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { [sortBy]: sortOrder },
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: {

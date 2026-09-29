@@ -80,7 +80,7 @@ export default function LogsPage() {
   });
   const { data: userList } = useQuery({
     queryKey: ['admin', 'users', 'for-filter'],
-    queryFn: ({ signal }) => adminApi.users(undefined, 1, 100, signal),
+    queryFn: ({ signal }) => adminApi.users({ page: 1, pageSize: 100 }, signal),
     enabled: !!isAdmin,
   });
 
