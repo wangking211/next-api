@@ -98,8 +98,8 @@ describe('GroupsService 可见性', () => {
     expect(service.isModelVisible(g, 'gpt-5.5')).toBe(false);
   });
 
-  it('渠道可见性：无分组时不限制', () => {
-    expect(service.channelVisibilityWhere(null)).toEqual({});
+  it('渠道可见性：无分组时返回 null（调用方回退为不限制）', () => {
+    expect(service.channelVisibilityWhere(null)).toBeNull();
   });
 
   it('渠道可见性：公共渠道 + 同分组渠道', () => {

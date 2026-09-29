@@ -188,11 +188,12 @@ export class GroupsService {
   }
 
   /**
-   * 渠道可见性过滤条件：未配分组的渠道为公共渠道；配了分组的渠道仅对同分组可见。
-   * groupId 为 null（系统无分组）时不限制，保证兼容。
+   * 渠道分组可见性条件：生效分组存在时返回过滤条件（未配分组的渠道视为公共渠道）；
+   * 无分组时返回 null（不限制），调用方需回退到「BYOK + 全部平台渠道」。
+   * 注意：不要在 OR 数组里放空对象 `{}`——Prisma 归一化后会导致平台渠道被整体过滤。
    */
-  channelVisibilityWhere(groupId: string | null): Prisma.ChannelWhereInput {
-    if (!groupId) return {};
+  channelVisibilityWhere(groupId: string | null): Prisma.ChannelWhereInput | null {
+    if (!groupId) return null;
     return {
       OR: [{ groups: { none: {} } }, { groups: { some: { id: groupId } } }],
     };

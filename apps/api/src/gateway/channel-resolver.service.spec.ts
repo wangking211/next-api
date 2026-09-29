@@ -92,7 +92,11 @@ function makeService(
   };
   const config = { get: (_k: string, d?: string) => d } as unknown as ConfigService;
   const groups = {
-    channelVisibilityWhere: jest.fn(() => ({})),
+    channelVisibilityWhere: jest.fn((groupId: string | null) =>
+      groupId
+        ? { OR: [{ groups: { none: {} } }, { groups: { some: { id: groupId } } }] }
+        : null,
+    ),
   };
   return {
     service: new ChannelResolverService(
@@ -165,9 +169,21 @@ describe('ChannelResolverService', () => {
     // 可用性：启用，或自动禁用已过冷却期
     expect(arg.where.channel.AND[0].OR).toHaveLength(2);
     expect(arg.where.channel.AND[0].OR[0].status).toBe(ChannelStatus.ENABLED);
-    // 渠道分组隔离：自有 BYOK 渠道 + 分组过滤条件（未生效分组时为 {}，即不限制）
+    // 渠道分组隔离：自有 BYOK 渠道 + 分组过滤条件（未生效分组时为「全部平台渠道」）
     expect(arg.where.channel.AND[1].OR).toHaveLength(2);
     expect(arg.where.channel.AND[1].OR[0].ownerType).toBe(ChannelOwnerType.USER);
+    expect(arg.where.channel.AND[1].OR[1].ownerType).toBe(ChannelOwnerType.PLATFORM);
+  });
+
+  it('生效分组存在时，平台渠道只保留公共渠道与同分组渠道', async () => {
+    const { service, prisma } = makeService([]);
+    await service.resolve('u1', 'gpt-4o', { groupId: 'g1' });
+    const arg = prisma.channelModel.findMany.mock.calls[0][0];
+    const visibility = arg.where.channel.AND[1];
+    expect(visibility.OR[0].ownerType).toBe(ChannelOwnerType.USER);
+    expect(visibility.OR[1]).toEqual({
+      OR: [{ groups: { none: {} } }, { groups: { some: { id: 'g1' } } }],
+    });
   });
 
   it('honors the routing strategy option (CHEAPEST vs FASTEST)', async () => {

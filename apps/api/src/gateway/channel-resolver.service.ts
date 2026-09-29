@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Channel, ChannelOwnerType, ChannelStatus, RoutingStrategy } from '@prisma/client';
+import { Channel, ChannelOwnerType, ChannelStatus, Prisma, RoutingStrategy } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
 import { ResolvedChannel } from './types';
@@ -92,24 +92,23 @@ export class ChannelResolverService {
     model: string,
     opts: RouteOptions = {},
   ): Promise<ResolvedChannel[]> {
-    const groupWhere = this.groups.channelVisibilityWhere(opts.groupId ?? null);
+    const groupCond = this.groups.channelVisibilityWhere(opts.groupId ?? null);
+    // 自有 BYOK 渠道始终可见；平台渠道按生效分组隔离（无分组时退回「全部平台渠道」）
+    const visibility: Prisma.ChannelWhereInput = groupCond
+      ? { OR: [{ ownerType: ChannelOwnerType.USER, ownerUserId: userId }, groupCond] }
+      : {
+          OR: [
+            { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
+            { ownerType: ChannelOwnerType.PLATFORM },
+          ],
+        };
     const [rows, catalog] = await Promise.all([
       this.prisma.channelModel.findMany({
         where: {
           modelName: model,
           enabled: true,
           channel: {
-            AND: [
-              this.availabilityWhere(this.reenableCutoff()),
-              {
-                OR: [
-                  // 自有 BYOK 渠道不受分组限制
-                  { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
-                  // 平台渠道：未配分组（公共）或与本分组一致
-                  groupWhere,
-                ],
-              },
-            ],
+            AND: [this.availabilityWhere(this.reenableCutoff()), visibility],
           },
         },
         include: { channel: true },
@@ -340,20 +339,20 @@ export class ChannelResolverService {
 
   /** 汇总用户当前可实际调用的模型（自有+平台启用渠道所支持的模型） */
   async availableModels(userId: string, groupId?: string | null): Promise<string[]> {
-    const groupWhere = this.groups.channelVisibilityWhere(groupId ?? null);
+    const groupCond = this.groups.channelVisibilityWhere(groupId ?? null);
+    const visibility: Prisma.ChannelWhereInput = groupCond
+      ? { OR: [{ ownerType: ChannelOwnerType.USER, ownerUserId: userId }, groupCond] }
+      : {
+          OR: [
+            { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
+            { ownerType: ChannelOwnerType.PLATFORM },
+          ],
+        };
     const rows = await this.prisma.channelModel.findMany({
       where: {
         enabled: true,
         channel: {
-          AND: [
-            this.availabilityWhere(this.reenableCutoff()),
-            {
-              OR: [
-                { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
-                groupWhere,
-              ],
-            },
-          ],
+          AND: [this.availabilityWhere(this.reenableCutoff()), visibility],
         },
       },
       distinct: ['modelName'],

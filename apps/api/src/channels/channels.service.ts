@@ -220,20 +220,21 @@ export class ChannelsService {
   /** 当前用户可调用的模型，按渠道分组（自有 BYOK + 平台，按生效分组过滤），用于控制台展示。 */
   async availableModels(user: AuthUser) {
     const group = await this.groups.effectiveGroup(user.id);
-    const groupWhere = this.groups.channelVisibilityWhere(group.id);
+    const groupCond = this.groups.channelVisibilityWhere(group.id);
+    const visibility = groupCond
+      ? { OR: [{ ownerType: ChannelOwnerType.USER, ownerUserId: user.id }, groupCond] }
+      : {
+          OR: [
+            { ownerType: ChannelOwnerType.USER, ownerUserId: user.id },
+            { ownerType: ChannelOwnerType.PLATFORM },
+          ],
+        };
     const rows = await this.prisma.channelModel.findMany({
       where: {
         enabled: true,
         channel: {
           status: ChannelStatus.ENABLED,
-          AND: [
-            {
-              OR: [
-                { ownerType: ChannelOwnerType.USER, ownerUserId: user.id },
-                groupWhere,
-              ],
-            },
-          ],
+          AND: [visibility],
         },
       },
       select: {
