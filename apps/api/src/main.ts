@@ -2,6 +2,10 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { json, urlencoded } from 'express';
+import type { NextFunction, Request, Response } from 'express';
+import { openaiError } from './gateway/types';
+import { toAnthropicErrorBody } from './gateway/anthropic-format';
+import { openaiTypeFor } from './gateway/gateway-error.filter';
 import helmet from 'helmet';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
@@ -44,6 +48,26 @@ async function bootstrap() {
   app.use(helmet());
   app.use(json({ limit: '25mb' }));
   app.use(urlencoded({ extended: true, limit: '25mb' }));
+  // 请求体解析失败（非法 JSON/超限）发生在进入路由之前，不经过 Nest 的异常过滤器，
+  // 会落回 express 默认错误体（{statusCode,message,error}）——/v1 客户端取不到 error.message。
+  // 这里补一层：/v1 按客户端协议回错误体，其余路径继续交给 Nest（保持原状）。
+  app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
+    if (!err) return next();
+    const path = (req.originalUrl ?? req.url ?? '').split('?')[0];
+    if (!path.startsWith('/v1')) return next(err);
+    if (res.headersSent) return next(err);
+    const e = err as { status?: number; statusCode?: number; message?: string };
+    const status = e.status ?? e.statusCode ?? 400;
+    const message = e.message || 'Invalid request body';
+    const type = openaiTypeFor(status);
+    res
+      .status(status)
+      .json(
+        path.startsWith('/v1/messages')
+          ? toAnthropicErrorBody(message, type)
+          : openaiError(message, type),
+      );
+  });
 
   // 控制台 API 走 /api 前缀；OpenAI 兼容网关走 /v1；Anthropic 兼容网关走 /v1/messages
   app.setGlobalPrefix('api', {
