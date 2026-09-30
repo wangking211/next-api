@@ -64,6 +64,12 @@ check "/v1/models 401 OpenAI 形状" 401 'authentication_error'
 request "$API/v1/messages" -X POST -H 'content-type: application/json' -d '{}'
 check "/v1/messages 401 Anthropic 形状" 401 '"type":"error"'
 
+# 3b) 视频端点已注册（未带 key → 401；若被套上 /api 前缀会变成 404 Cannot POST）
+request "$API/v1/videos" -X POST -H 'content-type: application/json' -d '{}'
+check "/v1/videos 路由已注册（401 而非 404）" 401
+request "$API/v1/videos/task_smoke_probe"
+check "/v1/videos/:id 路由已注册（401 而非 404）" 401
+
 # 4) 请求关联：合法 x-request-id 原样回显
 REQ_ID_HDR=$(curl -sS -m 15 -D - -o /dev/null -H 'x-request-id: deploy-smoke' \
   "$API/v1/models" 2>&1 || true)

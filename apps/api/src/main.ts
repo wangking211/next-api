@@ -91,6 +91,7 @@ async function bootstrap() {
   });
 
   // 控制台 API 走 /api 前缀；OpenAI 兼容网关走 /v1；Anthropic 兼容网关走 /v1/messages
+  // ⚠️ 网关新增端点时必须同步加到这里，否则会被套上 /api 前缀（表现为 Cannot POST/GET）
   app.setGlobalPrefix('api', {
     exclude: [
       { path: 'v1/chat/completions', method: RequestMethod.POST },
@@ -98,6 +99,9 @@ async function bootstrap() {
       { path: 'v1/messages', method: RequestMethod.POST },
       { path: 'v1/embeddings', method: RequestMethod.POST },
       { path: 'v1/images/generations', method: RequestMethod.POST },
+      { path: 'v1/videos', method: RequestMethod.POST },
+      { path: 'v1/videos/:id', method: RequestMethod.GET },
+      { path: 'v1/videos/:id/content', method: RequestMethod.GET },
     ],
   });
 
