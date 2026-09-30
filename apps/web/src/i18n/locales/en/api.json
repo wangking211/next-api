@@ -1,3 +1,9 @@
 {
-  "api.requestFailed": "Request failed"
+  "api.requestFailed": "Request failed",
+  "api.unauthorized": "Your session has expired. Please sign in again.",
+  "api.forbidden": "You don't have permission to perform this action.",
+  "api.notFound": "The requested resource was not found.",
+  "api.tooManyRequests": "Too many requests. Please try again shortly.",
+  "api.serverError": "The server had an error. Please try again later.",
+  "api.networkError": "Network error. Check your connection and try again."
 }

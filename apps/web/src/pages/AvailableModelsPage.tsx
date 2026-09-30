@@ -2,13 +2,14 @@ import { App, Card, Empty, Space, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { channelsApi } from '../api/endpoints';
+import QueryError from '../components/QueryError';
 
 const { Paragraph, Text } = Typography;
 
 export default function AvailableModelsPage() {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['available-models'],
     queryFn: ({ signal }) => channelsApi.availableModels(signal),
   });
@@ -24,6 +25,8 @@ export default function AvailableModelsPage() {
 
   return (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
+      <QueryError show={isError} onRetry={refetch} />
+
       <Card loading={isLoading} title={t('models.available.title')}>
         <Paragraph type="secondary">
           {t('models.available.help')}

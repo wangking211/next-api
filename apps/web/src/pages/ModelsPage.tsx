@@ -18,8 +18,8 @@ import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { modelsApi } from '../api/endpoints';
-import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import QueryError from '../components/QueryError';
 import type { ModelInfo } from '../api/types';
 
 export default function ModelsPage() {
@@ -32,7 +32,7 @@ export default function ModelsPage() {
   const [editing, setEditing] = useState<ModelInfo | null>(null);
   const [form] = Form.useForm();
 
-  const { data: models = [], isLoading } = useQuery({
+  const { data: models = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['models'],
     queryFn: ({ signal }) => modelsApi.list(signal),
   });
@@ -47,7 +47,6 @@ export default function ModelsPage() {
       form.resetFields();
       message.success(editing ? t('models.msg.updated') : t('models.msg.created'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const removeMut = useMutation({
@@ -56,7 +55,6 @@ export default function ModelsPage() {
       qc.invalidateQueries({ queryKey: ['models'] });
       message.success(t('models.msg.deleted'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const classifyMut = useMutation({
@@ -65,7 +63,6 @@ export default function ModelsPage() {
       qc.invalidateQueries({ queryKey: ['models'] });
       message.success(t('models.classify.success', { updated: r.updated, total: r.total }));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const openCreate = () => {
@@ -122,6 +119,8 @@ export default function ModelsPage() {
         )
       }
     >
+      <QueryError show={isError} onRetry={refetch} />
+
       <Table<ModelInfo>
         rowKey="id"
         loading={isLoading}

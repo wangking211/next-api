@@ -21,7 +21,7 @@ import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { groupsApi, modelsApi } from '../api/endpoints';
-import { errorMessage } from '../api/client';
+import QueryError from '../components/QueryError';
 import type { ModelGroup, ModelInfo, ModelOrigin } from '../api/types';
 
 type OriginFilter = 'ALL' | ModelOrigin;
@@ -36,7 +36,7 @@ export default function GroupsPage() {
   const [form] = Form.useForm();
   const selectedModels: string[] = Form.useWatch('models', form) ?? [];
 
-  const { data: groups = [], isLoading } = useQuery({
+  const { data: groups = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['groups'],
     queryFn: ({ signal }) => groupsApi.list(signal),
   });
@@ -79,7 +79,6 @@ export default function GroupsPage() {
       form.resetFields();
       message.success(editing ? t('groups.msg.updated') : t('groups.msg.created'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const defaultMut = useMutation({
@@ -88,7 +87,6 @@ export default function GroupsPage() {
       qc.invalidateQueries({ queryKey: ['groups'] });
       message.success(t('groups.setDefaultSuccess'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const removeMut = useMutation({
@@ -97,7 +95,6 @@ export default function GroupsPage() {
       qc.invalidateQueries({ queryKey: ['groups'] });
       message.success(t('groups.msg.deleted'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const openCreate = () => {
@@ -155,6 +152,8 @@ export default function GroupsPage() {
         </Button>
       }
     >
+      <QueryError show={isError} onRetry={refetch} />
+
       <Table<ModelGroup>
         rowKey="id"
         loading={isLoading}

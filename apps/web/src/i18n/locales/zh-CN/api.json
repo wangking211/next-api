@@ -1,3 +1,9 @@
 {
-  "api.requestFailed": "请求失败"
+  "api.requestFailed": "请求失败",
+  "api.unauthorized": "登录已过期，请重新登录",
+  "api.forbidden": "你没有权限执行该操作",
+  "api.notFound": "请求的资源不存在",
+  "api.tooManyRequests": "请求过于频繁，请稍后再试",
+  "api.serverError": "服务器出错了，请稍后重试",
+  "api.networkError": "网络异常，请检查网络后重试"
 }

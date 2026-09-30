@@ -16,6 +16,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { usageApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
+import QueryError from '../components/QueryError';
 import { formatCredits } from '../utils/format';
 import { downloadCsv, toCsv } from '../utils/csv';
 import type { UsageAnalytics } from '../api/types';
@@ -40,7 +41,7 @@ export default function UsageStatsPage() {
 
   const scope = isAdmin && all ? 'all' : undefined;
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['usage', 'stats', scope, range],
     queryFn: ({ signal }) =>
       usageApi.analytics(30, scope, signal, undefined, range?.[0], range?.[1]),
@@ -100,6 +101,8 @@ export default function UsageStatsPage() {
           </Space>
         }
       >
+        <QueryError show={isError} onRetry={refetch} />
+
         <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
           {tr('usage.help')}
         </Typography.Paragraph>

@@ -16,13 +16,14 @@ import {
   Typography,
 } from 'antd';
 import { PlusOutlined, CopyOutlined } from '@ant-design/icons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { redeemCodesApi } from '../api/endpoints';
-import { errorMessage } from '../api/client';
 import { formatCredits, formatDateTime, fromCredits } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
+import { usePagination } from '../hooks/usePagination';
+import QueryError from '../components/QueryError';
 import type { RedeemCode, RedeemCodeStatus } from '../api/types';
 
 const getStatusMeta = (
@@ -75,20 +76,20 @@ export default function AdminRedeemPage() {
   const qc = useQueryClient();
   const statusMeta = getStatusMeta(t);
   const [open, setOpen] = useState(false);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
   const [status, setStatus] = useState<RedeemCodeStatus | 'ALL'>('ALL');
   const [generated, setGenerated] = useState<string[] | null>(null);
   const [form] = Form.useForm();
   const expiryPreset = Form.useWatch('expiryPreset', form) ?? 'forever';
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['redeem-codes', page, pageSize, status],
+  const pg = usePagination();
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['redeem-codes', pg.page, pg.pageSize, status],
     queryFn: ({ signal }) =>
-      redeemCodesApi.list(page, pageSize, status === 'ALL' ? undefined : status, signal),
+      redeemCodesApi.list(pg.page, pg.pageSize, status === 'ALL' ? undefined : status, signal),
+    placeholderData: keepPreviousData,
   });
 
-  usePageClamp(page, setPage, data);
+  usePageClamp(pg.page, pg.setPage, data);
 
   const generateMut = useMutation({
     mutationFn: (values: {
@@ -113,7 +114,6 @@ export default function AdminRedeemPage() {
       form.resetFields();
       setGenerated(res.codes);
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const disableMut = useMutation({
@@ -122,7 +122,6 @@ export default function AdminRedeemPage() {
       qc.invalidateQueries({ queryKey: ['redeem-codes'] });
       message.success(t('admin.redeem.voidSuccess'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const copyAll = async () => {
@@ -143,12 +142,14 @@ export default function AdminRedeemPage() {
         </Button>
       }
     >
+      <QueryError show={isError} onRetry={refetch} />
+
       <div style={{ marginBottom: 12 }}>
         <Segmented
           value={status}
           onChange={(v) => {
             setStatus(v as RedeemCodeStatus | 'ALL');
-            setPage(1);
+            pg.reset();
           }}
           options={[
             { label: t('common.all'), value: 'ALL' },
@@ -164,16 +165,7 @@ export default function AdminRedeemPage() {
         loading={isLoading}
         dataSource={data?.items ?? []}
         scroll={{ x: 900 }}
-        pagination={{
-          current: page,
-          pageSize,
-          total: data?.total ?? 0,
-          showSizeChanger: true,
-          onChange: (p, ps) => {
-            setPage(p);
-            setPageSize(ps);
-          },
-        }}
+        pagination={pg.pagination(data?.total)}
         columns={[
           { title: t('admin.redeem.column.code'), dataIndex: 'code', render: (v: string) => <code>{v}</code> },
           {

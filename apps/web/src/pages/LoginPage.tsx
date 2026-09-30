@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, App, Button, Form, Input, Spin, Tabs } from 'antd';
 import {
   CheckCircleFilled,
@@ -13,7 +13,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { useAuth } from '../auth/AuthContext';
-import { errorMessage } from '../api/client';
+import { consumeSessionExpired, errorMessage } from '../api/client';
 import Logo from '../components/Logo';
 import { LangSwitch } from '../components/LangSwitch';
 import useDocumentTitle from '../hooks/useDocumentTitle';
@@ -57,6 +57,11 @@ export default function LoginPage() {
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [loginForm] = Form.useForm();
   const [registerForm] = Form.useForm();
+
+  // 401 被动登出跳过来时给一次明确提示，避免用户以为「莫名其妙要重新登录」
+  useEffect(() => {
+    if (consumeSessionExpired()) setLoginNotice(t('api.unauthorized'));
+  }, [t]);
 
   useDocumentTitle(activeKey === 'login' ? t('auth.docTitle.login') : t('auth.docTitle.register'));
 

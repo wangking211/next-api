@@ -24,7 +24,7 @@ export default function PricingSection({
   const [q, setQ] = useState('');
   const [provider, setProvider] = useState(ALL);
 
-  const items = data?.items ?? [];
+  const items = useMemo(() => data?.items ?? [], [data]);
 
   const filtered = useMemo(() => {
     const keyword = q.trim().toLowerCase();

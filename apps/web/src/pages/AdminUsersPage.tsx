@@ -17,13 +17,15 @@ import {
   Tag,
 } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { adminApi, groupsApi, usageApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { downloadBlob } from '../utils/csv';
 import { formatCredits, fromCredits } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
+import { usePagination } from '../hooks/usePagination';
+import QueryError from '../components/QueryError';
 import AdminUserDetailDrawer from './AdminUserDetailDrawer';
 import type { AdminUser } from '../api/types';
 
@@ -34,8 +36,7 @@ export default function AdminUsersPage() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [q, setQ] = useState('');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const pg = usePagination();
   const [role, setRole] = useState<string | undefined>();
   const [status, setStatus] = useState<string | undefined>();
   const [groupId, setGroupId] = useState<string | undefined>();
@@ -85,7 +86,7 @@ export default function AdminUsersPage() {
     setHasChannels(undefined);
     setSortBy('createdAt');
     setSortOrder('desc');
-    setPage(1);
+    pg.reset();
   };
 
   const exportCsv = async () => {
@@ -97,12 +98,14 @@ export default function AdminUsersPage() {
     }
   };
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['admin', 'users', filters, page, pageSize],
-    queryFn: ({ signal }) => adminApi.users({ ...filters, page, pageSize }, signal),
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['admin', 'users', filters, pg.page, pg.pageSize],
+    queryFn: ({ signal }) =>
+      adminApi.users({ ...filters, page: pg.page, pageSize: pg.pageSize }, signal),
+    placeholderData: keepPreviousData,
   });
 
-  usePageClamp(page, setPage, data);
+  usePageClamp(pg.page, pg.setPage, data);
 
   const { data: agents } = useQuery({
     queryKey: ['admin', 'agents'],
@@ -137,7 +140,6 @@ export default function AdminUsersPage() {
       editForm.resetFields();
       message.success(t('admin.users.saveSuccess'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const openEdit = (u: AdminUser) => {
@@ -180,7 +182,6 @@ export default function AdminUsersPage() {
       form.resetFields();
       message.success(mode === 'recharge' ? t('admin.users.rechargeSuccess') : t('admin.users.adjustSuccess'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const openModal = (user: AdminUser, m: Mode) => {
@@ -200,12 +201,12 @@ export default function AdminUsersPage() {
             style={{ width: 220 }}
             onPressEnter={(e) => {
               setQ((e.target as HTMLInputElement).value);
-              setPage(1);
+              pg.reset();
             }}
             onChange={(e) => {
               if (!e.target.value) {
                 setQ('');
-                setPage(1);
+                pg.reset();
               }
             }}
           />
@@ -218,7 +219,7 @@ export default function AdminUsersPage() {
             value={role}
             onChange={(v) => {
               setRole(v);
-              setPage(1);
+              pg.reset();
             }}
             options={[
               { value: 'ADMIN', label: t('admin.users.roleAdmin') },
@@ -235,7 +236,7 @@ export default function AdminUsersPage() {
             value={status}
             onChange={(v) => {
               setStatus(v);
-              setPage(1);
+              pg.reset();
             }}
             options={[
               { value: 'ACTIVE', label: t('admin.users.statusActive') },
@@ -251,7 +252,7 @@ export default function AdminUsersPage() {
             value={groupId}
             onChange={(v) => {
               setGroupId(v);
-              setPage(1);
+              pg.reset();
             }}
             options={groups.map((g) => ({ value: g.id, label: g.displayName || g.name }))}
           />
@@ -266,7 +267,7 @@ export default function AdminUsersPage() {
             value={agentId}
             onChange={(v) => {
               setAgentId(v);
-              setPage(1);
+              pg.reset();
             }}
             options={(agents?.items ?? []).map((u) => ({ value: u.id, label: u.username }))}
           />
@@ -280,7 +281,7 @@ export default function AdminUsersPage() {
               value={balanceMin}
               onChange={(v) => {
                 setBalanceMin((v as number) ?? undefined);
-                setPage(1);
+                pg.reset();
               }}
             />
             <InputNumber
@@ -290,7 +291,7 @@ export default function AdminUsersPage() {
               value={balanceMax}
               onChange={(v) => {
                 setBalanceMax((v as number) ?? undefined);
-                setPage(1);
+                pg.reset();
               }}
             />
           </Space>
@@ -304,7 +305,7 @@ export default function AdminUsersPage() {
             ]}
             onChange={(v) => {
               setRange(v);
-              setPage(1);
+              pg.reset();
             }}
           />
         </Col>
@@ -315,7 +316,7 @@ export default function AdminUsersPage() {
               value={sortBy}
               onChange={(v) => {
                 setSortBy(v as 'createdAt' | 'balance' | 'username' | 'lastActiveAt');
-                setPage(1);
+                pg.reset();
               }}
               options={[
                 { value: 'createdAt', label: t('admin.users.sort.createdAt') },
@@ -329,7 +330,7 @@ export default function AdminUsersPage() {
               value={sortOrder}
               onChange={(v) => {
                 setSortOrder(v as 'asc' | 'desc');
-                setPage(1);
+                pg.reset();
               }}
               options={[
                 { value: 'desc', label: t('admin.users.sort.desc') },
@@ -346,7 +347,7 @@ export default function AdminUsersPage() {
             value={hasKeys === undefined ? undefined : String(hasKeys)}
             onChange={(v) => {
               setHasKeys(v === undefined ? undefined : v === 'true');
-              setPage(1);
+              pg.reset();
             }}
             options={[
               { value: 'true', label: t('admin.users.filter.has') },
@@ -362,7 +363,7 @@ export default function AdminUsersPage() {
             value={hasChannels === undefined ? undefined : String(hasChannels)}
             onChange={(v) => {
               setHasChannels(v === undefined ? undefined : v === 'true');
-              setPage(1);
+              pg.reset();
             }}
             options={[
               { value: 'true', label: t('admin.users.filter.has') },
@@ -377,21 +378,14 @@ export default function AdminUsersPage() {
           </Space>
         </Col>
       </Row>
+      <QueryError show={isError} onRetry={refetch} />
+
       <Table<AdminUser>
         rowKey="id"
         loading={isLoading}
         dataSource={data?.items ?? []}
         scroll={{ x: 1000 }}
-        pagination={{
-          current: page,
-          pageSize,
-          total: data?.total ?? 0,
-          showSizeChanger: true,
-          onChange: (p, ps) => {
-            setPage(p);
-            setPageSize(ps);
-          },
-        }}
+        pagination={pg.pagination(data?.total)}
         columns={[
           { title: t('admin.users.column.username'), dataIndex: 'username' },
           { title: t('admin.users.column.email'), dataIndex: 'email' },

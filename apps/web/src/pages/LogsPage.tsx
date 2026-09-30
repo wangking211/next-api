@@ -18,7 +18,7 @@ import {
   Typography,
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { adminApi, usageApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
@@ -26,6 +26,8 @@ import { useAuth } from '../auth/AuthContext';
 import { formatDateTime, formatCredits } from '../utils/format';
 import { downloadBlob } from '../utils/csv';
 import { usePageClamp } from '../hooks/usePageClamp';
+import { usePagination } from '../hooks/usePagination';
+import QueryError from '../components/QueryError';
 import type { LogFilters, RequestLogRow } from '../api/types';
 
 function TextBlock({ title, text }: { title: string; text: string | null }) {
@@ -60,19 +62,19 @@ export default function LogsPage() {
   const { message } = App.useApp();
   const isAdmin = user?.role === 'ADMIN';
   const [all, setAll] = useState(false);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
   const [filters, setFilters] = useState<LogFilters>({});
   const [detailId, setDetailId] = useState<string | null>(null);
   const [form] = Form.useForm();
   const scope = isAdmin && all ? 'all' : undefined;
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['usage', 'logs', page, pageSize, scope, filters],
-    queryFn: ({ signal }) => usageApi.logs(page, pageSize, scope, filters, signal),
+  const pg = usePagination();
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['usage', 'logs', pg.page, pg.pageSize, scope, filters],
+    queryFn: ({ signal }) => usageApi.logs(pg.page, pg.pageSize, scope, filters, signal),
+    placeholderData: keepPreviousData,
   });
 
-  usePageClamp(page, setPage, data);
+  usePageClamp(pg.page, pg.setPage, data);
   const { data: detail, isLoading: detailLoading } = useQuery({
     queryKey: ['usage', 'log', detailId, scope],
     queryFn: ({ signal }) => usageApi.logDetail(detailId!, scope, signal),
@@ -94,13 +96,13 @@ export default function LogsPage() {
       from: v.range?.[0]?.toISOString(),
       to: v.range?.[1]?.toISOString(),
     });
-    setPage(1);
+    pg.reset();
   };
 
   const reset = () => {
     form.resetFields();
     setFilters({});
-    setPage(1);
+    pg.reset();
   };
 
   const exportCsv = async () => {
@@ -183,21 +185,14 @@ export default function LogsPage() {
         </Form.Item>
       </Form>
 
+      <QueryError show={isError} onRetry={refetch} />
+
       <Table<RequestLogRow>
         rowKey="id"
         loading={isLoading}
         dataSource={data?.items ?? []}
         scroll={{ x: 1200 }}
-        pagination={{
-          current: page,
-          pageSize,
-          total: data?.total ?? 0,
-          showSizeChanger: true,
-          onChange: (p, ps) => {
-            setPage(p);
-            setPageSize(ps);
-          },
-        }}
+        pagination={pg.pagination(data?.total)}
         columns={[
           {
             title: t('common.time'),

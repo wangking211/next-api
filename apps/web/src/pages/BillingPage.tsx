@@ -18,13 +18,14 @@ import {
   Tag,
   Typography,
 } from 'antd';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { billingApi, paymentApi } from '../api/endpoints';
-import { errorMessage } from '../api/client';
 import { getCreditsPerCny, getPayRate, isPayEnabled } from '../api/config';
 import { formatDateTime, toCredits } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
+import { usePagination } from '../hooks/usePagination';
+import QueryError from '../components/QueryError';
 import type {
   BalanceTransaction,
   BalanceTxType,
@@ -39,8 +40,6 @@ export default function BillingPage() {
   const { message } = App.useApp();
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
   const [type, setType] = useState<BalanceTxType | 'ALL'>('ALL');
   const [code, setCode] = useState('');
   const [amountYuan, setAmountYuan] = useState(10);
@@ -89,10 +88,17 @@ export default function BillingPage() {
     queryKey: ['billing', 'me'],
     queryFn: ({ signal }) => billingApi.me(signal),
   });
-  const { data, isLoading } = useQuery({
-    queryKey: ['billing', 'transactions', page, pageSize, type],
+  const pg = usePagination();
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['billing', 'transactions', pg.page, pg.pageSize, type],
     queryFn: ({ signal }) =>
-      billingApi.transactions(page, pageSize, type === 'ALL' ? undefined : type, signal),
+      billingApi.transactions(
+        pg.page,
+        pg.pageSize,
+        type === 'ALL' ? undefined : type,
+        signal,
+      ),
+    placeholderData: keepPreviousData,
   });
   const { data: orders } = useQuery({
     queryKey: ['billing', 'pay-orders'],
@@ -100,7 +106,7 @@ export default function BillingPage() {
     enabled: payEnabled,
   });
 
-  usePageClamp(page, setPage, data);
+  usePageClamp(pg.page, pg.setPage, data);
 
   const redeemMut = useMutation({
     mutationFn: billingApi.redeem,
@@ -111,7 +117,6 @@ export default function BillingPage() {
       setCode('');
       qc.invalidateQueries({ queryKey: ['billing'] });
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const createPayMut = useMutation({
@@ -126,7 +131,6 @@ export default function BillingPage() {
       }
       setCreated(res);
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   // 待支付订单轮询（每 3 秒）
@@ -300,7 +304,7 @@ export default function BillingPage() {
               value={type}
               onChange={(v) => {
                 setType(v as BalanceTxType | 'ALL');
-                setPage(1);
+                pg.reset();
               }}
               options={[
                 { label: t('common.all'), value: 'ALL' },
@@ -311,21 +315,14 @@ export default function BillingPage() {
             />
           }
         >
+          <QueryError show={isError} onRetry={refetch} />
+
           <Table<BalanceTransaction>
             rowKey="id"
             loading={isLoading}
             dataSource={data?.items ?? []}
             scroll={{ x: 800 }}
-            pagination={{
-              current: page,
-              pageSize,
-              total: data?.total ?? 0,
-              showSizeChanger: true,
-              onChange: (p, ps) => {
-                setPage(p);
-                setPageSize(ps);
-              },
-            }}
+            pagination={pg.pagination(data?.total)}
             columns={[
               {
                 title: t('common.time'),

@@ -26,6 +26,7 @@ import { useTranslation } from 'react-i18next';
 import './i18n';
 import App from './App';
 import { queryClient } from './api/queryClient';
+import MessageBridge from './components/MessageBridge';
 import { loadConfig } from './api/config';
 import './index.css';
 
@@ -88,6 +89,7 @@ loadConfig().finally(() => {
     <React.StrictMode>
       <LocaleShell>
         <AntApp>
+          <MessageBridge />
           <QueryClientProvider client={queryClient}>
             <BrowserRouter>
               <App />

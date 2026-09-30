@@ -3,8 +3,8 @@ import { App, Button, Card, Popconfirm, Segmented, Space, Table, Tag } from 'ant
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { withdrawalsApi } from '../api/endpoints';
-import { errorMessage } from '../api/client';
 import { formatCredits, formatDateTime } from '../utils/format';
+import QueryError from '../components/QueryError';
 import { downloadCsv, toCsv } from '../utils/csv';
 import type { Withdrawal, WithdrawalStatus } from '../api/types';
 
@@ -14,7 +14,7 @@ export default function AdminWithdrawalsPage() {
   const qc = useQueryClient();
   const [status, setStatus] = useState<WithdrawalStatus | 'ALL'>('PENDING');
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['admin', 'withdrawals', status],
     queryFn: ({ signal }) =>
       withdrawalsApi.listAll(status === 'ALL' ? undefined : status, signal),
@@ -27,7 +27,6 @@ export default function AdminWithdrawalsPage() {
       qc.invalidateQueries({ queryKey: ['admin', 'withdrawals'] });
       message.success(v.action === 'APPROVE' ? t('common.approved') : t('admin.withdraw.rejectSuccess'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   return (
@@ -67,6 +66,8 @@ export default function AdminWithdrawalsPage() {
         </Space>
       }
     >
+      <QueryError show={isError} onRetry={refetch} />
+
       <Table<Withdrawal>
         rowKey="id"
         loading={isLoading}

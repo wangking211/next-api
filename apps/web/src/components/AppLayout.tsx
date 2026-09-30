@@ -30,27 +30,9 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
 
   const isAdmin = user?.role === 'ADMIN';
-
-  /** 控制台各页的 document.title（SPA 无路由级标题管理，在外壳统一维护） */
-  const PAGE_TITLES: Record<string, string> = {
-    '/dashboard': t('layout.title.dashboard'),
-    '/keys': 'API Key',
-    '/channels': t('layout.title.channels'),
-    '/available-models': t('layout.title.availableModels'),
-    '/models': t('layout.title.models'),
-    '/logs': t('layout.title.logs'),
-    '/usage-stats': t('layout.title.usageStats'),
-    '/billing': t('layout.title.billing'),
-    '/agent': t('layout.title.agent'),
-    '/users': t('layout.title.users'),
-    '/groups': t('layout.title.groups'),
-    '/redeem-codes': t('layout.title.redeemCodes'),
-    '/audit-logs': t('layout.title.auditLogs'),
-    '/withdrawals': t('layout.title.withdrawals'),
-  };
 
   const selectedKey = useMemo(() => {
     const match = ['/keys', '/channels', '/available-models', '/models', '/logs', '/usage-stats', '/billing', '/agent', '/users', '/groups', '/redeem-codes', '/audit-logs', '/withdrawals'].find((p) =>
@@ -60,12 +42,29 @@ export default function AppLayout() {
   }, [location.pathname]);
 
   useEffect(() => {
+    /** 控制台各页的 document.title（SPA 无路由级标题管理，在外壳统一维护） */
+    const pageTitles: Record<string, string> = {
+      '/dashboard': t('layout.title.dashboard'),
+      '/keys': 'API Key',
+      '/channels': t('layout.title.channels'),
+      '/available-models': t('layout.title.availableModels'),
+      '/models': t('layout.title.models'),
+      '/logs': t('layout.title.logs'),
+      '/usage-stats': t('layout.title.usageStats'),
+      '/billing': t('layout.title.billing'),
+      '/agent': t('layout.title.agent'),
+      '/users': t('layout.title.users'),
+      '/groups': t('layout.title.groups'),
+      '/redeem-codes': t('layout.title.redeemCodes'),
+      '/audit-logs': t('layout.title.auditLogs'),
+      '/withdrawals': t('layout.title.withdrawals'),
+    };
     const title =
       (selectedKey === '/channels' && !isAdmin
         ? t('layout.title.myChannels')
-        : PAGE_TITLES[selectedKey]) ?? t('layout.title.fallback');
+        : pageTitles[selectedKey]) ?? t('layout.title.fallback');
     document.title = `${title} · AI Gateway`;
-  }, [selectedKey, isAdmin, i18n.language]);
+  }, [selectedKey, isAdmin, t]);
 
   const items = [
     { key: '/dashboard', icon: <DashboardOutlined />, label: t('layout.menu.overview') },

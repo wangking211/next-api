@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Descriptions, Drawer, Table, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { adminApi, usageApi } from '../api/endpoints';
 import { formatCredits, formatDateTime, toCredits } from '../utils/format';
+import { usePageClamp } from '../hooks/usePageClamp';
+import { usePagination } from '../hooks/usePagination';
 import type {
   AdminUser,
   ApiKeyInfo,
@@ -26,14 +28,16 @@ const PAGE_SIZE = 6;
  */
 export default function AdminUserDetailDrawer({ user, onClose }: Props) {
   const { t } = useTranslation();
-  const [logsPage, setLogsPage] = useState(1);
-  const [txPage, setTxPage] = useState(1);
+  const logsPg = usePagination(PAGE_SIZE);
+  const txPg = usePagination(PAGE_SIZE);
+  const resetPages = logsPg.reset;
+  const resetTxPage = txPg.reset;
 
   // 切换用户时回到第一页
   useEffect(() => {
-    setLogsPage(1);
-    setTxPage(1);
-  }, [user?.id]);
+    resetPages();
+    resetTxPage();
+  }, [user?.id, resetPages, resetTxPage]);
 
   const { data: keys, isLoading: keysLoading } = useQuery({
     queryKey: ['admin', 'user-keys', user?.id],
@@ -42,17 +46,21 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
   });
 
   const { data: logs, isLoading: logsLoading } = useQuery({
-    queryKey: ['admin', 'user-detail-logs', user?.id, logsPage],
+    queryKey: ['admin', 'user-detail-logs', user?.id, logsPg.page],
     queryFn: ({ signal }) =>
-      usageApi.logs(logsPage, PAGE_SIZE, undefined, { userId: user!.id }, signal),
+      usageApi.logs(logsPg.page, PAGE_SIZE, undefined, { userId: user!.id }, signal),
     enabled: !!user,
   });
 
   const { data: txs, isLoading: txsLoading } = useQuery({
-    queryKey: ['admin', 'user-tx', user?.id, txPage],
-    queryFn: ({ signal }) => adminApi.userTransactions(user!.id, txPage, PAGE_SIZE, signal),
+    queryKey: ['admin', 'user-tx', user?.id, txPg.page],
+    queryFn: ({ signal }) => adminApi.userTransactions(user!.id, txPg.page, PAGE_SIZE, signal),
     enabled: !!user,
   });
+
+  // 删除末页最后一条 / 数据变少时自动回退，抽屉里此前缺少这层保护会停在空白表格
+  usePageClamp(logsPg.page, logsPg.setPage, logs);
+  usePageClamp(txPg.page, txPg.setPage, txs);
 
   const TX_META: Record<BalanceTxType, { color: string; label: string }> = {
     RECHARGE: { color: 'green', label: t('billing.txnType.recharge') },
@@ -199,14 +207,10 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
         loading={logsLoading}
         dataSource={logs?.items ?? []}
         locale={{ emptyText: t('admin.users.detail.noCalls') }}
-        pagination={{
-          current: logsPage,
-          pageSize: PAGE_SIZE,
-          total: logs?.total ?? 0,
+        pagination={logsPg.pagination(logs?.total, {
           size: 'small',
           showSizeChanger: false,
-          onChange: setLogsPage,
-        }}
+        })}
         columns={[
           {
             title: t('common.time'),
@@ -249,14 +253,10 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
         loading={txsLoading}
         dataSource={txs?.items ?? []}
         locale={{ emptyText: t('admin.users.detail.noTransactions') }}
-        pagination={{
-          current: txPage,
-          pageSize: PAGE_SIZE,
-          total: txs?.total ?? 0,
+        pagination={txPg.pagination(txs?.total, {
           size: 'small',
           showSizeChanger: false,
-          onChange: setTxPage,
-        }}
+        })}
         columns={[
           {
             title: t('common.time'),

@@ -19,8 +19,8 @@ import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { agentApi, billingApi, withdrawalsApi } from '../api/endpoints';
-import { errorMessage } from '../api/client';
 import { formatCredits, formatDateTime, fromCredits } from '../utils/format';
+import QueryError from '../components/QueryError';
 import type { AgentMember, BalanceTransaction, Withdrawal } from '../api/types';
 
 export default function AgentPage() {
@@ -34,7 +34,7 @@ export default function AgentPage() {
   const [rechargeForm] = Form.useForm();
   const [withdrawForm] = Form.useForm();
 
-  const { data: overview, isLoading } = useQuery({
+  const { data: overview, isLoading, isError, refetch } = useQuery({
     queryKey: ['agent', 'overview'],
     queryFn: ({ signal }) => agentApi.overview(signal),
   });
@@ -65,7 +65,6 @@ export default function AgentPage() {
       createForm.resetFields();
       message.success(t('agent.member.createSuccess'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const rechargeMut = useMutation({
@@ -77,7 +76,6 @@ export default function AgentPage() {
       rechargeForm.resetFields();
       message.success(t('agent.recharge.success'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const withdrawMut = useMutation({
@@ -88,11 +86,12 @@ export default function AgentPage() {
       withdrawForm.resetFields();
       message.success(t('agent.withdraw.success'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   return (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
+      <QueryError show={isError} onRetry={refetch} />
+
       <Card
         title={t('agent.overview.title')}
         loading={isLoading}

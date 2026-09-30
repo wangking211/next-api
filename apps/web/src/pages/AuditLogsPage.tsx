@@ -1,25 +1,28 @@
 import { useState } from 'react';
 import { Card, Input, Table, Tag, Tooltip, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { auditApi } from '../api/endpoints';
 import { formatDateTime } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
+import { usePagination } from '../hooks/usePagination';
+import QueryError from '../components/QueryError';
 import type { AuditLog } from '../api/types';
 
 export default function AuditLogsPage() {
   const { t } = useTranslation();
   const [action, setAction] = useState('');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['audit-logs', action, page, pageSize],
-    queryFn: ({ signal }) => auditApi.list(page, pageSize, action || undefined, signal),
+  const pg = usePagination();
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['audit-logs', action, pg.page, pg.pageSize],
+    queryFn: ({ signal }) =>
+      auditApi.list(pg.page, pg.pageSize, action || undefined, signal),
+    placeholderData: keepPreviousData,
   });
 
-  usePageClamp(page, setPage, data);
+  usePageClamp(pg.page, pg.setPage, data);
 
   return (
     <Card
@@ -32,26 +35,19 @@ export default function AuditLogsPage() {
           style={{ width: 240 }}
           onPressEnter={(e) => {
             setAction((e.target as HTMLInputElement).value);
-            setPage(1);
+            pg.reset();
           }}
         />
       }
     >
+      <QueryError show={isError} onRetry={refetch} />
+
       <Table<AuditLog>
         rowKey="id"
         loading={isLoading}
         dataSource={data?.items ?? []}
         scroll={{ x: 1000 }}
-        pagination={{
-          current: page,
-          pageSize,
-          total: data?.total ?? 0,
-          showSizeChanger: true,
-          onChange: (p, ps) => {
-            setPage(p);
-            setPageSize(ps);
-          },
-        }}
+        pagination={pg.pagination(data?.total)}
         columns={[
           {
             title: t('common.time'),

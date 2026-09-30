@@ -13,12 +13,14 @@ import {
   Typography,
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { channelsApi, groupsApi, modelsApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { usePageClamp } from '../hooks/usePageClamp';
+import { usePagination } from '../hooks/usePagination';
+import QueryError from '../components/QueryError';
 import type { ChannelInfo, ChannelTestResult } from '../api/types';
 import { PROVIDERS, type Filters, type PriceRow } from './channels/constants';
 import { PricingTable } from './channels/PricingTable';
@@ -37,8 +39,6 @@ export default function ChannelsPage() {
   const [form] = Form.useForm();
 
   const [filters, setFilters] = useState<Filters>({});
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{
     channel: ChannelInfo;
@@ -77,12 +77,15 @@ export default function ChannelsPage() {
       return entry;
     });
 
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['channels', filters, page, pageSize],
-    queryFn: ({ signal }) => channelsApi.list({ ...filters, page, pageSize }, signal),
+  const pg = usePagination();
+  const { data, isLoading, isFetching, isError, refetch } = useQuery({
+    queryKey: ['channels', filters, pg.page, pg.pageSize],
+    queryFn: ({ signal }) =>
+      channelsApi.list({ ...filters, page: pg.page, pageSize: pg.pageSize }, signal),
+    placeholderData: keepPreviousData,
   });
 
-  usePageClamp(page, setPage, data);
+  usePageClamp(pg.page, pg.setPage, data);
   const { data: groups = [] } = useQuery({
     queryKey: ['groups'],
     queryFn: ({ signal }) => groupsApi.list(signal),
@@ -113,7 +116,7 @@ export default function ChannelsPage() {
 
   const applyFilters = (next: Filters) => {
     setFilters(next);
-    setPage(1);
+    pg.reset();
   };
 
   const saveMut = useMutation({
@@ -135,7 +138,6 @@ export default function ChannelsPage() {
         editing ? t('channels.message.channelUpdated') : t('channels.message.channelCreated'),
       );
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const openCreate = () => {
@@ -242,7 +244,6 @@ export default function ChannelsPage() {
       qc.invalidateQueries({ queryKey: ['channels'] });
       message.success(t('channels.message.updated'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const removeMut = useMutation({
@@ -251,7 +252,6 @@ export default function ChannelsPage() {
       qc.invalidateQueries({ queryKey: ['channels'] });
       message.success(t('channels.message.removed'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const openPricing = (r: ChannelInfo) => {
@@ -278,7 +278,6 @@ export default function ChannelsPage() {
       setPriceChannel(null);
       message.success(t('channels.message.pricingSaved'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const runTest = async (r: ChannelInfo, models: string[]) => {
@@ -311,22 +310,16 @@ export default function ChannelsPage() {
         }}
       />
 
+      <QueryError show={isError} onRetry={refetch} />
+
       <Table<ChannelInfo>
         rowKey="id"
         loading={isLoading || isFetching}
         dataSource={data?.items ?? []}
         scroll={{ x: 1200 }}
-        pagination={{
-          current: page,
-          pageSize,
-          total: data?.total ?? 0,
-          showSizeChanger: true,
+        pagination={pg.pagination(data?.total, {
           showTotal: (total) => t('channels.table.total', { count: total }),
-          onChange: (p, ps) => {
-            setPage(p);
-            setPageSize(ps);
-          },
-        }}
+        })}
         columns={buildChannelColumns({
           testingId,
           onTest: (r) => {

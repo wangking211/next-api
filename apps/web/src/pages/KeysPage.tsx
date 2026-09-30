@@ -19,9 +19,9 @@ import { PlusOutlined, CopyOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { keysApi, groupsApi } from '../api/endpoints';
-import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { formatDateTime, formatCredits } from '../utils/format';
+import QueryError from '../components/QueryError';
 import type { ApiKeyCreated, ApiKeyInfo, RoutingStrategy } from '../api/types';
 
 type StrategyOptionKey =
@@ -65,7 +65,7 @@ export default function KeysPage() {
   const [created, setCreated] = useState<ApiKeyCreated | null>(null);
   const [form] = Form.useForm();
 
-  const { data: keys = [], isLoading } = useQuery({
+  const { data: keys = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['keys'],
     queryFn: ({ signal }) => keysApi.list(signal),
   });
@@ -83,7 +83,6 @@ export default function KeysPage() {
       form.resetFields();
       setCreated(data);
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const updateMut = useMutation({
@@ -93,7 +92,6 @@ export default function KeysPage() {
       qc.invalidateQueries({ queryKey: ['keys'] });
       message.success(t('keys.toast.updated'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const removeMut = useMutation({
@@ -102,7 +100,6 @@ export default function KeysPage() {
       qc.invalidateQueries({ queryKey: ['keys'] });
       message.success(t('keys.toast.deleted'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const groupMut = useMutation({
@@ -112,7 +109,6 @@ export default function KeysPage() {
       qc.invalidateQueries({ queryKey: ['keys'] });
       message.success(t('keys.toast.updated'));
     },
-    onError: (e) => message.error(errorMessage(e)),
   });
 
   const copy = async (text: string) => {
@@ -133,6 +129,8 @@ export default function KeysPage() {
         </Button>
       }
     >
+      <QueryError show={isError} onRetry={refetch} />
+
       <Table<ApiKeyInfo>
         rowKey="id"
         loading={isLoading}
