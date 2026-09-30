@@ -43,7 +43,6 @@ export default function AdminUsersPage() {
   const [balanceMin, setBalanceMin] = useState<number | undefined>();
   const [balanceMax, setBalanceMax] = useState<number | undefined>();
   // RangePicker 的 dayjs 区间（避免额外引入 dayjs 类型）
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [range, setRange] = useState<any>(null);
   const [sortBy, setSortBy] = useState<'createdAt' | 'balance' | 'username' | 'lastActiveAt'>('createdAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');

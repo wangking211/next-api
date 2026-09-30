@@ -201,11 +201,19 @@ curl http://localhost:3000/v1/embeddings \
 ## 测试
 
 ```bash
-# 单元测试（crypto / token 估算 / SSE 用量收集 / Anthropic+Gemini 转换 / 渠道排序与智能路由评分 / 路由指标 / 渠道健康 / 计费 / 兑换码 / 支付验签与回调入账）
+# 静态检查与格式化（CI 强制 lint；格式化为可选工具）
+pnpm lint            # ESLint 全仓（0 error 通过；react hooks exhaustive-deps 等为 warning）
+pnpm lint:fix        # 自动修复可修复项
+pnpm format          # Prettier 全仓格式化（可选）
+pnpm format:check    # 仅检查格式
+
+# 单元测试（crypto / token 估算 / SSE 用量收集 / Anthropic+Gemini 转换 / 渠道排序与智能路由评分 / 路由指标 / 渠道健康 / 计费 / 兑换码 / 支付验签与回调入账 / 观测指标与看门狗）
 pnpm test
 
 # 端到端测试：自动拉起 mock 上游 + API，依次跑全部用例（P1-P4、P7-P10）
-# 需先启动数据库并迁移，且已构建 API
+# 数据完全隔离、可反复运行：每次自动创建/重建 `<库名>_e2e` 独立数据库并重新迁移，
+# 同时 FLUSH Redis db 15（限流计数等残留一并清掉）；E2E_DATABASE_URL / E2E_REDIS_URL 可覆盖。
+# 需先启动数据库（pnpm db:up）且已构建 API
 pnpm --filter @ai-gateway/api build
 pnpm test:e2e
 ```
@@ -239,14 +247,16 @@ cp .env.production.example .env      # 再填入真实密钥
 # 或直接在 .env 中固定 compose 文件组合，之后即可用简写命令：
 #   COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml
 
-# 2) 一键部署（拉取代码 → 串行构建 → 重建 → 健康检查）
+# 2) 一键部署（拉取代码 → 串行构建 → 重建 → 健康检查 + 冒烟，失败自动回滚）
 ./deploy.sh
 
 # 等价的手动命令
 docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile full up -d --build
 ```
 
-`deploy.sh` 会串行构建镜像（`COMPOSE_PARALLEL_LIMIT=1`）以降低小内存服务器 OOM 风险，并在结束时检查容器健康与 `/api/health`。
+`deploy.sh` 会串行构建镜像（`COMPOSE_PARALLEL_LIMIT=1`）以降低小内存服务器 OOM 风险，随后依次执行 **容器健康等待 → 冒烟测试（`ops/smoke.sh`）**。冒烟覆盖：`/api/health`（db/redis 双 up）、网关无 key 的 OpenAI/Anthropic 错误形状、`x-request-id` 回显、登录校验管道、`/api/metrics` 在位、前端静态资源、web nginx → api 两跳链路（全部为无副作用请求，可反复执行）。
+
+**失败自动回滚**：健康等待或冒烟任一失败 → 代码 `git reset` 回部署前 SHA、把部署前打好的 `ai-gateway-{api,web}:rollback` 镜像快照顶回原名并 `--force-recreate` 重建，最终以非 0 退出码结束（Actions 的 Deploy 任务标红）。两点边界：**构建失败**时容器未被触碰，直接退出不回滚；**数据库迁移不随代码回退**（本项目迁移均为增量加表/加列，旧版本代码兼容新 schema）。
 
 典型服务器拓扑：容器仅监听回环地址（api `127.0.0.1:3000`、web `127.0.0.1:8081`），由宿主机 nginx 反向代理并终结 TLS（如 `xiaopuyun.com` → `127.0.0.1:8081`，Certbot 管理证书）。
 
@@ -293,7 +303,7 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 
 - 推送到 `main` 后 CI 通过即自动部署；或在 **Actions → Deploy → Run workflow** 手动触发；
 - **未配置 `DEPLOY_HOST` / `DEPLOY_SSH_KEY` 时，Deploy 会以明确报错失败（属预期）**，配置 secrets 后重跑该任务即可；
-- 部署脚本自身会校验容器健康与 `/api/health`，失败会在日志中体现。
+- 部署脚本自身会校验容器健康并跑 `ops/smoke.sh` 冒烟，失败**自动回滚**（代码 + 镜像快照），结果在日志与任务状态中体现。
 
 ## 计费口径（BYOK 与平台渠道）
 

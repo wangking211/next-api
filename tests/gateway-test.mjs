@@ -12,7 +12,7 @@ async function api(method, path, { token, body } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
   let data = null;
-  try { data = await res.json(); } catch {}
+  try { data = await res.json(); } catch { /* ignore */ }
   return { status: res.status, data };
 }
 async function collectStream(path, key, body) {

@@ -1,4 +1,4 @@
-import { ModelOrigin, ModelGroupStatus } from '@prisma/client';
+import { ModelGroupStatus } from '@prisma/client';
 import { GroupsService } from './groups.service';
 import { PrismaService } from '../prisma/prisma.service';
 

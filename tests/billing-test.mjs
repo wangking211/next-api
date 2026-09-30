@@ -10,7 +10,7 @@ async function api(method, path, { token, body } = {}) {
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
-  let data = null; try { data = await res.json(); } catch {}
+  let data = null; try { data = await res.json(); } catch { /* ignore */ }
   return { status: res.status, data };
 }
 const chat = (sk, body) => fetch(API + '/v1/chat/completions', {

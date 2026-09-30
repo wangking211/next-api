@@ -76,7 +76,7 @@ describe('scoreCandidates', () => {
   });
 
   it('every strategy weight set sums to 1', () => {
-    for (const [name, w] of Object.entries(STRATEGY_WEIGHTS)) {
+    for (const [, w] of Object.entries(STRATEGY_WEIGHTS)) {
       const sum = w.price + w.speed + w.stability + w.quality + w.noise;
       expect(sum).toBeCloseTo(1, 6);
     }

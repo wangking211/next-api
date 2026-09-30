@@ -104,7 +104,7 @@ export class ChannelsService {
     modelPrices?: ChannelModel[];
     groups?: { id: string; name: string; displayName: string }[];
   }) {
-    let preview = '';
+    let preview: string;
     try {
       const key = this.crypto.decrypt(c.apiKeyEnc);
       preview = key.length > 4 ? `****${key.slice(-4)}` : '****';

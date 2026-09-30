@@ -305,7 +305,7 @@ export class ChannelResolverService {
       .filter(Boolean);
     if (!entries.length) return null;
     const uniq = [...new Set(entries)];
-    let rows: { name: string; aliases: string[] }[] = [];
+    let rows: { name: string; aliases: string[] }[];
     try {
       rows = await this.prisma.modelCatalog.findMany({
         where: { OR: [{ name: { in: uniq } }, { aliases: { hasSome: uniq } }] },

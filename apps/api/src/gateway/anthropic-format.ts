@@ -183,7 +183,7 @@ export function openAiToAnthropicResponse(openai: any, model: string) {
   const text = typeof msg.content === 'string' ? msg.content : '';
   if (text) content.push({ type: 'text', text });
   for (const tc of msg.tool_calls ?? []) {
-    let input: any = {};
+    let input: any;
     try {
       input = JSON.parse(tc.function?.arguments || '{}');
     } catch {

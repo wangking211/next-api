@@ -14,7 +14,7 @@ async function req(method, path, { token, body } = {}) {
   let data = null;
   try {
     data = await res.json();
-  } catch {}
+  } catch { /* ignore */ }
   return { status: res.status, data };
 }
 
