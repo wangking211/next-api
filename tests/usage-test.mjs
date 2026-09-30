@@ -122,7 +122,13 @@ check('quota key first request 200', c1.status === 200, c1.status);
 const c2 = await chat(skC, { model, messages: [{ role: 'user', content: 'hi' }] });
 check('quota key second request 403 (exhausted)', c2.status === 403, c2.status);
 const c2body = await c2.json();
-check('quota error message', /quota/i.test(c2body?.message ?? ''), c2body);
+// 网关错误统一为 OpenAI 形状 {error:{message,type,code}}（GatewayErrorFilter）
+check(
+  'quota error message',
+  /quota/i.test(c2body?.error?.message ?? c2body?.message ?? '') &&
+    c2body?.error?.type === 'permission_error',
+  c2body,
+);
 
 // admin 全局视图
 const adminSum = await api('GET', '/api/usage/summary?scope=all', { token: adminJwt });
