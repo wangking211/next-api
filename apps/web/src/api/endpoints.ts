@@ -380,7 +380,7 @@ export const adminApi = {
       createdTo?: string;
       hasKeys?: boolean;
       hasChannels?: boolean;
-      sortBy?: 'createdAt' | 'balance' | 'username';
+      sortBy?: 'createdAt' | 'balance' | 'username' | 'lastActiveAt';
       sortOrder?: 'asc' | 'desc';
     } = {},
     signal?: AbortSignal,
@@ -404,7 +404,7 @@ export const adminApi = {
       createdTo?: string;
       hasKeys?: boolean;
       hasChannels?: boolean;
-      sortBy?: 'createdAt' | 'balance' | 'username';
+      sortBy?: 'createdAt' | 'balance' | 'username' | 'lastActiveAt';
       sortOrder?: 'asc' | 'desc';
     } = {},
     signal?: AbortSignal,

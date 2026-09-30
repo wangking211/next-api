@@ -44,7 +44,7 @@ export default function AdminUsersPage() {
   // RangePicker 的 dayjs 区间（避免额外引入 dayjs 类型）
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [range, setRange] = useState<any>(null);
-  const [sortBy, setSortBy] = useState<'createdAt' | 'balance' | 'username'>('createdAt');
+  const [sortBy, setSortBy] = useState<'createdAt' | 'balance' | 'username' | 'lastActiveAt'>('createdAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [hasKeys, setHasKeys] = useState<boolean | undefined>();
   const [hasChannels, setHasChannels] = useState<boolean | undefined>();
@@ -313,13 +313,14 @@ export default function AdminUsersPage() {
               style={{ width: 130 }}
               value={sortBy}
               onChange={(v) => {
-                setSortBy(v as 'createdAt' | 'balance' | 'username');
+                setSortBy(v as 'createdAt' | 'balance' | 'username' | 'lastActiveAt');
                 setPage(1);
               }}
               options={[
                 { value: 'createdAt', label: t('admin.users.sort.createdAt') },
                 { value: 'balance', label: t('admin.users.sort.balance') },
                 { value: 'username', label: t('admin.users.sort.username') },
+                { value: 'lastActiveAt', label: t('admin.users.sort.lastActive') },
               ]}
             />
             <Select

@@ -39,6 +39,8 @@ model User {
   group        ModelGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
+  /// 最后活跃（最近一次网关调用/登录）：物化自 RequestLog，用于列表按活跃时间排序
+  lastActiveAt DateTime?
 
   apiKeys     ApiKey[]
   channels    Channel[]
@@ -47,6 +49,8 @@ model User {
   balanceTxs  BalanceTransaction[]
   withdrawals WithdrawalRequest[]
   payments    PaymentOrder[]
+
+  @@index([lastActiveAt])
 }
 
 model WithdrawalRequest {

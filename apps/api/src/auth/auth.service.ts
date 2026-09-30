@@ -100,6 +100,8 @@ export class AuthService {
       throw new UnauthorizedException('Account is banned');
     }
     await this.clearLoginFailures(throttleKey);
+    // 登录也计入「最后活跃」（尽力而为，内部已吞错，失败不影响登录）
+    await this.users.touchLastActive(user!.id);
     return this.sign(user!);
   }
 

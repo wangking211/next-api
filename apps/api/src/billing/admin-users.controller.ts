@@ -146,7 +146,7 @@ export class AdminUsersController {
       const d = new Date(v);
       return Number.isNaN(d.getTime()) ? undefined : d;
     };
-    const sortFields = ['createdAt', 'balance', 'username'] as const;
+    const sortFields = ['createdAt', 'balance', 'username', 'lastActiveAt'] as const;
     return {
       q: src.q?.trim() || undefined,
       page: src.page ? toInt(src.page, 1) : undefined,

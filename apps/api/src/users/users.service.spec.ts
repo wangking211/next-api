@@ -7,8 +7,8 @@ describe('UsersService.list 筛选与排序', () => {
       user: {
         findMany: jest.fn().mockResolvedValue([]),
         count: jest.fn().mockResolvedValue(0),
+        update: jest.fn().mockResolvedValue({}),
       },
-      requestLog: { groupBy: jest.fn().mockResolvedValue([]) },
     };
     return { service: new UsersService(prisma as unknown as PrismaService), prisma };
   }
@@ -70,17 +70,36 @@ describe('UsersService.list 筛选与排序', () => {
     expect(arg.where.channels).toEqual({ none: {} });
   });
 
-  it('最后活跃时间由调用明细聚合派生并挂到列表项', async () => {
+  it('按最后活跃排序时显式 nulls:last（从未调用者排末尾）', async () => {
+    const { service, prisma } = svc();
+    await service.list({ sortBy: 'lastActiveAt', sortOrder: 'desc' });
+    const arg = prisma.user.findMany.mock.calls[0][0];
+    expect(arg.orderBy).toEqual({ lastActiveAt: { sort: 'desc', nulls: 'last' } });
+    // 物化列直读：不再按页做 RequestLog 聚合
+    expect(arg.select.lastActiveAt).toBe(true);
+  });
+
+  it('列表项直接携带物化的 lastActiveAt', async () => {
     const { service, prisma } = svc();
     const when = new Date('2026-09-29T10:00:00Z');
-    prisma.user.findMany.mockResolvedValue([{ id: 'u1' }, { id: 'u2' }]);
-    prisma.requestLog.groupBy.mockResolvedValue([
-      { userId: 'u1', _max: { createdAt: when } },
+    prisma.user.findMany.mockResolvedValue([
+      { id: 'u1', lastActiveAt: when },
+      { id: 'u2', lastActiveAt: null },
     ]);
     const res = await service.list();
-    expect(res.items[0]).toEqual({ id: 'u1', lastActiveAt: when });
-    expect(res.items[1]).toEqual({ id: 'u2', lastActiveAt: null });
-    expect(prisma.requestLog.groupBy).toHaveBeenCalledTimes(1);
+    expect(res.items[0].lastActiveAt).toEqual(when);
+    expect(res.items[1].lastActiveAt).toBeNull();
+  });
+
+  it('touchLastActive 更新列且吞掉失败', async () => {
+    const { service, prisma } = svc();
+    await service.touchLastActive('u1');
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      data: { lastActiveAt: expect.any(Date) },
+    });
+    prisma.user.update.mockRejectedValueOnce(new Error('db down'));
+    await expect(service.touchLastActive('u1')).resolves.toBeUndefined();
   });
 
   it('CSV 导出复用同一套筛选条件并带上表头', async () => {
@@ -95,6 +114,7 @@ describe('UsersService.list 筛选与排序', () => {
         balance: 1.5,
         priceMultiplier: null,
         rebateRate: null,
+        lastActiveAt: new Date('2026-09-29T10:00:00Z'),
         createdAt: new Date('2026-01-01T00:00:00Z'),
         agent: null,
         group: { name: 'default' },
@@ -105,6 +125,7 @@ describe('UsersService.list 筛选与排序', () => {
     expect(count).toBe(1);
     const [header, row] = csv.split('\n');
     expect(header).toContain('lastActiveAt');
+    expect(row).toContain('2026-09-29T10:00:00.000Z');
     expect(row).toContain('"a,b"'); // 含逗号的字段被转义
     expect(prisma.user.findMany.mock.calls[0][0].where.apiKeys).toEqual({ some: {} });
   });

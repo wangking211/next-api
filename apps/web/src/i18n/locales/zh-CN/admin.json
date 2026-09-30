@@ -30,6 +30,7 @@
   "admin.users.sort.createdAt": "注册时间",
   "admin.users.sort.balance": "余额",
   "admin.users.sort.username": "用户名",
+  "admin.users.sort.lastActive": "最后活跃",
   "admin.users.sort.asc": "升序",
   "admin.users.sort.desc": "降序",
   "admin.users.statusActive": "正常",

@@ -204,6 +204,28 @@ export class UsageService {
         `用量日聚合失败 user=${entry.userId} date=${date.toISOString().slice(0, 10)}: ${(e as Error)?.message}`,
       );
     }
+
+    // 物化「最后活跃」：提交后尽力而为（失败不影响计费）。
+    // 仅当超过 5 分钟才真正写行——多数请求 0 行命中，不增加热路径的行锁与写放大。
+    await this.touchLastActive(entry.userId);
+  }
+
+  /** 刷新用户最后活跃时间（超过 5 分钟才落一次写；失败静默） */
+  private async touchLastActive(userId?: string | null): Promise<void> {
+    if (!userId) return;
+    try {
+      const now = new Date();
+      const staleBefore = new Date(now.getTime() - 5 * 60_000);
+      await this.prisma.user.updateMany({
+        where: {
+          id: userId,
+          OR: [{ lastActiveAt: null }, { lastActiveAt: { lt: staleBefore } }],
+        },
+        data: { lastActiveAt: now },
+      });
+    } catch {
+      // 活跃时间只是展示性数据，失败静默
+    }
   }
 
   /** 按天聚合：先查后写，命中唯一约束时回退为原子自增 */

@@ -20,6 +20,7 @@ function makeService() {
       create: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({}),
     },
+    user: { updateMany: jest.fn().mockResolvedValue({}) },
     requestLog: {
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
@@ -83,6 +84,8 @@ describe('UsageService 计费口径', () => {
     expect(prisma.usageDaily.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ cost: 1, billedCost: 0 }),
     });
+    // 无论是否扣费都刷新「最后活跃」
+    expect(prisma.user.updateMany).toHaveBeenCalledTimes(1);
   });
 
   it('平台渠道调用扣余额并累计 billedCost 与费用额度', async () => {
@@ -115,6 +118,29 @@ describe('UsageService 计费口径', () => {
     await service.record({ ...baseEntry });
 
     expect(billing.recordConsumption).not.toHaveBeenCalled();
+  });
+
+  it('落账后刷新「最后活跃」，且带 5 分钟陈旧阈值（避免热路径每请求写行）', async () => {
+    const { service, prisma } = makeService();
+
+    await service.record({ ...baseEntry, chargeable: true });
+
+    expect(prisma.user.updateMany).toHaveBeenCalledTimes(1);
+    const arg = prisma.user.updateMany.mock.calls[0][0];
+    expect(arg.where.id).toBe('user1');
+    expect(arg.where.OR[0]).toEqual({ lastActiveAt: null });
+    expect(arg.where.OR[1].lastActiveAt.lt).toBeInstanceOf(Date);
+    expect(arg.data.lastActiveAt).toBeInstanceOf(Date);
+  });
+
+  it('活跃时间写入失败静默，不影响计费主流程', async () => {
+    const { service, prisma, billing } = makeService();
+    prisma.user.updateMany.mockRejectedValueOnce(new Error('db down'));
+
+    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toBeUndefined();
+
+    expect(billing.recordConsumption).toHaveBeenCalled();
+    expect(prisma.usageDaily.create).toHaveBeenCalled();
   });
 });
 

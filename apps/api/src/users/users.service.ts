@@ -20,7 +20,7 @@ export interface UserListFilters {
   /** 有无 Key / 有无渠道 */
   hasKeys?: boolean;
   hasChannels?: boolean;
-  sortBy?: 'createdAt' | 'balance' | 'username';
+  sortBy?: 'createdAt' | 'balance' | 'username' | 'lastActiveAt';
   sortOrder?: 'asc' | 'desc';
 }
 
@@ -128,7 +128,7 @@ export class UsersService {  constructor(private readonly prisma: PrismaService)
     const [items, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
-        orderBy: { [sortBy]: sortOrder },
+        orderBy: this.orderBy(sortBy, sortOrder),
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: {
@@ -144,50 +144,49 @@ export class UsersService {  constructor(private readonly prisma: PrismaService)
           agent: { select: { id: true, username: true, priceMultiplier: true } },
           groupId: true,
           group: { select: { id: true, name: true, displayName: true, ratio: true } },
+          lastActiveAt: true,
           createdAt: true,
           _count: { select: { apiKeys: true, channels: true } },
         },
       }),
       this.prisma.user.count({ where }),
     ]);
-    const lastActive = await this.lastActiveMap(items.map((u) => u.id));
-    return {
-      items: items.map((u) => ({ ...u, lastActiveAt: lastActive.get(u.id) ?? null })),
-      total,
-      page,
-      pageSize,
-    };
+    return { items, total, page, pageSize };
   }
 
   /**
-   * 派生「最后活跃时间」：取该批用户在 RequestLog 中的最近一次调用时刻。
-   * 走 (userId, createdAt) 索引聚合，避免为 User 增加冗余列与写放大。
+   * 列表/导出共用的排序构造。
+   * lastActiveAt 可空，必须显式 `nulls: 'last'`：否则 Postgres 在 DESC 下把
+   * NULL（从未调用）排在最前，「最近活跃优先」的语义就反了。
    */
-  private async lastActiveMap(userIds: string[]): Promise<Map<string, Date>> {
-    const out = new Map<string, Date>();
-    if (!userIds.length) return out;
-    try {
-      const rows = await this.prisma.requestLog.groupBy({
-        by: ['userId'],
-        where: { userId: { in: userIds } },
-        _max: { createdAt: true },
-      });
-      for (const r of rows) {
-        if (r._max.createdAt) out.set(r.userId, r._max.createdAt);
-      }
-    } catch {
-      // 聚合失败不影响列表主流程
-    }
-    return out;
+  private orderBy(
+    sortBy: NonNullable<UserListFilters['sortBy']>,
+    sortOrder: 'asc' | 'desc',
+  ): Prisma.UserOrderByWithRelationInput {
+    return sortBy === 'lastActiveAt'
+      ? { lastActiveAt: { sort: sortOrder, nulls: 'last' } }
+      : { [sortBy]: sortOrder };
   }
 
-  /** 按当前筛选导出用户 CSV（上限 1 万行，含派生最后活跃时间） */
+  /** 刷新最后活跃时间（登录时调用）；尽力而为，失败不影响登录。 */
+  async touchLastActive(userId: string): Promise<void> {
+    try {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { lastActiveAt: new Date() },
+      });
+    } catch {
+      // 展示性数据，失败静默
+    }
+  }
+
+  /** 按当前筛选导出用户 CSV（上限 1 万行，含最后活跃时间） */
   async exportCsv(f: UserListFilters = {}): Promise<{ csv: string; count: number }> {
     const { page: _p, pageSize: _ps, ...rest } = f;
     const where = this.buildWhere(rest);
     const rows = await this.prisma.user.findMany({
       where,
-      orderBy: { [f.sortBy ?? 'createdAt']: f.sortOrder ?? 'desc' },
+      orderBy: this.orderBy(f.sortBy ?? 'createdAt', f.sortOrder ?? 'desc'),
       take: 10000,
       select: {
         id: true,
@@ -198,13 +197,13 @@ export class UsersService {  constructor(private readonly prisma: PrismaService)
         balance: true,
         priceMultiplier: true,
         rebateRate: true,
+        lastActiveAt: true,
         createdAt: true,
         agent: { select: { username: true } },
         group: { select: { name: true } },
         _count: { select: { apiKeys: true, channels: true } },
       },
     });
-    const lastActive = await this.lastActiveMap(rows.map((r) => r.id));
     const esc = (v: unknown): string => {
       const s = v == null ? '' : String(v);
       return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -237,7 +236,7 @@ export class UsersService {  constructor(private readonly prisma: PrismaService)
         r.group?.name ?? '',
         r._count.apiKeys,
         r._count.channels,
-        lastActive.get(r.id)?.toISOString() ?? '',
+        r.lastActiveAt?.toISOString() ?? '',
         r.createdAt.toISOString(),
       ]
         .map(esc)

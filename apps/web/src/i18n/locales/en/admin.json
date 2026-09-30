@@ -30,6 +30,7 @@
   "admin.users.sort.createdAt": "Registered",
   "admin.users.sort.balance": "Balance",
   "admin.users.sort.username": "Username",
+  "admin.users.sort.lastActive": "Last active",
   "admin.users.sort.asc": "Ascending",
   "admin.users.sort.desc": "Descending",
   "admin.users.statusActive": "Active",

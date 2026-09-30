@@ -30,6 +30,7 @@
   "admin.users.sort.createdAt": "註冊時間",
   "admin.users.sort.balance": "餘額",
   "admin.users.sort.username": "使用者名稱",
+  "admin.users.sort.lastActive": "最後活躍",
   "admin.users.sort.asc": "升冪",
   "admin.users.sort.desc": "降冪",
   "admin.users.statusActive": "正常",

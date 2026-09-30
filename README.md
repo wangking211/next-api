@@ -118,7 +118,8 @@ pnpm cleanup             # 执行清理
 | GET | `/api/agent/members` | 名下成员列表 | 代理/管理员 |
 | POST | `/api/agent/members` | 创建名下成员 | 代理/管理员 |
 | POST | `/api/agent/members/:id/recharge` | 用代理余额给成员充值 | 代理/管理员 |
-| GET | `/api/admin/users` | 用户列表（`?q=` 搜索） | 管理员 |
+| GET | `/api/admin/users` | 用户列表（`?q=&role=&status=&groupId=&agentId=&balanceMin=&balanceMax=&createdFrom=&createdTo=&hasKeys=&hasChannels=&sortBy=createdAt\|balance\|username\|lastActiveAt&sortOrder=`；`lastActiveAt` 为物化列，`nulls:last`） | 管理员 |
+| GET | `/api/admin/users/export` | 按当前筛选导出用户 CSV（≤1 万行，含最后活跃时间） | 管理员 |
 | POST | `/api/admin/users/:id/recharge` | 充值 | 管理员 |
 | POST | `/api/admin/users/:id/adjust` | 余额调整（可负） | 管理员 |
 | POST | `/api/admin/redeem-codes` | 批量生成兑换码 | 管理员 |
