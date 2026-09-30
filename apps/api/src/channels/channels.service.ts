@@ -230,8 +230,14 @@ export class ChannelsService {
   async availableModels(user: AuthUser) {
     const group = await this.groups.effectiveGroup({ id: user.id });
     const groupCond = this.groups.channelVisibilityWhere(group.id);
+    // 与网关 resolve() 同口径：分组可见性只作用于平台渠道，BYOK 渠道仅持有者可见
     const visibility = groupCond
-      ? { OR: [{ ownerType: ChannelOwnerType.USER, ownerUserId: user.id }, groupCond] }
+      ? {
+          OR: [
+            { ownerType: ChannelOwnerType.USER, ownerUserId: user.id },
+            { AND: [{ ownerType: ChannelOwnerType.PLATFORM }, groupCond] },
+          ],
+        }
       : {
           OR: [
             { ownerType: ChannelOwnerType.USER, ownerUserId: user.id },

@@ -136,9 +136,16 @@ export class ChannelResolverService {
     opts: RouteOptions = {},
   ): Promise<ResolvedChannel[]> {
     const groupCond = this.groups.channelVisibilityWhere(opts.groupId ?? null);
-    // 自有 BYOK 渠道始终可见；平台渠道按生效分组隔离（无分组时退回「全部平台渠道」）
+    // 自有 BYOK 渠道始终只对持有者可见；平台渠道按生效分组隔离（无分组时退回「全部平台渠道」）。
+    // ⚠️ 分组条件必须限定 ownerType=PLATFORM：`groups: { none: {} }` 会匹配到「未配分组的私有渠道」，
+    // 否则任何用户都能路由到别人的 BYOK 渠道（消耗对方上游额度）。
     const visibility: Prisma.ChannelWhereInput = groupCond
-      ? { OR: [{ ownerType: ChannelOwnerType.USER, ownerUserId: userId }, groupCond] }
+      ? {
+          OR: [
+            { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
+            { AND: [{ ownerType: ChannelOwnerType.PLATFORM }, groupCond] },
+          ],
+        }
       : {
           OR: [
             { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
@@ -409,8 +416,14 @@ export class ChannelResolverService {
   /** 汇总用户当前可实际调用的模型（自有+平台启用渠道所支持的模型） */
   async availableModels(userId: string, groupId?: string | null): Promise<string[]> {
     const groupCond = this.groups.channelVisibilityWhere(groupId ?? null);
+    // 与 resolve() 同口径：分组可见性只作用于平台渠道，BYOK 渠道仅持有者可见
     const visibility: Prisma.ChannelWhereInput = groupCond
-      ? { OR: [{ ownerType: ChannelOwnerType.USER, ownerUserId: userId }, groupCond] }
+      ? {
+          OR: [
+            { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
+            { AND: [{ ownerType: ChannelOwnerType.PLATFORM }, groupCond] },
+          ],
+        }
       : {
           OR: [
             { ownerType: ChannelOwnerType.USER, ownerUserId: userId },

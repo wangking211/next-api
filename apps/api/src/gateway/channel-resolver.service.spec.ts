@@ -178,14 +178,21 @@ describe('ChannelResolverService', () => {
     expect(arg.where.channel.AND[1].OR[1].ownerType).toBe(ChannelOwnerType.PLATFORM);
   });
 
-  it('生效分组存在时，平台渠道只保留公共渠道与同分组渠道', async () => {
+  it('生效分组存在时，平台渠道只保留公共渠道与同分组渠道（且不波及他人 BYOK）', async () => {
     const { service, prisma } = makeService([]);
     await service.resolve('u1', 'gpt-4o', { groupId: 'g1' });
     const arg = prisma.channelModel.findMany.mock.calls[0][0];
     const visibility = arg.where.channel.AND[1];
-    expect(visibility.OR[0].ownerType).toBe(ChannelOwnerType.USER);
+    expect(visibility.OR[0]).toEqual({
+      ownerType: ChannelOwnerType.USER,
+      ownerUserId: 'u1',
+    });
+    // 分组条件必须限定 ownerType=PLATFORM，否则未配分组的私有渠道会被一并放行
     expect(visibility.OR[1]).toEqual({
-      OR: [{ groups: { none: {} } }, { groups: { some: { id: 'g1' } } }],
+      AND: [
+        { ownerType: ChannelOwnerType.PLATFORM },
+        { OR: [{ groups: { none: {} } }, { groups: { some: { id: 'g1' } } }] },
+      ],
     });
   });
 
@@ -529,5 +536,29 @@ describe('ChannelResolverService catalog 快照缓存', () => {
       { modelName: 'gpt-5.1' },
     ] as never);
     await expect(service.availableModels('u1')).resolves.toEqual(['gpt-5.1']);
+  });
+
+  it('有分组时可见性必须限定平台渠道，不能漏出别人的 BYOK 渠道', async () => {
+    const { service, prisma } = makeService([]);
+    await service.resolve('u1', 'm', { groupId: 'g1' });
+
+    const where = prisma.channelModel.findMany.mock.calls[0][0].where;
+    // 分组分支必须包一层 ownerType=PLATFORM：否则 `groups: { none: {} }`
+    // 会把「未配分组的私有渠道」也匹配进来（可消耗他人上游额度）
+    expect(where.channel.AND[1]).toEqual({
+      OR: [
+        { ownerType: 'USER', ownerUserId: 'u1' },
+        {
+          AND: [
+            { ownerType: 'PLATFORM' },
+            { OR: [{ groups: { none: {} } }, { groups: { some: { id: 'g1' } } }] },
+          ],
+        },
+      ],
+    });
+
+    await service.availableModels('u1', 'g1');
+    const availWhere = prisma.channelModel.findMany.mock.calls[1][0].where;
+    expect(availWhere.channel.AND[1]).toEqual(where.channel.AND[1]);
   });
 });
