@@ -80,3 +80,50 @@ export async function assertPublicHttpUrl(raw: string): Promise<void> {
     }
   }
 }
+
+/**
+ * 是否允许出站目标为私网：非生产（本地开发/e2e 用 mock 上游）或显式 ALLOW_PRIVATE_UPSTREAM=true。
+ * 与渠道保存、探测、模型列表拉取共用同一开关，避免两套规则漂移。
+ */
+export function upstreamAllowsPrivate(): boolean {
+  return (
+    process.env.NODE_ENV !== 'production' ||
+    process.env.ALLOW_PRIVATE_UPSTREAM === 'true'
+  );
+}
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/**
+ * 带 SSRF 防护的出站探测 fetch：`redirect: 'manual'` + 逐跳复验目标地址。
+ *
+ * 只校验首跳是不够的：攻击者可以让公网 URL 302 到 169.254.169.254（云元数据）等内网地址，
+ * 自动跟随重定向会直接绕过校验。这里每一跳都重新 assertPublicHttpUrl，最多 maxRedirects 次。
+ *
+ * 不重放请求体与跨域头，仅用于 GET 类探测（拉模型列表等）。
+ */
+export async function safeFetch(
+  input: string,
+  init: RequestInit = {},
+  maxRedirects = 3,
+): Promise<Response> {
+  let current = input;
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    if (!upstreamAllowsPrivate()) await assertPublicHttpUrl(current);
+    const res = await fetch(current, { ...init, redirect: 'manual' });
+    if (!REDIRECT_STATUSES.has(res.status)) return res;
+    const location = res.headers.get('location');
+    if (!location) return res;
+    let next: string;
+    try {
+      next = new URL(location, current).toString();
+    } catch {
+      throw new UnsafeUrlError('上游返回了无法解析的重定向地址');
+    }
+    if (hop === maxRedirects) {
+      throw new UnsafeUrlError(`上游重定向次数超过 ${maxRedirects} 次，已拒绝`);
+    }
+    current = next;
+  }
+  throw new UnsafeUrlError(`上游重定向次数超过 ${maxRedirects} 次，已拒绝`);
+}

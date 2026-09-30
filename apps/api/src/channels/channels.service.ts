@@ -10,7 +10,7 @@ import { CryptoService } from '../common/crypto.service';
 import { AuthUser } from '../common/interfaces/auth.interface';
 import { ProviderRegistry } from '../gateway/providers/provider.registry';
 import { UpstreamError } from '../gateway/types';
-import { assertPublicHttpUrl, UnsafeUrlError } from '../common/url-safety';
+import { assertPublicHttpUrl, safeFetch, UnsafeUrlError, upstreamAllowsPrivate } from '../common/url-safety';
 import { joinUrl } from '../gateway/providers/stream.util';
 import { GroupsService } from '../groups/groups.service';
 import { CreateChannelDto } from './dto/create-channel.dto';
@@ -92,9 +92,7 @@ export class ChannelsService {
 
   private async assertSafeBaseUrl(baseUrl: string): Promise<void> {
     // 生产环境禁止渠道 baseUrl 指向私网/回环（SSRF）；如需本地 mock 上游可设 ALLOW_PRIVATE_UPSTREAM=true
-    if (process.env.NODE_ENV !== 'production' || process.env.ALLOW_PRIVATE_UPSTREAM === 'true') {
-      return;
-    }
+    if (upstreamAllowsPrivate()) return;
     try {
       await assertPublicHttpUrl(baseUrl);
     } catch (e) {
@@ -549,10 +547,13 @@ export class ChannelsService {
           ? `${url}?pageSize=1000&key=${encodeURIComponent(apiKey)}`
           : url;
       try {
-        res = await fetch(target, { headers, signal: AbortSignal.timeout(15000) });
+        // 用户可控的上游地址：逐跳校验 + 不自动跟随重定向（防止 302 转内网绕过 SSRF 校验）
+        res = await safeFetch(target, { headers, signal: AbortSignal.timeout(15000) });
       } catch (e) {
         throw new BadRequestException(
-          `无法连接上游: ${e instanceof Error ? e.message : String(e)}`,
+          e instanceof UnsafeUrlError
+            ? e.message
+            : `无法连接上游: ${e instanceof Error ? e.message : String(e)}`,
         );
       }
       if (res.status !== 404 || url === urls[urls.length - 1]) break;

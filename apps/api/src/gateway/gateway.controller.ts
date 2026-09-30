@@ -6,12 +6,14 @@ import {
   Post,
   Req,
   Res,
+  UseFilters,
   UseGuards,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ApiKeyGuard } from './guards/api-key.guard';
+import { GatewayErrorFilter } from './gateway-error.filter';
 import { ChannelResolverService } from './channel-resolver.service';
 import { ProviderRegistry } from './providers/provider.registry';
 import { ChannelHealthService } from './channel-health.service';
@@ -111,6 +113,8 @@ function embeddingsResponsePreview(json: any): string {
 @ApiTags('gateway')
 @ApiBearerAuth('bearer')
 @UseGuards(ApiKeyGuard)
+// 未预期异常/守卫/限流的错误体也要符合客户端协议（OpenAI 形状；/v1/messages 为 Anthropic 形状）
+@UseFilters(new GatewayErrorFilter())
 @Controller('v1')
 export class GatewayController {
   private readonly streamIdleMs: number;

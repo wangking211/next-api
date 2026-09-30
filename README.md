@@ -134,8 +134,12 @@ pnpm cleanup             # 执行清理
 | GET | `/v1/models` | 列出当前 key 可用模型 |
 | POST | `/v1/chat/completions` | 对话补全（支持 `stream: true`） |
 | POST | `/v1/embeddings` | 向量化（`input` 为 string / string[] / token id 数组，按输入 token 计费） |
+| POST | `/v1/messages` | Anthropic 兼容对话（双向格式转换与 SSE 翻译） |
+| POST | `/v1/images/generations` | OpenAI 兼容图片生成（按次计费，支持故障转移） |
 
 鉴权：`Authorization: Bearer sk-...` 或 `x-api-key: sk-...`。
+
+错误响应统一为客户端协议形状：`/v1/**` 返回 OpenAI 的 `{error:{message,type,code}}`，`/v1/messages` 返回 Anthropic 的 `{type:'error',error:{type,message}}`——守卫 401、RPM/TPM 429、未预期 500 也走同一形状（`GatewayErrorFilter`）。
 
 ```bash
 curl http://localhost:3000/v1/chat/completions \
@@ -389,3 +393,6 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 - 已启用 `helmet` 安全响应头、请求体大小限制（25MB）、按 key 的 RPM 限流。
 - API 文档 `/api/docs`（Swagger）生产默认**关闭**，需要时设 `SWAGGER_ENABLED=true` 显式开启。
 - 调用内容（输入/输出）默认不记录（`LOG_CONTENT=false`，仅保留元数据与 token）；设 `LOG_CONTENT=true` 时写入 `RequestLog`，单条上限 `LOG_CONTENT_MAX=20000` 字符（生产开启会显著增加磁盘与日志占用）。
+- **反向代理与客户端 IP**（`TRUST_PROXY`）：部署链路为 host nginx → web nginx → api，默认信任 `172.16.0.0/12`（docker 网段）。这样既能从 `X-Forwarded-For` 还原真实客户端 IP（否则 `req.ip` 恒为上一跳容器 IP，按 IP 的限流与审计会全部失效），又不会采信直连 `:3000` 时伪造的转发头；拓扑不同时用 `TRUST_PROXY=true|false|跳数|网段` 覆盖。
+- **登录/注册按 IP 限流**：`LOGIN_IP_LIMIT`（默认 `30`）次 / `LOGIN_IP_WINDOW`（默认 `300`）秒，超限 429；与账号维度的 `LOGIN_FAIL_LIMIT`（默认 `10` 次 / `LOGIN_FAIL_WINDOW` 默认 `300` 秒）叠加——前者防「换账号轮换撞库」与同 IP 批量注册，后者防单账号暴力破解；Redis 不可用时两者都放行（不阻断登录）。
+- **SSRF**：渠道 `baseUrl` 与探测请求只允许公网地址（`assertPublicHttpUrl`：私网/回环/链路本地/云元数据 `169.254.169.254` 一律拒绝，非生产或 `ALLOW_PRIVATE_UPSTREAM=true` 放开）；出站探测改走 `safeFetch` —— `redirect: 'manual'` 且**逐跳复验**，防止公网 URL 用 302 跳到内网绕过一次性校验；网关三个上游 provider 本就 `redirect: 'manual'`。

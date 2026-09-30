@@ -26,6 +26,15 @@ function assertProductionSecrets(config: ConfigService) {
   }
 }
 
+/** TRUST_PROXY 解析：true / false / 跳数（数字） / 网段（如 172.16.0.0/12），交由 express 信任判定 */
+function parseTrustProxy(raw: string | undefined): boolean | number | string {
+  const v = (raw ?? '').trim();
+  if (v === 'true') return true;
+  if (v === 'false' || v === '') return false;
+  if (/^\d+$/.test(v)) return Number(v);
+  return v;
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   const config = app.get(ConfigService);
@@ -43,6 +52,7 @@ async function bootstrap() {
       { path: 'v1/models', method: RequestMethod.GET },
       { path: 'v1/messages', method: RequestMethod.POST },
       { path: 'v1/embeddings', method: RequestMethod.POST },
+      { path: 'v1/images/generations', method: RequestMethod.POST },
     ],
   });
 
@@ -62,6 +72,16 @@ async function bootstrap() {
   } else {
     app.enableCors({ origin: true, credentials: true });
   }
+
+  // 反向代理链：host nginx → web nginx → api（ops/nginx/xiaopuyun.com.conf + apps/web/nginx.conf）。
+  // 不声明信任就无法从 X-Forwarded-For 还原真实客户端 IP（req.ip 恒为上一跳容器 IP），
+  // 按 IP 的登录限流、审计定位会全部失效。默认信任 docker 网段而非跳数：
+  // 经 nginx 的域名流量能正确还原客户端 IP，而直连 3000 端口伪造的 XFF 因来源不在网段内不被采信。
+  const trustProxy = parseTrustProxy(
+    config.get<string>('TRUST_PROXY', isProd ? '172.16.0.0/12' : 'false'),
+  );
+  app.getHttpAdapter().getInstance().set('trust proxy', trustProxy);
+  Logger.log(`trust proxy = ${JSON.stringify(trustProxy)}`, 'Bootstrap');
 
   app.useGlobalPipes(
     new ValidationPipe({
