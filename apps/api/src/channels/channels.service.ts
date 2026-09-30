@@ -167,6 +167,8 @@ export class ChannelsService {
       'weight',
       'qualityScore',
     ] as const;
+    // 批量 + prune 放进同一事务：中途失败不会留下「半份模型表」
+    const ops: Prisma.PrismaPromise<unknown>[] = [];
     for (const model of names) {
       const p = priceMap.get(model);
       const pricing: Record<string, unknown> = {};
@@ -176,17 +178,22 @@ export class ChannelsService {
         }
         if (p.enabled !== undefined) pricing.enabled = p.enabled;
       }
-      await this.prisma.channelModel.upsert({
-        where: { channelId_modelName: { channelId, modelName: model } },
-        create: { channelId, modelName: model, enabled: true, ...pricing },
-        update: pricing,
-      });
+      ops.push(
+        this.prisma.channelModel.upsert({
+          where: { channelId_modelName: { channelId, modelName: model } },
+          create: { channelId, modelName: model, enabled: true, ...pricing },
+          update: pricing,
+        }),
+      );
     }
     if (prune) {
-      await this.prisma.channelModel.deleteMany({
-        where: { channelId, modelName: { notIn: [...names] } },
-      });
+      ops.push(
+        this.prisma.channelModel.deleteMany({
+          where: { channelId, modelName: { notIn: [...names] } },
+        }),
+      );
     }
+    if (ops.length) await this.prisma.$transaction(ops);
   }
 
   async list(user: AuthUser, q: ChannelQuery = {}) {
@@ -221,7 +228,7 @@ export class ChannelsService {
 
   /** 当前用户可调用的模型，按渠道分组（自有 BYOK + 平台，按生效分组过滤），用于控制台展示。 */
   async availableModels(user: AuthUser) {
-    const group = await this.groups.effectiveGroup(user.id);
+    const group = await this.groups.effectiveGroup({ id: user.id });
     const groupCond = this.groups.channelVisibilityWhere(group.id);
     const visibility = groupCond
       ? { OR: [{ ownerType: ChannelOwnerType.USER, ownerUserId: user.id }, groupCond] }

@@ -1,5 +1,6 @@
 import { ApiKey, Channel, User } from '@prisma/client';
 import { Request } from 'express';
+import type { ChannelPricing } from '../billing/pricing.util';
 
 export interface GatewayAuthContext {
   user: User;
@@ -63,6 +64,11 @@ export interface ResolvedChannel {
   apiKey: string;
   /** 上游真实模型名（模型映射）；为空表示用请求的规范名 */
   upstreamModelName?: string | null;
+  /**
+   * 该渠道×模型的定价（resolve 时用已查出的渠道行 + 缓存目录行本地派生）。
+   * 热路径的预授权 / 图片计价 / 落账直接复用，免再查 `getChannelPricing`。
+   */
+  pricing: ChannelPricing;
 }
 
 export interface Provider {

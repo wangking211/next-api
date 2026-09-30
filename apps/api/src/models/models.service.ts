@@ -1,5 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { ModelOrigin } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { TtlCacheService } from '../common/ttl-cache.service';
 import { CreateModelDto } from './dto/create-model.dto';
 import { UpdateModelDto } from './dto/update-model.dto';
 import { COMMON_MODELS } from './common-models';
@@ -7,7 +9,16 @@ import { inferVendorOrigin } from './origin.util';
 
 @Injectable()
 export class ModelsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // 网关热路径共享的模型目录快照；测试手工构造时未传 → 仅跳过失效动作
+    @Optional() private readonly cache?: TtlCacheService,
+  ) {}
+
+  /** 目录写路径：失效网关共享的 `catalog:*` 快照（TTL 兜底：旁路改库 60s 后收敛） */
+  private invalidateCatalog() {
+    this.cache?.invalidate('catalog:');
+  }
 
   /** 内置主流模型建议（供渠道创建时选择，不依赖数据库种子） */
   suggestions() {
@@ -21,9 +32,9 @@ export class ModelsService {
     });
   }
 
-  create(dto: CreateModelDto) {
+  async create(dto: CreateModelDto) {
     const inferred = inferVendorOrigin(dto.name);
-    return this.prisma.modelCatalog.create({
+    const row = await this.prisma.modelCatalog.create({
       data: {
         name: dto.name,
         displayName: dto.displayName,
@@ -40,6 +51,8 @@ export class ModelsService {
         enabled: dto.enabled ?? true,
       },
     });
+    this.invalidateCatalog();
+    return row;
   }
 
   /**
@@ -53,31 +66,44 @@ export class ModelsService {
     let updated = 0;
     const byOrigin: Record<string, number> = { DOMESTIC: 0, OVERSEAS: 0 };
     const byVendor: Record<string, number> = {};
+    // 按 (vendor, origin) 分组批量落库：模型种类有限 → 查询数与表规模无关
+    const pending = new Map<string, { vendor: string | null; origin: ModelOrigin; ids: string[] }>();
     for (const r of rows) {
       const { vendor, origin } = inferVendorOrigin(r.name);
       byOrigin[origin] = (byOrigin[origin] ?? 0) + 1;
       byVendor[vendor ?? 'unknown'] = (byVendor[vendor ?? 'unknown'] ?? 0) + 1;
       if (r.vendor !== vendor || r.origin !== origin) {
-        await this.prisma.modelCatalog.update({
-          where: { id: r.id },
-          data: { vendor, origin },
-        });
+        const key = `${origin}|${vendor ?? ''}`;
+        const bucket = pending.get(key) ?? { vendor, origin, ids: [] };
+        bucket.ids.push(r.id);
+        pending.set(key, bucket);
         updated++;
       }
     }
+    for (const { vendor, origin, ids } of pending.values()) {
+      // vendor 为 undefined 时 Prisma 跳过该字段（与原逐行 update 语义一致）
+      await this.prisma.modelCatalog.updateMany({
+        where: { id: { in: ids } },
+        data: { vendor, origin },
+      });
+    }
+    if (updated > 0) this.invalidateCatalog();
     return { total: rows.length, updated, byOrigin, byVendor };
   }
 
   async update(id: string, dto: UpdateModelDto) {
     const exists = await this.prisma.modelCatalog.findUnique({ where: { id } });
     if (!exists) throw new NotFoundException('Model not found');
-    return this.prisma.modelCatalog.update({ where: { id }, data: { ...dto } });
+    const row = await this.prisma.modelCatalog.update({ where: { id }, data: { ...dto } });
+    this.invalidateCatalog();
+    return row;
   }
 
   async remove(id: string) {
     const exists = await this.prisma.modelCatalog.findUnique({ where: { id } });
     if (!exists) throw new NotFoundException('Model not found');
     await this.prisma.modelCatalog.delete({ where: { id } });
+    this.invalidateCatalog();
     return { success: true };
   }
 }

@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BalanceTxType } from '@prisma/client';
+import { BalanceTxType, Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMemberDto } from './dto/create-member.dto';
@@ -22,7 +22,7 @@ export class AgentService {
   /** 代理概览：余额、返点比例/倍率、名下成员数与近 30 天成员消费、累计返点 */
   async overview(agentId: string) {
     const since = new Date(Date.now() - 30 * DAY_MS);
-    const [user, memberCount, commissionAgg, members] = await Promise.all([
+    const [user, memberCount, commissionAgg] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id: agentId },
         select: { balance: true, rebateRate: true, priceMultiplier: true },
@@ -32,24 +32,28 @@ export class AgentService {
         where: { userId: agentId, type: BalanceTxType.COMMISSION },
         _sum: { amount: true },
       }),
-      this.prisma.user.findMany({ where: { agentId }, select: { id: true } }),
     ]);
 
-    const ids = members.map((m) => m.id);
-    // 请求/token 计全部调用（BYOK 也是真实用量），消费只计实际扣费
-    const [usage, billed] = ids.length
-      ? await Promise.all([
-          this.prisma.requestLog.aggregate({
-            where: { userId: { in: ids }, createdAt: { gte: since } },
-            _count: { _all: true },
-            _sum: { totalTokens: true },
-          }),
-          this.prisma.requestLog.aggregate({
-            where: { userId: { in: ids }, createdAt: { gte: since }, chargeable: true },
-            _sum: { cost: true },
-          }),
-        ])
-      : [null, null];
+    // 请求/token 计全部调用（BYOK 也是真实用量），消费只计实际扣费。
+    // 用关系过滤 `user.agentId` 代替「先 findMany 拿 ids 再 IN」：省一次查询，也不用拼大 IN 列表
+    const memberCond: Prisma.RequestLogWhereInput = {
+      user: { agentId },
+      createdAt: { gte: since },
+    };
+    const [usage, billed] =
+      memberCount > 0
+        ? await Promise.all([
+            this.prisma.requestLog.aggregate({
+              where: memberCond,
+              _count: { _all: true },
+              _sum: { totalTokens: true },
+            }),
+            this.prisma.requestLog.aggregate({
+              where: { ...memberCond, chargeable: true },
+              _sum: { cost: true },
+            }),
+          ])
+        : [null, null];
 
     return {
       balance: user ? Number(user.balance) : 0,

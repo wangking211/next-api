@@ -2,6 +2,7 @@ import { UsageService, UsageEntry } from './usage.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { BillingService } from '../billing/billing.service';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 
 /**
  * 计费口径：
@@ -16,9 +17,8 @@ function makeService() {
   const prisma = {
     $transaction: (cb: any) => cb(tx),
     usageDaily: {
-      findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({}),
-      updateMany: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     user: { updateMany: jest.fn().mockResolvedValue({}) },
     requestLog: {
@@ -141,6 +141,55 @@ describe('UsageService 计费口径', () => {
 
     expect(billing.recordConsumption).toHaveBeenCalled();
     expect(prisma.usageDaily.create).toHaveBeenCalled();
+  });
+
+  it('日聚合 updateMany-first：已存在行时直接自增，不再 create', async () => {
+    const { service, prisma } = makeService();
+    prisma.usageDaily.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    await service.record({ ...baseEntry, chargeable: true });
+
+    expect(prisma.usageDaily.create).not.toHaveBeenCalled();
+    expect(prisma.usageDaily.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.usageDaily.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user1', apiKeyId: 'k1', date: expect.any(Date) },
+      data: expect.objectContaining({ requests: { increment: 1 } }),
+    });
+  });
+
+  it('日聚合 create 撞唯一约束（并发首写）时回退 updateMany 自增', async () => {
+    const { service, prisma } = makeService();
+    prisma.usageDaily.create.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`userId`,`apiKeyId`,`date`)', {
+        code: 'P2002',
+        clientVersion: '6.2.1',
+      }),
+    );
+
+    await service.record({ ...baseEntry, chargeable: true });
+
+    // 首次 updateMany 命中 0 行 → create → P2002 → 再 updateMany 自增
+    expect(prisma.usageDaily.updateMany).toHaveBeenCalledTimes(2);
+    expect(prisma.usageDaily.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('进程内节流：5 分钟内同一用户只写一次 lastActiveAt', async () => {
+    const { service, prisma } = makeService();
+
+    await service.record({ ...baseEntry, chargeable: true });
+    await service.record({ ...baseEntry, chargeable: true });
+    await service.record({ ...baseEntry, chargeable: true });
+
+    expect(prisma.user.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('不同用户各自节流（互不干扰）', async () => {
+    const { service, prisma } = makeService();
+
+    await service.record({ ...baseEntry, chargeable: true });
+    await service.record({ ...baseEntry, userId: 'user2', chargeable: true });
+
+    expect(prisma.user.updateMany).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -51,6 +51,12 @@ model User {
   payments    PaymentOrder[]
 
   @@index([lastActiveAt])
+  // 代理/分销维度：按 agentId 聚合名下成员（overview/members 的关系过滤走这里）
+  @@index([agentId])
+  // 分组维度：按 groupId 筛选/统计用户
+  @@index([groupId])
+  // 管理端按创建时间倒序分页
+  @@index([createdAt])
 }
 
 model WithdrawalRequest {
@@ -228,7 +234,7 @@ model ApiKey {
   logs  RequestLog[]
   usage UsageDaily[]
 
-  @@index([userId])
+  @@index([userId, createdAt]) // 复合索引前缀已覆盖 userId-only 查询
 }
 
 enum ChannelOwnerType {
@@ -435,4 +441,6 @@ model UsageDaily {
   @@unique([userId, apiKeyId, date])
   @@index([userId, date])
   @@index([apiKeyId, date])
+  // 管理端按日期维度聚合（不带 userId 过滤）走这里
+  @@index([date])
 }

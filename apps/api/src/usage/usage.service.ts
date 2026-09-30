@@ -2,7 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { BillingService } from '../billing/billing.service';
+import { BillingService, ChannelPricing } from '../billing/billing.service';
 import { MetricsService } from '../observability/metrics.service';
 import { truncate } from './content.util';
 
@@ -30,6 +30,11 @@ export interface UsageEntry {
   /** 直接指定费用（按次计费模型：图片等）；给定时跳过 token 计价 */
   costOverride?: number;
   upstreamCostOverride?: number;
+  /**
+   * 渠道×模型定价（网关 resolve 时已带出）；命中时 computeCosts 免查目录与渠道价，
+   * 热路径省 2 次查询。缺省则回退 getChannelPricing。
+   */
+  pricing?: ChannelPricing;
   /** 输入文本（messages 拍平），受 LOG_CONTENT 开关控制 */
   requestPreview?: string | null;
   /** 输出文本，受 LOG_CONTENT 开关控制 */
@@ -63,6 +68,13 @@ export class UsageService {
   private readonly logger = new Logger(UsageService.name);
   private readonly logContent: boolean;
   private readonly maxChars: number;
+  /** 进程内「已写最后活跃」节流表：userId → 上次成功写库时刻（ms） */
+  private readonly lastActiveWrites = new Map<string, number>();
+
+  /** 最后活跃写入的节流窗口（与 DB 侧 stale 条件同口径） */
+  private static readonly LAST_ACTIVE_TTL_MS = 5 * 60_000;
+  /** 节流表容量上限：到顶先清过期项，仍超则整体重建 */
+  private static readonly LAST_ACTIVE_MAX_ENTRIES = 10_000;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -85,8 +97,11 @@ export class UsageService {
     cacheReadTokens = 0,
     cacheWriteTokens = 0,
     multiplierOverride?: number,
+    /** 已带出的定价（resolve 结果）：命中即免查渠道价与目录价 */
+    pricingOverride?: ChannelPricing,
   ): Promise<{ cost: number; upstreamCost: number }> {
-    const pricing = await this.billing.getChannelPricing(channelId, model);
+    const pricing =
+      pricingOverride ?? (await this.billing.getChannelPricing(channelId, model));
     const multiplier =
       multiplierOverride ?? (userId ? await this.billing.getUserMultiplier(userId) : 1);
     const nonCached = Math.max(0, promptTokens - cacheReadTokens);
@@ -128,6 +143,7 @@ export class UsageService {
             entry.cacheReadTokens ?? 0,
             entry.cacheWriteTokens ?? 0,
             multiplier,
+            entry.pricing,
           );
     const date = utcDay();
 
@@ -224,25 +240,45 @@ export class UsageService {
     await this.touchLastActive(entry.userId);
   }
 
-  /** 刷新用户最后活跃时间（超过 5 分钟才落一次写；失败静默） */
+  /** 刷新用户最后活跃时间（进程内先节流 5 分钟，再由 DB stale 条件二次把关；失败静默） */
   private async touchLastActive(userId?: string | null): Promise<void> {
     if (!userId) return;
+    const now = Date.now();
+    const last = this.lastActiveWrites.get(userId);
+    // 进程内先节流：5 分钟内本进程已写过就不再打库（DB 侧 stale 条件保留，多副本各自安全）
+    if (last !== undefined && now - last < UsageService.LAST_ACTIVE_TTL_MS) return;
     try {
-      const now = new Date();
-      const staleBefore = new Date(now.getTime() - 5 * 60_000);
       await this.prisma.user.updateMany({
         where: {
           id: userId,
-          OR: [{ lastActiveAt: null }, { lastActiveAt: { lt: staleBefore } }],
+          OR: [{ lastActiveAt: null }, { lastActiveAt: { lt: new Date(now - UsageService.LAST_ACTIVE_TTL_MS) } }],
         },
-        data: { lastActiveAt: now },
+        data: { lastActiveAt: new Date(now) },
       });
+      // 写成功（含 0 行命中：库里已是新鲜值）才记录节流时间
+      this.rememberLastActive(userId, now);
     } catch {
       // 活跃时间只是展示性数据，失败静默
     }
   }
 
-  /** 按天聚合：先查后写，命中唯一约束时回退为原子自增 */
+  /** 记录「已写最后活跃」的节流时间；容量到顶时先清过期项，仍超限则整体重建（内存兜底） */
+  private rememberLastActive(userId: string, now: number): void {
+    const m = this.lastActiveWrites;
+    if (m.size >= UsageService.LAST_ACTIVE_MAX_ENTRIES) {
+      for (const [k, ts] of m) {
+        if (now - ts >= UsageService.LAST_ACTIVE_TTL_MS) m.delete(k);
+      }
+      if (m.size >= UsageService.LAST_ACTIVE_MAX_ENTRIES) m.clear();
+    }
+    m.set(userId, now);
+  }
+
+  /**
+   * 按天聚合：updateMany-first（1 次写，无读后写竞态）。
+   * 首次出现该 (user, key, date) 组合时 updateMany 命中 0 行 → create；
+   * create 撞唯一约束（并发首写）时回退为 updateMany 原子自增。
+   */
   private async aggregateDaily(entry: UsageEntry, cost: number, date: Date): Promise<void> {
     const where = { userId: entry.userId, apiKeyId: entry.apiKeyId, date };
     const billed = entry.chargeable ? cost : 0;
@@ -255,11 +291,8 @@ export class UsageService {
       billedCost: { increment: billed },
     };
 
-    const existing = await this.prisma.usageDaily.findFirst({ where });
-    if (existing) {
-      await this.prisma.usageDaily.update({ where: { id: existing.id }, data: inc });
-      return;
-    }
+    const hit = await this.prisma.usageDaily.updateMany({ where, data: inc });
+    if (hit.count > 0) return;
     try {
       await this.prisma.usageDaily.create({
         data: {
@@ -363,7 +396,7 @@ export class UsageService {
 
   async summary(userId: string | null, days = 30) {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const [agg, billed] = await Promise.all([
+    const [agg, billed, successCount] = await Promise.all([
       this.prisma.requestLog.aggregate({
         where: { ...this.scope(userId), createdAt: { gte: since } },
         _count: { _all: true },
@@ -379,10 +412,11 @@ export class UsageService {
         where: { ...this.scope(userId), createdAt: { gte: since }, chargeable: true },
         _sum: { cost: true },
       }),
+      // 成功计数与前两个聚合互不依赖 → 并行（三者只读）
+      this.prisma.requestLog.count({
+        where: { ...this.scope(userId), createdAt: { gte: since }, status: { lt: 400 } },
+      }),
     ]);
-    const successCount = await this.prisma.requestLog.count({
-      where: { ...this.scope(userId), createdAt: { gte: since }, status: { lt: 400 } },
-    });
     return {
       rangeDays: days,
       requests: agg._count._all,
@@ -504,6 +538,9 @@ export class UsageService {
       ...(until ? { lte: until } : {}),
     };
     const base: Prisma.RequestLogWhereInput = { ...this.scope(userId), createdAt: created };
+    // 实际扣费部分：仅 chargeable 的调用，用于「费用(已扣)」口径（与余额扣款同口径）
+    const billedBase: Prisma.RequestLogWhereInput = { ...base, chargeable: true };
+    const billedAgg = { cost: true, upstreamCost: true } as const;
 
     const [
       byModel,
@@ -514,6 +551,12 @@ export class UsageService {
       byApiKey,
       totals,
       totalErr,
+      // 实际扣费部分（仅 chargeable 的调用，用于「费用(已扣)」口径）不依赖上面任何结果 → 一波并行
+      billedByModel,
+      billedByChannel,
+      billedByUser,
+      billedByApiKey,
+      billedTotals,
     ] = await Promise.all([
       this.prisma.requestLog.groupBy({
         by: ['model'],
@@ -558,18 +601,6 @@ export class UsageService {
           _sum: { totalTokens: true, cost: true, upstreamCost: true },
         }),
         this.prisma.requestLog.count({ where: { ...base, status: { gte: 400 } } }),
-      ]);
-
-    const errByModel = new Map(byModelErr.map((r) => [r.model, r._count._all]));
-    const errByChannel = new Map(
-      byChannelErr.map((r) => [r.channelId, r._count._all]),
-    );
-
-    // 实际扣费部分：同维度再聚合一次（仅 chargeable 的调用），用于「费用(已扣)」口径
-    const billedBase: Prisma.RequestLogWhereInput = { ...base, chargeable: true };
-    const billedAgg = { cost: true, upstreamCost: true } as const;
-    const [billedByModel, billedByChannel, billedByUser, billedByApiKey, billedTotals] =
-      await Promise.all([
         this.prisma.requestLog.groupBy({
           by: ['model'],
           where: billedBase,
@@ -597,6 +628,11 @@ export class UsageService {
           _sum: billedAgg,
         }),
       ]);
+
+    const errByModel = new Map(byModelErr.map((r) => [r.model, r._count._all]));
+    const errByChannel = new Map(
+      byChannelErr.map((r) => [r.channelId, r._count._all]),
+    );
 
     /** 平台口径：实收（billedCost）与实付上游成本（billedUpstreamCost），BYOK 两者皆为 0 */
     const billedMap = (rows: any[], key: string) =>

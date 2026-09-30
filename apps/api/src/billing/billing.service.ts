@@ -1,35 +1,57 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { BalanceTxType, Prisma, RedeemCodeStatus } from '@prisma/client';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { BalanceTxType, ModelCatalog, Prisma, RedeemCodeStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { TtlCacheService } from '../common/ttl-cache.service';
 import { generateRedeemCode, normalizeCode } from './redeem.util';
+import {
+  CatalogPricingRow,
+  ChannelModelPricingRow,
+  ChannelPricing,
+  deriveChannelPricing,
+} from './pricing.util';
+
+export { ChannelPricing } from './pricing.util';
 
 function round6(n: number): number {
   return Math.round(n * 1e6) / 1e6;
 }
 
-export interface ChannelPricing {
-  /** 对用户售价 USD/1M tokens */
-  priceInput: number;
-  priceOutput: number;
-  /** 上游成本 USD/1M tokens */
-  costInput: number;
-  costOutput: number;
-  /** 缓存读/写 售价与成本（USD/1M tokens） */
-  cacheReadPrice: number;
-  cacheWritePrice: number;
-  cacheReadCost: number;
-  cacheWriteCost: number;
-  /** 按次售价/成本（USD/次）：图片等非 token 计费模型 */
-  pricePerCall: number;
-  costPerCall: number;
-  /** 是否来自渠道×模型显式定价（否则为目录默认价） */
-  explicit: boolean;
-}
+/** getChannelPricing 需要的渠道×模型定价字段（与 pricing.util 的结构子集一致） */
+const CM_PRICE_SELECT = {
+  priceInput: true,
+  priceOutput: true,
+  costInput: true,
+  costOutput: true,
+  discount: true,
+  costDiscount: true,
+  priceDiscount: true,
+  pricePerCall: true,
+  costPerCall: true,
+} as const;
+
+const CATALOG_PRICE_SELECT = {
+  inputPrice: true,
+  outputPrice: true,
+  cacheReadPrice: true,
+  cacheWritePrice: true,
+  perCallPrice: true,
+} as const;
 
 @Injectable()
 export class BillingService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly catalogTtl: number;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    // 测试里手工 `new BillingService(prisma)` 时未传缓存 → 直查数据库
+    @Optional() private readonly cache?: TtlCacheService,
+    @Optional() config?: ConfigService,
+  ) {
+    this.catalogTtl =
+      Number(config?.get<string>('CATALOG_CACHE_TTL_MS', '60000')) || 60_000;
+  }
 
   async getBalance(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -54,81 +76,34 @@ export class BillingService {
             where: {
               channelId_modelName: { channelId, modelName: model },
             },
-            select: {
-              priceInput: true,
-              priceOutput: true,
-              costInput: true,
-              costOutput: true,
-              discount: true,
-              costDiscount: true,
-              priceDiscount: true,
-              pricePerCall: true,
-              costPerCall: true,
-            },
+            select: CM_PRICE_SELECT,
           })
         : Promise.resolve(null),
-      this.prisma.modelCatalog.findUnique({
-        where: { name: model },
-        select: {
-          inputPrice: true,
-          outputPrice: true,
-          cacheReadPrice: true,
-          cacheWritePrice: true,
-          perCallPrice: true,
-        },
-      }),
+      this.catalogRow(model),
     ]);
+    return deriveChannelPricing(
+      cm as ChannelModelPricingRow | null,
+      catalog as CatalogPricingRow | null,
+    );
+  }
 
-    const officialIn = catalog ? Number(catalog.inputPrice) : 0;
-    const officialOut = catalog ? Number(catalog.outputPrice) : 0;
-    const officialCacheRead = catalog ? Number(catalog.cacheReadPrice) : 0;
-    const officialCacheWrite = catalog ? Number(catalog.cacheWritePrice) : 0;
-    const officialPerCall =
-      catalog?.perCallPrice != null ? Number(catalog.perCallPrice) : 0;
-    // 兼容旧 discount：仅作为下游售价折扣
-    const priceDisc =
-      cm?.priceDiscount != null
-        ? Number(cm.priceDiscount)
-        : cm?.discount != null
-          ? Number(cm.discount)
-          : 1;
-    const costDisc = cm?.costDiscount != null ? Number(cm.costDiscount) : 1;
-
-    const priceInput =
-      cm?.priceInput != null ? Number(cm.priceInput) : officialIn * priceDisc;
-    const priceOutput =
-      cm?.priceOutput != null ? Number(cm.priceOutput) : officialOut * priceDisc;
-    const costInput =
-      cm?.costInput != null ? Number(cm.costInput) : officialIn * costDisc;
-    const costOutput =
-      cm?.costOutput != null ? Number(cm.costOutput) : officialOut * costDisc;
-    const pricePerCall =
-      cm?.pricePerCall != null ? Number(cm.pricePerCall) : officialPerCall * priceDisc;
-    const costPerCall =
-      cm?.costPerCall != null ? Number(cm.costPerCall) : officialPerCall * costDisc;
-
-    return {
-      priceInput,
-      priceOutput,
-      costInput,
-      costOutput,
-      cacheReadPrice: officialCacheRead * priceDisc,
-      cacheWritePrice: officialCacheWrite * priceDisc,
-      cacheReadCost: officialCacheRead * costDisc,
-      cacheWriteCost: officialCacheWrite * costDisc,
-      pricePerCall,
-      costPerCall,
-      explicit:
-        cm?.priceInput != null ||
-        cm?.priceOutput != null ||
-        cm?.costInput != null ||
-        cm?.costOutput != null ||
-        cm?.pricePerCall != null ||
-        cm?.costPerCall != null ||
-        cm?.costDiscount != null ||
-        cm?.priceDiscount != null ||
-        cm?.discount != null,
-    };
+  /**
+   * 目录行（带 TTL 缓存）：网关热路径每次落账都要读官方价，
+   * 命中时归零查询；未注入缓存（测试手工构造）时退回直查。
+   */
+  async catalogRow(model: string): Promise<CatalogPricingRow | null> {
+    if (this.cache) {
+      const rows = await this.cache.getOrLoad<ModelCatalog[]>(
+        'catalog:all',
+        this.catalogTtl,
+        () => this.prisma.modelCatalog.findMany(),
+      );
+      return rows.find((r) => r.name === model) ?? null;
+    }
+    return this.prisma.modelCatalog.findUnique({
+      where: { name: model },
+      select: CATALOG_PRICE_SELECT,
+    });
   }
 
   /** 该模型在渠道下是否为 0 价（免费，无需余额）；按次模型以按次价为准 */
@@ -146,11 +121,35 @@ export class BillingService {
    * 解析有效售价倍率及其来源（互斥优先，不叠乘）：
    * 用户个人倍率 > 分组倍率 > 所属代理倍率 > 1。
    * groupRatio 由网关按「令牌分组 > 用户分组 > 默认分组」解析后传入。
+   *
+   * snapshot：调用方已持有的用户行（含 priceMultiplier/agentId）时直传，
+   * 可免掉一次 user 查询；仅当需要回退到代理倍率时才查库（1 次）。
    */
   async getBillingMultiplier(
     userId: string,
     groupRatio?: number | null,
+    snapshot?: { priceMultiplier?: unknown; agentId?: string | null },
   ): Promise<{ value: number; source: 'user' | 'group' | 'agent' | 'default' }> {
+    if (snapshot) {
+      if (snapshot.priceMultiplier != null) {
+        const v = Number(snapshot.priceMultiplier);
+        if (v > 0) return { value: v, source: 'user' };
+      }
+      if (groupRatio != null && groupRatio > 0) {
+        return { value: groupRatio, source: 'group' };
+      }
+      if (snapshot.agentId) {
+        const agent = await this.prisma.user.findUnique({
+          where: { id: snapshot.agentId },
+          select: { priceMultiplier: true },
+        });
+        if (agent?.priceMultiplier != null) {
+          const v = Number(agent.priceMultiplier);
+          if (v > 0) return { value: v, source: 'agent' };
+        }
+      }
+      return { value: 1, source: 'default' };
+    }
     const u = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {

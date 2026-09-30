@@ -64,4 +64,61 @@ describe('BillingService.getBillingMultiplier', () => {
     const s = svc({ priceMultiplier: 1.25, agent: null });
     await expect(s.getUserMultiplier('u')).resolves.toBe(1.25);
   });
+
+  describe('snapshot（调用方已持有用户行时 0 查询）', () => {
+    function svcWith(prisma: unknown) {
+      return new BillingService(prisma as unknown as PrismaService);
+    }
+
+    it('snapshot 自带个人倍率 → 完全不查库', async () => {
+      const prisma = { user: { findUnique: jest.fn() } };
+      const s = svcWith(prisma);
+      await expect(
+        s.getBillingMultiplier('u', 0.8, { priceMultiplier: 1.5, agentId: 'a1' }),
+      ).resolves.toEqual({ value: 1.5, source: 'user' });
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('snapshot 无个人倍率 → 用分组倍率，仍不查库', async () => {
+      const prisma = { user: { findUnique: jest.fn() } };
+      const s = svcWith(prisma);
+      await expect(
+        s.getBillingMultiplier('u', 0.8, { priceMultiplier: null, agentId: 'a1' }),
+      ).resolves.toEqual({ value: 0.8, source: 'group' });
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('只有代理时才查 1 次代理倍率', async () => {
+      const prisma = {
+        user: { findUnique: jest.fn().mockResolvedValue({ priceMultiplier: 0.9 }) },
+      };
+      const s = svcWith(prisma);
+      await expect(
+        s.getBillingMultiplier('u', null, { priceMultiplier: null, agentId: 'a1' }),
+      ).resolves.toEqual({ value: 0.9, source: 'agent' });
+      expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
+      expect(prisma.user.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'a1' } }),
+      );
+    });
+
+    it('无个人/分组/代理 → 默认 1 且 0 查询', async () => {
+      const prisma = { user: { findUnique: jest.fn() } };
+      const s = svcWith(prisma);
+      await expect(
+        s.getBillingMultiplier('u', null, { priceMultiplier: null, agentId: null }),
+      ).resolves.toEqual({ value: 1, source: 'default' });
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('代理存在但未配倍率 → 回退默认 1', async () => {
+      const prisma = {
+        user: { findUnique: jest.fn().mockResolvedValue({ priceMultiplier: null }) },
+      };
+      const s = svcWith(prisma);
+      await expect(
+        s.getBillingMultiplier('u', null, { priceMultiplier: null, agentId: 'a1' }),
+      ).resolves.toEqual({ value: 1, source: 'default' });
+    });
+  });
 });

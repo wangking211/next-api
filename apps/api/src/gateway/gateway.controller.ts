@@ -28,6 +28,7 @@ import {
 } from './anthropic-format';
 import { UsageService } from '../usage/usage.service';
 import { BillingService } from '../billing/billing.service';
+import type { ChannelPricing } from '../billing/pricing.util';
 import { GroupsService } from '../groups/groups.service';
 import { SseUsageCollector } from '../usage/sse-usage.collector';
 import { estimatePromptTokens, estimateTokensFromText } from '../usage/token.util';
@@ -119,6 +120,8 @@ function embeddingsResponsePreview(json: any): string {
 export class GatewayController {
   private readonly streamIdleMs: number;
   private readonly defaultMaxOutputTokens: number;
+  /** 内容日志开关（与 UsageService 同口径）：false 时跳过拍平/抽取，省 CPU（生产 LOG_CONTENT=false） */
+  private readonly logContent: boolean;
 
   constructor(
     private readonly resolver: ChannelResolverService,
@@ -134,13 +137,14 @@ export class GatewayController {
       Number(config.get<string>('STREAM_IDLE_TIMEOUT_MS', '120000')) || 120000;
     this.defaultMaxOutputTokens =
       Number(config.get<string>('PREAUTH_MAX_OUTPUT_TOKENS', '4096')) || 4096;
+    this.logContent = config.get<string>('LOG_CONTENT', 'false') !== 'false';
   }
 
   @ApiOperation({ summary: '列出当前 Key 可用模型（含 capabilities 与别名）' })
   @Get('models')
   async listModels(@Req() req: GatewayRequest, @Res() res: Response) {
     const { user, apiKey } = req.gateway;
-    const group = await this.groups.effectiveGroup(user.id, apiKey.groupId);
+    const group = await this.groups.effectiveGroup(user, apiKey.groupId);
     let names = await this.resolver.availableModels(user.id, group.id);
     // 模型分组可见性（分组未配置可见模型 = 不限制）
     names = names.filter((n) => this.groups.isModelVisible(group, n));
@@ -255,11 +259,11 @@ export class GatewayController {
     if (!requested) {
       return res.status(400).json(err('Missing required field: model'));
     }
-    // 别名解析（含 :latest）到规范名后再路由/计费/记日志
-    const model = await this.resolver.resolveAlias(requested);
-
-    // 生效分组（令牌分组 > 用户分组 > 默认分组）：决定可见模型、渠道隔离与分组倍率
-    const group = await this.groups.effectiveGroup(user.id, apiKey.groupId);
+    // 别名解析（含 :latest）与生效分组（令牌 > 用户 > 默认）互不依赖 → 并行
+    const [model, group] = await Promise.all([
+      this.resolver.resolveAlias(requested),
+      this.groups.effectiveGroup(user, apiKey.groupId),
+    ]);
     if (!this.groups.isModelVisible(group, model)) {
       return res
         .status(404)
@@ -271,16 +275,17 @@ export class GatewayController {
           ),
         );
     }
-    const billingInfo = await this.billing.getBillingMultiplier(user.id, group.ratio);
-
-    // 能力校验：目录声明了 capabilities 时，请求所需能力必须被覆盖（未声明则放行）
-    if (!(await this.checkCapabilities(model, body, res, err))) return;
-
-    const channels = await this.resolver.resolve(user.id, model, {
-      strategy: apiKey.routingStrategy,
-      stickyKey: this.buildStickyKey(req, user.id, body),
-      groupId: group.id,
-    });
+    // 倍率 / 能力校验 / 路由互不依赖 → 并行执行（三者都只读，失败语义与串行一致）
+    const [billingInfo, channels, capsOk] = await Promise.all([
+      this.billing.getBillingMultiplier(user.id, group.ratio, user),
+      this.resolver.resolve(user.id, model, {
+        strategy: apiKey.routingStrategy,
+        stickyKey: this.buildStickyKey(req, user.id, body),
+        groupId: group.id,
+      }),
+      this.checkCapabilities(model, body, res, err),
+    ]);
+    if (!capsOk) return;
     if (channels.length === 0) {
       return res
         .status(404)
@@ -296,7 +301,8 @@ export class GatewayController {
     const isStream = body.stream === true;
     const startedAt = Date.now();
     const promptFallback = estimatePromptTokens(body);
-    const requestPreview = flattenMessages(body);
+    // LOG_CONTENT=false 时不拍平请求体（生产默认关；落库侧同样会丢弃，纯属省 CPU）
+    const requestPreview = this.logContent ? flattenMessages(body) : '';
     let lastError: UpstreamError | null = null;
 
     // 平台渠道需余额：0 价模型豁免；对每个候选渠道按“输入 + 最大输出”预估上限做预授权，避免单次调用透支
@@ -315,17 +321,16 @@ export class GatewayController {
     });
 
     for (let i = 0; i < channels.length; i++) {
-      const { channel, apiKey: upstreamKey, upstreamModelName } = channels[i];
+      const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
       // 模型映射：对外规范名 → 上游真实名（渠道×模型未配置则用规范名）
       const upstreamModel = upstreamModelName ?? model;
       const upstreamBody =
         upstreamModel === model ? body : { ...body, model: upstreamModel };
       if (channel.ownerType === ChannelOwnerType.PLATFORM) {
-        // 预授权：按该渠道的售价预估上限，余额不足则跳过
-        const p = await this.billing.getChannelPricing(channel.id, model);
+        // 预授权：按该渠道的售价预估上限，余额不足则跳过（定价随 resolve 结果带出，免再查）
         const required =
-          ((promptFallback / 1_000_000) * p.priceInput +
-            (maxOutputTokens / 1_000_000) * p.priceOutput) *
+          ((promptFallback / 1_000_000) * pricing.priceInput +
+            (maxOutputTokens / 1_000_000) * pricing.priceOutput) *
           (await guards.getUserMultiplier());
         if (required > 0 && (await guards.getBalance()) < required) {
           insufficientBalance = true;
@@ -358,6 +363,7 @@ export class GatewayController {
             apiFormat,
             multiplier: billingInfo.value,
             multiplierSource: billingInfo.source,
+            pricing,
             tpm: req.gateway.tpm,
           });
         }
@@ -384,11 +390,14 @@ export class GatewayController {
             chargeable: channel.ownerType === ChannelOwnerType.PLATFORM,
             isStream: false,
             requestPreview,
-            responsePreview: extractAssistantText(result.json),
+            responsePreview: this.logContent
+              ? extractAssistantText(result.json)
+              : null,
             multiplier: billingInfo.value,
             multiplierSource: billingInfo.source,
+            pricing,
           }),
-          this.health.recordSuccess(channel.id),
+          this.health.recordSuccess(channel.id, channel.failureCount),
           this.metrics.record(channel.id, model, 'ok', {
             latencyMs: Date.now() - attemptStart,
             completionTokens: usage.completionTokens,
@@ -420,6 +429,9 @@ export class GatewayController {
             requestPreview,
             isStream,
             hasMore: i < channels.length - 1,
+            pricing,
+            multiplier: billingInfo.value,
+            multiplierSource: billingInfo.source,
             errorBody: err,
           });
           if (action === 'continue') continue;
@@ -515,6 +527,10 @@ export class GatewayController {
       requestPreview: string;
       isStream: boolean;
       hasMore: boolean;
+      /** 已解析的定价与倍率（随 resolve 结果带出）：失败落账同样免查 */
+      pricing?: ChannelPricing;
+      multiplier?: number;
+      multiplierSource?: string;
       errorBody: (message: string, type?: string, code?: string | null) => any;
     },
   ): Promise<'continue' | 'responded'> {
@@ -574,6 +590,9 @@ export class GatewayController {
       chargeable: ctx.channel.ownerType === ChannelOwnerType.PLATFORM,
       isStream: ctx.isStream,
       requestPreview: ctx.requestPreview,
+      pricing: ctx.pricing,
+      multiplier: ctx.multiplier,
+      multiplierSource: ctx.multiplierSource,
     });
     if (modelDenied) {
       // 所有候选上游都无该模型权限：返回明确的 model_not_found，而非透传上游 403 文案
@@ -625,9 +644,11 @@ export class GatewayController {
         .json(err('Missing required field: input (non-empty string or array of strings/tokens)'));
     }
 
-    const model = await this.resolver.resolveAlias(requested);
-    // 生效分组：决定可见模型、渠道隔离与分组倍率
-    const group = await this.groups.effectiveGroup(user.id, apiKey.groupId);
+    // 别名解析与生效分组互不依赖 → 并行（可见性 / 倍率 / 路由都依赖这两者）
+    const [model, group] = await Promise.all([
+      this.resolver.resolveAlias(requested),
+      this.groups.effectiveGroup(user, apiKey.groupId),
+    ]);
     if (!this.groups.isModelVisible(group, model)) {
       return res
         .status(404)
@@ -639,14 +660,17 @@ export class GatewayController {
           ),
         );
     }
-    const billingInfo = await this.billing.getBillingMultiplier(user.id, group.ratio);
-    if (!(await this.checkCapabilities(model, body, res, err))) return;
-
-    const channels = await this.resolver.resolve(user.id, model, {
-      strategy: apiKey.routingStrategy,
-      stickyKey: this.buildStickyKey(req, user.id, body),
-      groupId: group.id,
-    });
+    // 倍率 / 能力校验 / 路由互不依赖 → 并行执行（三者都只读，失败语义与串行一致）
+    const [billingInfo, channels, capsOk] = await Promise.all([
+      this.billing.getBillingMultiplier(user.id, group.ratio, user),
+      this.resolver.resolve(user.id, model, {
+        strategy: apiKey.routingStrategy,
+        stickyKey: this.buildStickyKey(req, user.id, body),
+        groupId: group.id,
+      }),
+      this.checkCapabilities(model, body, res, err),
+    ]);
+    if (!capsOk) return;
     if (channels.length === 0) {
       return res
         .status(404)
@@ -676,7 +700,7 @@ export class GatewayController {
     });
 
     for (let i = 0; i < channels.length; i++) {
-      const { channel, apiKey: upstreamKey, upstreamModelName } = channels[i];
+      const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
       // 模型映射：对外规范名 → 上游真实名
       const upstreamModel = upstreamModelName ?? model;
       const upstreamBody =
@@ -687,10 +711,9 @@ export class GatewayController {
         continue;
       }
       if (channel.ownerType === ChannelOwnerType.PLATFORM) {
-        // 预授权：embeddings 只有输入 token（输出恒为 0），按输入预估上限
-        const p = await this.billing.getChannelPricing(channel.id, model);
+        // 预授权：embeddings 只有输入 token（输出恒为 0），按输入预估上限（定价随 resolve 带出）
         const required =
-          (promptFallback / 1_000_000) * p.priceInput * (await guards.getUserMultiplier());
+          (promptFallback / 1_000_000) * pricing.priceInput * (await guards.getUserMultiplier());
         if (required > 0 && (await guards.getBalance()) < required) {
           insufficientBalance = true;
           continue;
@@ -729,8 +752,9 @@ export class GatewayController {
             responsePreview: embeddingsResponsePreview(result.json),
             multiplier: billingInfo.value,
             multiplierSource: billingInfo.source,
+            pricing,
           }),
-          this.health.recordSuccess(channel.id),
+          this.health.recordSuccess(channel.id, channel.failureCount),
           this.metrics.record(channel.id, model, 'ok', {
             latencyMs: Date.now() - attemptStart,
             completionTokens: usage.completionTokens,
@@ -755,6 +779,9 @@ export class GatewayController {
             requestPreview,
             isStream: false,
             hasMore: i < channels.length - 1,
+            pricing,
+            multiplier: billingInfo.value,
+            multiplierSource: billingInfo.source,
             errorBody: err,
           });
           if (action === 'continue') continue;
@@ -825,9 +852,11 @@ export class GatewayController {
     }
     const n = Math.max(1, Math.min(Math.floor(Number(body?.n ?? 1) || 1), 10));
 
-    const model = await this.resolver.resolveAlias(requested);
-    // 生效分组：决定可见模型、渠道隔离与分组倍率
-    const group = await this.groups.effectiveGroup(user.id, apiKey.groupId);
+    // 别名解析与生效分组互不依赖 → 并行（可见性 / 倍率 / 路由都依赖这两者）
+    const [model, group] = await Promise.all([
+      this.resolver.resolveAlias(requested),
+      this.groups.effectiveGroup(user, apiKey.groupId),
+    ]);
     if (!this.groups.isModelVisible(group, model)) {
       return res
         .status(404)
@@ -839,14 +868,17 @@ export class GatewayController {
           ),
         );
     }
-    const billingInfo = await this.billing.getBillingMultiplier(user.id, group.ratio);
-    if (!(await this.checkCapabilities(model, body, res, err))) return;
-
-    const channels = await this.resolver.resolve(user.id, model, {
-      strategy: apiKey.routingStrategy,
-      stickyKey: this.buildStickyKey(req, user.id, body),
-      groupId: group.id,
-    });
+    // 倍率 / 能力校验 / 路由互不依赖 → 并行执行（三者都只读，失败语义与串行一致）
+    const [billingInfo, channels, capsOk] = await Promise.all([
+      this.billing.getBillingMultiplier(user.id, group.ratio, user),
+      this.resolver.resolve(user.id, model, {
+        strategy: apiKey.routingStrategy,
+        stickyKey: this.buildStickyKey(req, user.id, body),
+        groupId: group.id,
+      }),
+      this.checkCapabilities(model, body, res, err),
+    ]);
+    if (!capsOk) return;
     if (channels.length === 0) {
       return res
         .status(404)
@@ -874,7 +906,7 @@ export class GatewayController {
     });
 
     for (let i = 0; i < channels.length; i++) {
-      const { channel, apiKey: upstreamKey, upstreamModelName } = channels[i];
+      const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
       // 模型映射：对外规范名 → 上游真实名
       const upstreamModel = upstreamModelName ?? model;
       const upstreamBody =
@@ -884,7 +916,6 @@ export class GatewayController {
         unsupported = true;
         continue;
       }
-      const pricing = await this.billing.getChannelPricing(channel.id, model);
       const pricePerCall = pricing.pricePerCall;
       const costPerCall = pricing.costPerCall;
       // 预授权：按次价 × 张数 × 倍率（未配置按次价时不做按次预授权）
@@ -931,6 +962,7 @@ export class GatewayController {
             responsePreview: `[images ${images}]`,
             multiplier: billingInfo.value,
             multiplierSource: billingInfo.source,
+            pricing,
             ...(perCall
               ? {
                   costOverride: pricePerCall * n * billingInfo.value,
@@ -938,7 +970,7 @@ export class GatewayController {
                 }
               : {}),
           }),
-          this.health.recordSuccess(channel.id),
+          this.health.recordSuccess(channel.id, channel.failureCount),
           this.metrics.record(channel.id, model, 'ok', {
             latencyMs: Date.now() - attemptStart,
             status: result.status,
@@ -962,6 +994,9 @@ export class GatewayController {
             requestPreview,
             isStream: false,
             hasMore: i < channels.length - 1,
+            pricing,
+            multiplier: billingInfo.value,
+            multiplierSource: billingInfo.source,
             errorBody: err,
           });
           if (action === 'continue') continue;
@@ -1056,6 +1091,8 @@ export class GatewayController {
       /** 本次生效的售价倍率与来源（账单审计） */
       multiplier?: number;
       multiplierSource?: string;
+      /** 渠道×模型定价（随 resolve 带出）：落账免再查 */
+      pricing?: ChannelPricing;
       /** TPM 预扣上下文（guard 注入；流结束后回填实际用量） */
       tpm?: GatewayAuthContext['tpm'];
     },
@@ -1143,6 +1180,7 @@ export class GatewayController {
         responsePreview: collector.text,
         multiplier: meta.multiplier,
         multiplierSource: meta.multiplierSource,
+        pricing: meta.pricing,
       }),
     ];
 
@@ -1161,7 +1199,7 @@ export class GatewayController {
         );
       } else {
         tasks.push(
-          this.health.recordSuccess(meta.channel.id),
+          this.health.recordSuccess(meta.channel.id, meta.channel.failureCount),
           this.metrics.record(meta.channel.id, meta.model, 'ok', {
             latencyMs,
             status: 200,

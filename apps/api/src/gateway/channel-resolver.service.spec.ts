@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { ChannelOwnerType, ChannelStatus } from '@prisma/client';
 import { RoutingMetricsService, RouteMetrics } from './routing-metrics.service';
 import { GroupsService } from '../groups/groups.service';
+import { TtlCacheService } from '../common/ttl-cache.service';
 import { fnv1a } from './routing-score';
 
 function makeChannel(overrides: Record<string, unknown>) {
@@ -73,6 +74,7 @@ function makeService(
   rows: any[],
   decryptImpl?: (s: string) => string,
   metricsMap?: Map<string, RouteMetrics>,
+  cache?: TtlCacheService,
 ) {
   const prisma = {
     channelModel: { findMany: jest.fn().mockResolvedValue(rows) },
@@ -105,6 +107,7 @@ function makeService(
       metrics as unknown as RoutingMetricsService,
       groups as unknown as GroupsService,
       config,
+      cache,
     ),
     prisma,
     metrics,
@@ -423,5 +426,93 @@ describe('ChannelResolverService', () => {
       prisma.modelCatalog.findMany.mockResolvedValue([]);
       await expect(service.isModelAllowed('', ['gpt-4o'])).resolves.toBe(true);
     });
+  });
+});
+
+/**
+ * 目录快照缓存：注入 TtlCacheService 后，别名解析 / 白名单 / 元数据 / 定价都走 60s 内存副本
+ * （key `catalog:all`，loader 为 modelCatalog 全表 findMany），写路径在 models.service 按前缀失效。
+ */
+describe('ChannelResolverService catalog 快照缓存', () => {
+  const ROW = {
+    name: 'gpt-5.1',
+    aliases: ['gpt-5'],
+    provider: 'openai',
+    capabilities: ['tool'],
+    inputPrice: '1',
+    outputPrice: '2',
+    cacheReadPrice: '0.1',
+    cacheWritePrice: '0.2',
+    perCallPrice: null,
+  };
+
+  it('resolveAlias 命中快照：只加载一次，不走 findFirst', async () => {
+    const { service, prisma } = makeService([], undefined, undefined, new TtlCacheService());
+    prisma.modelCatalog.findMany.mockResolvedValue([ROW]);
+
+    await expect(service.resolveAlias('gpt-5')).resolves.toBe('gpt-5.1');
+    await expect(service.resolveAlias('gpt-5')).resolves.toBe('gpt-5.1');
+
+    expect(prisma.modelCatalog.findFirst).not.toHaveBeenCalled();
+    expect(prisma.modelCatalog.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('allowedModelSet 与 catalogFor 共享同一份快照', async () => {
+    const { service, prisma } = makeService([], undefined, undefined, new TtlCacheService());
+    prisma.modelCatalog.findMany.mockResolvedValue([ROW]);
+
+    await expect(service.allowedModelSet(['gpt-5'])).resolves.toEqual(new Set(['gpt-5.1']));
+    const meta = await service.catalogFor(['gpt-5.1']);
+
+    expect(meta.get('gpt-5.1')).toMatchObject({ provider: 'openai', capabilities: ['tool'] });
+    expect(prisma.modelCatalog.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.modelCatalog.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('resolve 从快照 + 渠道行本地派生 pricing，不再 findUnique 目录', async () => {
+    const { service, prisma } = makeService(
+      [
+        makeCM({
+          priceInput: 3,
+          priceOutput: 6,
+          costInput: 0.4,
+          costOutput: 0.8,
+        }),
+      ],
+      undefined,
+      undefined,
+      new TtlCacheService(),
+    );
+    prisma.modelCatalog.findMany.mockResolvedValue([{ ...ROW, name: 'm', aliases: [] }]);
+
+    const res = await service.resolve('u1', 'm');
+
+    expect(res).toHaveLength(1);
+    expect(res[0].pricing).toEqual({
+      priceInput: 3,
+      priceOutput: 6,
+      costInput: 0.4,
+      costOutput: 0.8,
+      cacheReadPrice: 0.1,
+      cacheWritePrice: 0.2,
+      cacheReadCost: 0.1,
+      cacheWriteCost: 0.2,
+      pricePerCall: 0,
+      costPerCall: 0,
+      explicit: true,
+    });
+    expect(prisma.modelCatalog.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('models.service 失效 catalog: 前缀后自动重载', async () => {
+    const cache = new TtlCacheService();
+    const { service, prisma } = makeService([], undefined, undefined, cache);
+    prisma.modelCatalog.findMany.mockResolvedValue([ROW]);
+
+    await service.resolveAlias('gpt-5');
+    cache.invalidate('catalog:');
+    await service.resolveAlias('gpt-5');
+
+    expect(prisma.modelCatalog.findMany).toHaveBeenCalledTimes(2);
   });
 });

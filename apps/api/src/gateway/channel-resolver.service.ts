@@ -1,11 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Channel, ChannelOwnerType, ChannelStatus, Prisma, RoutingStrategy } from '@prisma/client';
+import { Channel, ChannelOwnerType, ChannelStatus, ModelCatalog, Prisma, RoutingStrategy } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
+import { TtlCacheService } from '../common/ttl-cache.service';
 import { ResolvedChannel } from './types';
 import { RoutingMetricsService } from './routing-metrics.service';
 import { GroupsService } from '../groups/groups.service';
+import {
+  CatalogPricingRow,
+  ChannelModelPricingRow,
+  deriveChannelPricing,
+} from '../billing/pricing.util';
 import {
   DEFAULT_STRATEGY,
   applySticky,
@@ -41,6 +47,7 @@ export class ChannelResolverService {
   private readonly autoReenableMs: number;
   private readonly failureThreshold: number;
   private readonly debug: boolean;
+  private readonly catalogTtl: number;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -48,6 +55,8 @@ export class ChannelResolverService {
     private readonly metrics: RoutingMetricsService,
     private readonly groups: GroupsService,
     config: ConfigService,
+    // 测试里手工构造时未传缓存 → 退回直查（行为不变）
+    @Optional() private readonly cache?: TtlCacheService,
   ) {
     const s = config.get<string>('ROUTING_STRATEGY', DEFAULT_STRATEGY);
     this.defaultStrategy = isRoutingStrategy(s) ? s : DEFAULT_STRATEGY;
@@ -59,6 +68,40 @@ export class ChannelResolverService {
     this.failureThreshold =
       Number(config.get<string>('CHANNEL_FAILURE_THRESHOLD', '5')) || 5;
     this.debug = config.get<string>('ROUTING_DEBUG') === 'true';
+    this.catalogTtl =
+      Number(config.get<string>('CATALOG_CACHE_TTL_MS', '60000')) || 60_000;
+  }
+
+  /**
+   * 模型目录全表快照（默认 60s TTL，写路径在 models.service 失效）。
+   * 热路径的别名解析 / 白名单 / 元数据 / 官方价全部走这份内存副本。
+   * 未注入缓存（测试）时返回 null，调用方回退直查。
+   */
+  private async catalogRows(): Promise<ModelCatalog[] | null> {
+    if (!this.cache) return null;
+    return this.cache.getOrLoad<ModelCatalog[]>(
+      'catalog:all',
+      this.catalogTtl,
+      () => this.prisma.modelCatalog.findMany(),
+    );
+  }
+
+  /** 单行目录（带缓存）：热路径定价派生用；未注入缓存时退回单行直查 */
+  private async catalogRow(model: string): Promise<ModelCatalog | null> {
+    const rows = await this.catalogRows();
+    if (rows) return rows.find((r) => r.name === model) ?? null;
+    return this.prisma.modelCatalog
+      .findUnique({ where: { name: model } })
+      .catch(() => null);
+  }
+
+  /** 目录行按名/别名匹配（内存副本）：精确名优先，其次别名；均未命中返回 null */
+  private static matchByName(rows: ModelCatalog[], name: string): ModelCatalog | null {
+    return (
+      rows.find((r) => r.name === name) ??
+      rows.find((r) => r.aliases.includes(name)) ??
+      null
+    );
   }
 
   /** 半开恢复的冷却截止时刻（早于该时刻的自动禁用渠道重新进入候选） */
@@ -113,12 +156,9 @@ export class ChannelResolverService {
         },
         include: { channel: true },
       }),
-      this.prisma.modelCatalog.findUnique({
-        where: { name: model },
-        select: { inputPrice: true },
-      }),
+      this.catalogRow(model),
     ]);
-    const officialIn = catalog ? Number(catalog.inputPrice) : 0;
+    const officialIn = catalog?.inputPrice != null ? Number(catalog.inputPrice) : 0;
 
     const candidates: Candidate[] = [];
     const recoveries: Promise<void>[] = [];
@@ -140,7 +180,16 @@ export class ChannelResolverService {
           : officialIn * (cm.costDiscount != null ? Number(cm.costDiscount) : 1);
       candidates.push({
         id: cm.channel.id,
-        c: { channel: cm.channel, apiKey, upstreamModelName: cm.upstreamModelName },
+        c: {
+          channel: cm.channel,
+          apiKey,
+          upstreamModelName: cm.upstreamModelName,
+          // 本地派生定价：预授权/落账直接复用，热路径免再查渠道×模型价与目录价
+          pricing: deriveChannelPricing(
+            cm as unknown as ChannelModelPricingRow,
+            catalog as CatalogPricingRow | null,
+          ),
+        },
         tier: cm.channel.ownerType === ChannelOwnerType.USER ? 0 : 1,
         priority: cm.priority ?? cm.channel.priority,
         cost: rawCost > 0 ? rawCost : Number.POSITIVE_INFINITY,
@@ -239,35 +288,23 @@ export class ChannelResolverService {
     }
   }
 
-  supportsAnyModel(userId: string, model: string): Promise<unknown> {
-    return this.prisma.channelModel.findFirst({
-      where: {
-        modelName: model,
-        enabled: true,
-        channel: {
-          OR: [
-            { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
-            { ownerType: ChannelOwnerType.PLATFORM },
-          ],
-          AND: [this.availabilityWhere(this.reenableCutoff())],
-        },
-      },
-    });
-  }
-
   /**
    * 模型别名解析：目录 aliases 命中 → 规范名；`X:latest` → X（X 自身为别名时继续解析）；
    * 无命中原样返回。目录查询失败时降级为仅剥 `:latest` 后缀。
+   * 命中内存快照时 0 查询；未注入缓存时保持原有的逐次 findFirst。
    */
   async resolveAlias(model: string): Promise<string> {
     if (!model) return model;
-    const lookup = (name: string) =>
-      this.prisma.modelCatalog
-        .findFirst({
-          where: { OR: [{ name }, { aliases: { has: name } }] },
-          select: { name: true },
-        })
-        .catch(() => null);
+    const rows = await this.catalogRows();
+    const lookup = rows
+      ? (name: string) => Promise.resolve(ChannelResolverService.matchByName(rows, name))
+      : (name: string) =>
+          this.prisma.modelCatalog
+            .findFirst({
+              where: { OR: [{ name }, { aliases: { has: name } }] },
+              select: { name: true },
+            })
+            .catch(() => null);
     const direct = await lookup(model);
     if (direct) return direct.name;
     if (model.endsWith(':latest')) {
@@ -286,16 +323,21 @@ export class ChannelResolverService {
     Map<string, { name: string; provider: string; capabilities: string[]; aliases: string[] }>
   > {
     if (!names.length) return new Map();
-    const rows = await this.prisma.modelCatalog.findMany({
+    const rows = await this.catalogRows();
+    if (rows) {
+      const want = new Set(names);
+      return new Map(rows.filter((r) => want.has(r.name)).map((r) => [r.name, r]));
+    }
+    const direct = await this.prisma.modelCatalog.findMany({
       where: { name: { in: names } },
       select: { name: true, provider: true, capabilities: true, aliases: true },
     });
-    return new Map(rows.map((r) => [r.name, r]));
+    return new Map(direct.map((r) => [r.name, r]));
   }
 
   /**
    * 白名单 → 规范名集合。空/全无效返回 null（不限制）。
-   * 批量查询：`name in entries OR aliases hasSome entries`（1 次 findMany）；
+   * 批量查询：`name in entries OR aliases hasSome entries`（1 次 findMany，或内存快照 0 查询）；
    * 命中目录的条目归一为规范名，未命中的（含 DB 故障降级）原样保留（剥 `:latest`）。
    */
   async allowedModelSet(whitelist: string[]): Promise<Set<string> | null> {
@@ -307,10 +349,18 @@ export class ChannelResolverService {
     const uniq = [...new Set(entries)];
     let rows: { name: string; aliases: string[] }[];
     try {
-      rows = await this.prisma.modelCatalog.findMany({
-        where: { OR: [{ name: { in: uniq } }, { aliases: { hasSome: uniq } }] },
-        select: { name: true, aliases: true },
-      });
+      const snapshot = await this.catalogRows();
+      if (snapshot) {
+        const want = new Set(uniq);
+        rows = snapshot
+          .filter((r) => want.has(r.name) || r.aliases.some((a) => want.has(a)))
+          .map((r) => ({ name: r.name, aliases: r.aliases }));
+      } else {
+        rows = await this.prisma.modelCatalog.findMany({
+          where: { OR: [{ name: { in: uniq } }, { aliases: { hasSome: uniq } }] },
+          select: { name: true, aliases: true },
+        });
+      }
     } catch {
       rows = []; // 目录查询失败降级为字面比对
     }

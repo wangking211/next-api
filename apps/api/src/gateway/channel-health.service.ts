@@ -17,8 +17,15 @@ export class ChannelHealthService {
     this.webhook = config.get<string>('ALERT_WEBHOOK_URL') || undefined;
   }
 
-  /** 调用成功：清零失败计数。 */
-  async recordSuccess(channelId: string): Promise<void> {
+  /**
+   * 调用成功：清零失败计数。
+   *
+   * knownFailureCount：调用方（路由 resolve 结果）已持有的失败计数。为 0 时本就是
+   * no-op（where `failureCount > 0` 匹配不到行），直接跳过一次写查询；为 undefined
+   * 或 >0 时保持原逻辑。并发窗口：若读后被其它请求递增，本次可能漏清，下次成功自愈。
+   */
+  async recordSuccess(channelId: string, knownFailureCount?: number): Promise<void> {
+    if (knownFailureCount === 0) return;
     try {
       await this.prisma.channel.updateMany({
         where: { id: channelId, failureCount: { gt: 0 } },
