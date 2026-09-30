@@ -71,6 +71,22 @@ export interface ResolvedChannel {
   pricing: ChannelPricing;
 }
 
+/** 视频任务查询（状态/内容）：只需上游任务 id */
+export interface VideoTaskRequest {
+  taskId: string;
+  /** 上游超时（毫秒），默认 120000；传 0 表示不设（由外部 signal 控制） */
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+/** 视频内容（二进制流）：不缓冲整段视频，直接转发给客户端 */
+export interface VideoContentResult {
+  status: number;
+  contentType: string;
+  contentLength?: string;
+  stream: ReadableStream<Uint8Array>;
+}
+
 export interface Provider {
   readonly name: string;
   readonly aliases?: string[];
@@ -104,6 +120,28 @@ export interface Provider {
     apiKey: string,
     req: ChatRequest,
   ): Promise<NonStreamResult>;
+  /**
+   * 可选：`POST /v1/videos` 视频生成任务透传（OpenAI 兼容异步任务协议，如豆包 Seedance）。
+   * 与 embeddings/images 同款降级语义：未实现的服务商在视频调用中被跳过，
+   * 全部候选都不支持时网关返回 501。
+   */
+  videosCreate?(
+    channel: Channel,
+    apiKey: string,
+    req: ChatRequest,
+  ): Promise<NonStreamResult>;
+  /** 可选：`GET /v1/videos/{id}` 视频任务状态透传 */
+  videoStatus?(
+    channel: Channel,
+    apiKey: string,
+    req: VideoTaskRequest,
+  ): Promise<NonStreamResult>;
+  /** 可选：`GET /v1/videos/{id}/content` 视频内容透传（二进制流，不缓冲） */
+  videoContent?(
+    channel: Channel,
+    apiKey: string,
+    req: VideoTaskRequest,
+  ): Promise<VideoContentResult>;
 }
 
 export class UpstreamError extends Error {

@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   HttpCode,
+  Param,
   Post,
   Req,
   Res,
@@ -10,6 +11,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Response } from 'express';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ApiKeyGuard } from './guards/api-key.guard';
@@ -18,7 +21,7 @@ import { ChannelResolverService } from './channel-resolver.service';
 import { ProviderRegistry } from './providers/provider.registry';
 import { ChannelHealthService } from './channel-health.service';
 import { RoutingMetricsService } from './routing-metrics.service';
-import { GatewayAuthContext, GatewayRequest, StreamResult, UpstreamError, openaiError } from './types';
+import { GatewayAuthContext, GatewayRequest, ResolvedChannel, StreamResult, UpstreamError, openaiError } from './types';
 import { detectRequiredCapabilities } from './capabilities';
 import {
   AnthropicStreamTranslator,
@@ -30,6 +33,7 @@ import { UsageService } from '../usage/usage.service';
 import { BillingService } from '../billing/billing.service';
 import type { ChannelPricing } from '../billing/pricing.util';
 import { GroupsService } from '../groups/groups.service';
+import { VideoTaskService } from './video-task.service';
 import { SseUsageCollector } from '../usage/sse-usage.collector';
 import { estimatePromptTokens, estimateTokensFromText } from '../usage/token.util';
 import { flattenMessages, extractAssistantText } from '../usage/content.util';
@@ -111,6 +115,9 @@ function embeddingsResponsePreview(json: any): string {
   return `[embeddings ${data.length} ${dim}]`.trim();
 }
 
+/** 视频任务 id 只允许安全字符：防止路径穿越把请求打到上游的其它端点 */
+const VIDEO_TASK_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
+
 @ApiTags('gateway')
 @ApiBearerAuth('bearer')
 @UseGuards(ApiKeyGuard)
@@ -131,6 +138,7 @@ export class GatewayController {
     private readonly health: ChannelHealthService,
     private readonly metrics: RoutingMetricsService,
     private readonly groups: GroupsService,
+    private readonly videoTasks: VideoTaskService,
     config: ConfigService,
   ) {
     this.streamIdleMs =
@@ -237,6 +245,40 @@ export class GatewayController {
     @Body() body: Record<string, any>,
   ) {
     return this.executeImages(req, res, body);
+  }
+
+  /** OpenAI 兼容视频生成：异步任务（建任务 → 查状态 → 取内容），按次计费 */
+  @ApiOperation({
+    summary: 'OpenAI 兼容视频生成任务（/videos，异步，按次计费，支持故障转移）',
+  })
+  @Post('videos')
+  @HttpCode(200)
+  async videosCreate(
+    @Req() req: GatewayRequest,
+    @Res() res: Response,
+    @Body() body: Record<string, any>,
+  ) {
+    return this.executeVideoCreate(req, res, body);
+  }
+
+  @ApiOperation({ summary: '视频任务状态（/videos/{id}）' })
+  @Get('videos/:id')
+  async videoTaskStatus(
+    @Req() req: GatewayRequest,
+    @Res() res: Response,
+    @Param('id') id: string,
+  ) {
+    return this.executeVideoStatus(req, res, id);
+  }
+
+  @ApiOperation({ summary: '视频内容（/videos/{id}/content，二进制流透传）' })
+  @Get('videos/:id/content')
+  async videoTaskContent(
+    @Req() req: GatewayRequest,
+    @Res() res: Response,
+    @Param('id') id: string,
+  ) {
+    return this.executeVideoContent(req, res, id);
   }
 
   private async executeChat(
@@ -1037,6 +1079,383 @@ export class GatewayController {
           'upstream_error',
         ),
       );
+  }
+
+  /**
+   * 视频生成执行：与图片同构（别名→能力→路由→预授权→故障转移→按次计费），
+   * 差异在于上游是**异步任务**：这里只负责建任务并按次落账，
+   * 后续状态/内容查询走 GET /v1/videos/{id}（不再重复计费）。
+   */
+  private async executeVideoCreate(
+    req: GatewayRequest,
+    res: Response,
+    body: Record<string, any>,
+  ) {
+    const err = (
+      message: string,
+      type = 'invalid_request_error',
+      code: string | null = null,
+    ) => openaiError(message, type, code);
+    const { user, apiKey } = req.gateway;
+    const requested: string | undefined = body?.model;
+    if (!requested) {
+      return res.status(400).json(err('Missing required field: model'));
+    }
+    const prompt = body?.prompt;
+    if (typeof prompt !== 'string' || !prompt.trim()) {
+      return res
+        .status(400)
+        .json(err('Missing required field: prompt (non-empty string)'));
+    }
+
+    const [model, group] = await Promise.all([
+      this.resolver.resolveAlias(requested),
+      this.groups.effectiveGroup(user, apiKey.groupId),
+    ]);
+    if (!this.groups.isModelVisible(group, model)) {
+      return res
+        .status(404)
+        .json(
+          err(
+            `No available channel for model "${model}". Configure a channel that serves this model.`,
+            'model_not_found',
+            'model_not_found',
+          ),
+        );
+    }
+    if (!(await this.assertVideoCapable(model, res, err))) return;
+
+    // 倍率 / 路由互不依赖 → 并行
+    const [billingInfo, channels] = await Promise.all([
+      this.billing.getBillingMultiplier(user.id, group.ratio, user),
+      this.resolver.resolve(user.id, model, {
+        strategy: apiKey.routingStrategy,
+        stickyKey: this.buildStickyKey(req, user.id, body),
+        groupId: group.id,
+      }),
+    ]);
+    if (channels.length === 0) {
+      return res
+        .status(404)
+        .json(
+          err(
+            `No available channel for model "${model}". Configure a channel that serves this model.`,
+            'model_not_found',
+            'model_not_found',
+          ),
+        );
+    }
+
+    const startedAt = Date.now();
+    const requestPreview = this.logContent ? String(prompt).slice(0, 500) : '';
+    let lastError: UpstreamError | null = null;
+    let insufficientBalance = false;
+    let unsupported = false;
+    const guards = this.balanceGuards(user.id, billingInfo.value);
+
+    const upstreamAbort = new AbortController();
+    let clientClosed = false;
+    res.on('close', () => {
+      clientClosed = true;
+      upstreamAbort.abort();
+    });
+
+    for (let i = 0; i < channels.length; i++) {
+      const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
+      const upstreamModel = upstreamModelName ?? model;
+      const upstreamBody =
+        upstreamModel === model ? body : { ...body, model: upstreamModel };
+      const provider = this.providers.resolve(channel.provider);
+      if (typeof provider.videosCreate !== 'function') {
+        unsupported = true; // 未实现视频透传的服务商 → 换下一家
+        continue;
+      }
+      const pricePerCall = pricing.pricePerCall;
+      const costPerCall = pricing.costPerCall;
+      // 预授权：按次价 × 倍率（未配置按次价时不做预授权）
+      if (channel.ownerType === ChannelOwnerType.PLATFORM && pricePerCall > 0) {
+        const required = pricePerCall * billingInfo.value;
+        if ((await guards.getBalance()) < required) {
+          insufficientBalance = true;
+          continue;
+        }
+      }
+      const attemptStart = Date.now();
+      try {
+        const result = await provider.videosCreate(channel, upstreamKey, {
+          model: upstreamModel,
+          body: upstreamBody,
+          signal: upstreamAbort.signal,
+        });
+        const usage =
+          result.usage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+        const perCall = pricePerCall > 0;
+        const taskId = typeof result.json?.id === 'string' ? result.json.id : '';
+        if (taskId) {
+          // 记住任务落在哪家上游：状态/内容查询必须问同一家
+          this.videoTasks.remember(taskId, {
+            channelId: channel.id,
+            model,
+            userId: user.id,
+          });
+        }
+        await Promise.all([
+          this.usage.record({
+            userId: user.id,
+            apiKeyId: apiKey.id,
+            channelId: channel.id,
+            model,
+            provider: channel.provider,
+            ...usage,
+            latencyMs: Date.now() - startedAt,
+            status: result.status,
+            chargeable: channel.ownerType === ChannelOwnerType.PLATFORM,
+            isStream: false,
+            requestPreview,
+            responsePreview: taskId ? `[video task ${taskId}]` : '[video task]',
+            multiplier: billingInfo.value,
+            multiplierSource: billingInfo.source,
+            pricing,
+            ...(perCall
+              ? {
+                  costOverride: pricePerCall * billingInfo.value,
+                  upstreamCostOverride: costPerCall,
+                }
+              : {}),
+          }),
+          this.health.recordSuccess(channel.id, channel.failureCount),
+          this.metrics.record(channel.id, model, 'ok', {
+            latencyMs: Date.now() - attemptStart,
+            status: result.status,
+            totalTokens: usage.totalTokens,
+          }),
+        ]);
+        return res.status(result.status).json(result.json);
+      } catch (e) {
+        if (clientClosed) return;
+        if (e instanceof UpstreamError) {
+          lastError = e;
+          const action = await this.handleUpstreamFailure(e, {
+            res,
+            channel,
+            model,
+            attemptStart,
+            startedAt,
+            userId: user.id,
+            apiKeyId: apiKey.id,
+            requestPreview,
+            isStream: false,
+            hasMore: i < channels.length - 1,
+            pricing,
+            multiplier: billingInfo.value,
+            multiplierSource: billingInfo.source,
+            errorBody: err,
+          });
+          if (action === 'continue') continue;
+          return;
+        }
+        throw e;
+      }
+    }
+
+    if (insufficientBalance) {
+      return res
+        .status(403)
+        .json(
+          err(
+            'Insufficient balance. Please top up or configure a BYOK channel.',
+            'insufficient_quota',
+            'insufficient_balance',
+          ),
+        );
+    }
+    if (unsupported && !lastError) {
+      return res
+        .status(501)
+        .json(
+          err(
+            `Model "${model}": no upstream with video generation support among available channels ` +
+              '(/v1/videos is forwarded to openai-compatible providers only).',
+            'invalid_request_error',
+            'videos_not_supported',
+          ),
+        );
+    }
+    return res
+      .status(lastError?.status ?? 502)
+      .json(
+        err(
+          lastError ? upstreamErrorMessage(lastError) : 'All channels failed',
+          'upstream_error',
+        ),
+      );
+  }
+
+  /** 视频任务状态查询：定位建任务的渠道并透传（不计费、不计路由指标，避免轮询污染统计） */
+  private async executeVideoStatus(req: GatewayRequest, res: Response, taskId: string) {
+    const err = (
+      message: string,
+      type = 'invalid_request_error',
+      code: string | null = null,
+    ) => openaiError(message, type, code);
+    if (!VIDEO_TASK_ID_RE.test(taskId)) {
+      return res.status(400).json(err('Invalid video task id'));
+    }
+
+    const candidates = await this.videoCandidates(req, taskId);
+    let lastError: UpstreamError | null = null;
+    for (const { c, model: resolvedModel } of candidates) {
+      const provider = this.providers.resolve(c.channel.provider);
+      if (typeof provider.videoStatus !== 'function') continue;
+      try {
+        const result = await provider.videoStatus(c.channel, c.apiKey, { taskId });
+        const model =
+          typeof result.json?.model === 'string' ? result.json.model : resolvedModel;
+        // 回填映射：下次（含重启后）直接命中
+        this.videoTasks.remember(taskId, {
+          channelId: c.channel.id,
+          model,
+          userId: req.gateway.user.id,
+        });
+        return res.status(result.status).json(result.json);
+      } catch (e) {
+        if (e instanceof UpstreamError) {
+          lastError = e;
+          continue;
+        }
+        throw e;
+      }
+    }
+    return this.videoTaskNotFound(res, err, taskId, lastError);
+  }
+
+  /** 视频内容透传：二进制流直接转发（不计费） */
+  private async executeVideoContent(req: GatewayRequest, res: Response, taskId: string) {
+    const err = (
+      message: string,
+      type = 'invalid_request_error',
+      code: string | null = null,
+    ) => openaiError(message, type, code);
+    if (!VIDEO_TASK_ID_RE.test(taskId)) {
+      return res.status(400).json(err('Invalid video task id'));
+    }
+
+    const candidates = await this.videoCandidates(req, taskId);
+    let lastError: UpstreamError | null = null;
+    for (const { c } of candidates) {
+      const provider = this.providers.resolve(c.channel.provider);
+      if (typeof provider.videoContent !== 'function') continue;
+      try {
+        const upstream = await provider.videoContent(c.channel, c.apiKey, { taskId });
+        res.status(upstream.status);
+        res.setHeader('Content-Type', upstream.contentType);
+        if (upstream.contentLength) {
+          res.setHeader('Content-Length', upstream.contentLength);
+        }
+        await pipeline(
+          Readable.fromWeb(upstream.stream as Parameters<typeof Readable.fromWeb>[0]),
+          res,
+        );
+        return;
+      } catch (e) {
+        if (res.headersSent) return; // 已开始写流：不能再改写响应
+        if (e instanceof UpstreamError) {
+          lastError = e;
+          continue;
+        }
+        throw e;
+      }
+    }
+    return this.videoTaskNotFound(res, err, taskId, lastError);
+  }
+
+  private videoTaskNotFound(
+    res: Response,
+    err: (message: string, type?: string, code?: string | null) => any,
+    taskId: string,
+    lastError: UpstreamError | null,
+  ) {
+    return res
+      .status(lastError?.status === 404 ? 404 : (lastError?.status ?? 404))
+      .json(
+        err(
+          lastError
+            ? upstreamErrorMessage(lastError)
+            : `Video task "${taskId}" was not found on any available channel.`,
+          'invalid_request_error',
+          'video_task_not_found',
+        ),
+      );
+  }
+
+  /**
+   * 视频渠道候选（按序尝试）：
+   * ① 建任务时记住的渠道；② 映射缺失（发布重启/多副本）时，用「目录里标了 video 能力的模型」
+   * 逐个路由探测 —— 任务 id 只在上游自家有效，探测失败（404）成本很低。
+   */
+  private async videoCandidates(
+    req: GatewayRequest,
+    taskId: string,
+  ): Promise<Array<{ c: ResolvedChannel; model: string }>> {
+    const { user, apiKey } = req.gateway;
+    const hit = this.videoTasks.lookup(taskId);
+    const group = await this.groups.effectiveGroup(user, apiKey.groupId);
+    const seen = new Set<string>();
+    const out: Array<{ c: ResolvedChannel; model: string }> = [];
+    const add = (list: ResolvedChannel[], model: string) => {
+      for (const c of list) {
+        if (seen.has(c.channel.id)) continue;
+        seen.add(c.channel.id);
+        out.push({ c, model });
+      }
+    };
+    if (hit) {
+      add(
+        await this.resolver.resolve(user.id, hit.model, {
+          strategy: apiKey.routingStrategy,
+          groupId: group.id,
+        }),
+        hit.model,
+      );
+    }
+    if (out.length === 0) {
+      for (const name of await this.resolver.videoModelNames()) {
+        add(
+          await this.resolver.resolve(user.id, name, {
+            strategy: apiKey.routingStrategy,
+            groupId: group.id,
+          }),
+          name,
+        );
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 视频能力校验：目录里显式标了能力（非空）但不含 video → 400，
+   * 避免把纯文本模型按视频协议打到上游（能力为空 = 不限制，与其它端点同口径）。
+   */
+  private async assertVideoCapable(
+    model: string,
+    res: Response,
+    err: (message: string, type?: string, code?: string | null) => any,
+  ): Promise<boolean> {
+    const meta = await this.resolver.catalogFor([model]);
+    const caps = meta.get(model)?.capabilities;
+    if (caps && caps.length > 0 && !caps.includes('video')) {
+      res
+        .status(400)
+        .json(
+          err(
+            `Model "${model}" is not a video model (capabilities: ${caps.join(', ')}).`,
+            'invalid_request_error',
+            'video_not_supported',
+          ),
+        );
+      return false;
+    }
+    return true;
   }
 
   /**

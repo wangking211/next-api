@@ -158,6 +158,9 @@ export class ChannelResolverService {
       }),
       this.catalogRow(model),
     ]);
+    // 目录里被停用的模型不路由（与可用模型列表同口径）；
+    // 只在显式 false 时拦截，避免部分字段的目录行（未 select enabled）被误判
+    if (catalog && catalog.enabled === false) return [];
     const officialIn = catalog?.inputPrice != null ? Number(catalog.inputPrice) : 0;
 
     const candidates: Candidate[] = [];
@@ -336,6 +339,22 @@ export class ChannelResolverService {
   }
 
   /**
+   * 目录里标了 `video` 能力的模型名。
+   * 用于视频任务在进程内映射缺失时（发布重启/多副本）反查可能建过该任务的渠道。
+   */
+  async videoModelNames(): Promise<string[]> {
+    const rows = await this.catalogRows();
+    if (rows) {
+      return rows.filter((r) => r.capabilities.includes('video')).map((r) => r.name);
+    }
+    const direct = await this.prisma.modelCatalog.findMany({
+      where: { capabilities: { has: 'video' } },
+      select: { name: true },
+    });
+    return direct.map((r) => r.name);
+  }
+
+  /**
    * 白名单 → 规范名集合。空/全无效返回 null（不限制）。
    * 批量查询：`name in entries OR aliases hasSome entries`（1 次 findMany，或内存快照 0 查询）；
    * 命中目录的条目归一为规范名，未命中的（含 DB 故障降级）原样保留（剥 `:latest`）。
@@ -408,6 +427,27 @@ export class ChannelResolverService {
       distinct: ['modelName'],
       select: { modelName: true },
     });
-    return rows.map((r) => r.modelName).sort();
+    const names = rows.map((r) => r.modelName).sort();
+    return this.filterCatalogEnabled(names);
+  }
+
+  /**
+   * 目录里存在但被停用的模型一律不对外（`ModelCatalog.enabled=false`）。
+   * 让「模型」页的启用/停用开关真正生效（此前只影响落地页展示）。
+   * 目录里没有的模型放行——不隐性屏蔽历史数据/手工加的渠道模型。
+   */
+  private async filterCatalogEnabled(names: string[]): Promise<string[]> {
+    if (!names.length) return names;
+    const rows = await this.catalogRows();
+    if (rows) {
+      const off = new Set(rows.filter((r) => r.enabled === false).map((r) => r.name));
+      return names.filter((n) => !off.has(n));
+    }
+    const disabled = await this.prisma.modelCatalog.findMany({
+      where: { name: { in: names }, enabled: false },
+      select: { name: true },
+    });
+    const off = new Set(disabled.map((r) => r.name));
+    return names.filter((n) => !off.has(n));
   }
 }

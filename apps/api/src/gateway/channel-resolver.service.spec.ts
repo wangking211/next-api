@@ -515,4 +515,19 @@ describe('ChannelResolverService catalog 快照缓存', () => {
 
     expect(prisma.modelCatalog.findMany).toHaveBeenCalledTimes(2);
   });
+
+  it('目录里 enabled=false 的模型不路由、也不出现在可用模型列表', async () => {
+    const { service, prisma } = makeService([makeCM({})], undefined, undefined, new TtlCacheService());
+    prisma.modelCatalog.findMany.mockResolvedValue([
+      { ...ROW, name: 'm', aliases: [], enabled: false },
+    ]);
+
+    await expect(service.resolve('u1', 'm')).resolves.toEqual([]);
+
+    prisma.channelModel.findMany.mockResolvedValue([
+      { modelName: 'm' },
+      { modelName: 'gpt-5.1' },
+    ] as never);
+    await expect(service.availableModels('u1')).resolves.toEqual(['gpt-5.1']);
+  });
 });
