@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { BillingService } from '../billing/billing.service';
+import { MetricsService } from '../observability/metrics.service';
 import { truncate } from './content.util';
 
 export interface UsageEntry {
@@ -67,6 +68,8 @@ export class UsageService {
     private readonly prisma: PrismaService,
     private readonly billing: BillingService,
     config: ConfigService,
+    // 观测指标（全局模块提供；手动构造的测试可不传）
+    @Optional() private readonly metrics?: MetricsService,
   ) {
     this.logContent = config.get<string>('LOG_CONTENT', 'false') !== 'false';
     this.maxChars = Number(config.get<string>('LOG_CONTENT_MAX', '20000')) || 20000;
@@ -127,6 +130,17 @@ export class UsageService {
             multiplier,
           );
     const date = utcDay();
+
+    // Prometheus 网关指标（按模型的请求/tokens/实扣费用）。放在落库之前：
+    // 即便明细写失败，调用确实发生了，指标同样应计入
+    this.metrics?.recordGateway({
+      model: entry.model,
+      status: entry.status,
+      promptTokens: entry.promptTokens,
+      completionTokens: entry.completionTokens,
+      costUsd: cost,
+      chargeable: entry.chargeable === true,
+    });
 
     try {
       await this.prisma.$transaction(async (tx) => {

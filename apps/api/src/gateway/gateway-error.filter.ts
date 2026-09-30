@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { getRequestId } from '../common/request-id';
 import { openaiError } from './types';
 import { toAnthropicErrorBody } from './anthropic-format';
 
@@ -61,7 +62,7 @@ export class GatewayErrorFilter implements ExceptionFilter {
     if (!message) {
       message = 'The server had an error while processing your request.';
       this.logger.error(
-        `未处理异常 ${req.method} ${path}: ${
+        `未处理异常 [rid=${getRequestId(req)}] ${req.method} ${path}: ${
           (exception as Error)?.stack ?? String(exception)
         }`,
       );

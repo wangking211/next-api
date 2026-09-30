@@ -11,6 +11,8 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { BootstrapService } from './auth/bootstrap.service';
 import { assertProdJwtSecret } from './auth/jwt-secret';
+import { requestIdMiddleware } from './common/request-id';
+import { MetricsService } from './observability/metrics.service';
 
 function assertProductionSecrets(config: ConfigService) {
   if (config.get<string>('NODE_ENV') !== 'production') return;
@@ -46,6 +48,25 @@ async function bootstrap() {
   assertProductionSecrets(config);
 
   app.use(helmet());
+  // 请求关联：回显合法的入站 x-request-id，否则生成 UUID（响应头统一带回，
+  // 未处理异常日志带 [rid=...]，客户端报错可凭 id 定位日志）
+  app.use(requestIdMiddleware);
+  // HTTP 指标：按路由模板（非原始 URL，防高基数）记录次数与耗时，Prometheus 抓取 /api/metrics
+  const metrics = app.get(MetricsService);
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const start = process.hrtime.bigint();
+    res.on('finish', () => {
+      const raw = (req as unknown as { route?: { path?: string | string[] } }).route?.path;
+      const route = Array.isArray(raw) ? raw[0] : raw;
+      metrics.observeHttp(
+        req.method,
+        route ?? '__unmatched__',
+        res.statusCode,
+        Number(process.hrtime.bigint() - start) / 1e9,
+      );
+    });
+    next();
+  });
   app.use(json({ limit: '25mb' }));
   app.use(urlencoded({ extended: true, limit: '25mb' }));
   // 请求体解析失败（非法 JSON/超限）发生在进入路由之前，不经过 Nest 的异常过滤器，
@@ -147,6 +168,17 @@ async function bootstrap() {
   } else {
     Logger.log('Swagger 已禁用（生产默认关闭，SWAGGER_ENABLED=true 可开启）', 'Bootstrap');
   }
+
+  // Prometheus 指标（/api/metrics）：生产需设置 METRICS_TOKEN 才开启，防内部指标暴露公网
+  const metricsToken = (config.get<string>('METRICS_TOKEN', '') ?? '').trim();
+  Logger.log(
+    metricsToken
+      ? 'Prometheus 指标：/api/metrics（需 METRICS_TOKEN 鉴权）'
+      : isProd
+        ? 'Prometheus 指标：已禁用（生产设置 METRICS_TOKEN 后开启）'
+        : 'Prometheus 指标：/api/metrics（开发环境开放）',
+    'Bootstrap',
+  );
 
   app.enableShutdownHooks();
 

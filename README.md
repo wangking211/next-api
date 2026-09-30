@@ -384,6 +384,19 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 | `DELETE /api/groups/:id` | ADMIN | 删除分组（默认分组不可删） |
 | `POST /api/models/classify-origins` | ADMIN | 按模型名一键归类厂商/产地 |
 
+## 观测（Prometheus 指标 / 请求关联 / 看门狗告警）
+
+- **Prometheus 指标 `GET /api/metrics`**（text/plain; version=0.0.4）：
+  - HTTP 层：`http_requests_total{method,route,status}`、`http_request_duration_seconds{method,route}` —— 按 express 路由模板打点（非原始 URL，避免 `:id` 路径高基数），未匹配路由归 `__unmatched__`；
+  - 网关层（在用量落库漏斗 `UsageService.record` 埋点，模型名已过目录/渠道校验）：`gateway_requests_total{model,status}`、`gateway_tokens_total{kind=prompt|completion}`、`gateway_cost_usd_total{chargeable}`；自定义模型名标签上限 300，超出归 `__other__`（BYOK 可自定义模型名，防基数爆炸）；
+  - 看门狗：`service_up{component=db|redis}`（1=健康）、`cert_expiry_days{host}`（-1=检查失败）；另有 `process_uptime_seconds` 与 prom-client 默认 `nodejs_*` / `process_*`（CPU、内存、事件循环、GC）。
+  - **访问控制**：设 `METRICS_TOKEN` 后需 `Authorization: Bearer <token>` 或 `X-Metrics-Token` 头（定长比较）；**生产未设置 = 端点返回 403**（默认关闭，防内部路由结构与流量暴露公网），非生产未设置 = 开放。
+- **请求关联（`x-request-id`）**：所有响应都带 `x-request-id` 头；合法入站值（`[A-Za-z0-9._-]{1,64}`）原样回显，否则生成 UUID。网关未处理异常日志带 `[rid=...]`——客户端报错时凭响应头 id 即可定位日志。
+- **看门狗**（`WATCHDOG_ENABLED=true` 默认开启；启动 `WATCHDOG_INITIAL_DELAY_MS`（默认 30s）后首检，之后按周期执行，定时器 `unref` 不阻塞进程退出）：
+  - **健康检查**（默认 5 分钟）：DB/Redis 探活，仅**状态迁移**时推 `ALERT_WEBHOOK_URL`（`service_degraded` / `service_recovered`；首检正常不告警，持续故障不重复刷屏），并刷新 `service_up` 指标；
+  - **证书到期**（默认 6 小时）：TLS 握手读取对端证书有效期（`rejectUnauthorized: false` 只看有效期，不因中间证书缺失误报），剩余天数 ≤ `CERT_EXPIRY_WARN_DAYS`（默认 14）推 `cert_expiring` 告警并每 24h 重发，续期后复位；每次检查刷新 `cert_expiry_days` 指标。
+  - 相关环境变量：`METRICS_TOKEN`、`WATCHDOG_ENABLED` / `WATCHDOG_INITIAL_DELAY_MS` / `WATCHDOG_HEALTH_INTERVAL_MS` / `WATCHDOG_CERT_INTERVAL_MS`、`CERT_CHECK_HOST`（默认 `xiaopuyun.com`）/ `CERT_CHECK_PORT` / `CERT_EXPIRY_WARN_DAYS`。
+
 ## 安全说明
 
 - 平台 key：仅存 SHA-256 哈希，明文只在创建时返回一次。
