@@ -435,6 +435,19 @@ export const adminApi = {
   async adjust(id: string, amount: number, description?: string) {
     await api.post(`/admin/users/${id}/adjust`, { amount, description });
   },
+  /** 用户详情抽屉：该用户的全部 Key（管理端只读视图） */
+  async userKeys(id: string, signal?: AbortSignal) {
+    const { data } = await api.get<ApiKeyInfo[]>(`/admin/users/${id}/keys`, { signal });
+    return data;
+  },
+  /** 用户详情抽屉：该用户的余额流水 */
+  async userTransactions(id: string, page = 1, pageSize = 6, signal?: AbortSignal) {
+    const { data } = await api.get<Paginated<BalanceTransaction>>(
+      `/admin/users/${id}/transactions`,
+      { params: { page, pageSize }, signal },
+    );
+    return data;
+  },
 };
 
 export const redeemCodesApi = {

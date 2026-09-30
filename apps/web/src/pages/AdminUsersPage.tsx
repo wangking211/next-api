@@ -24,6 +24,7 @@ import { errorMessage } from '../api/client';
 import { downloadBlob } from '../utils/csv';
 import { formatCredits, fromCredits } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
+import AdminUserDetailDrawer from './AdminUserDetailDrawer';
 import type { AdminUser } from '../api/types';
 
 type Mode = 'recharge' | 'adjust';
@@ -52,6 +53,7 @@ export default function AdminUsersPage() {
   const [mode, setMode] = useState<Mode>('recharge');
   const [usageUser, setUsageUser] = useState<AdminUser | null>(null);
   const [editUser, setEditUser] = useState<AdminUser | null>(null);
+  const [detailUser, setDetailUser] = useState<AdminUser | null>(null);
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
 
@@ -457,9 +459,12 @@ export default function AdminUsersPage() {
           {
             title: t('common.action'),
             fixed: 'right',
-            width: 240,
+            width: 300,
             render: (_, r) => (
               <Space>
+                <Button size="small" onClick={() => setDetailUser(r)}>
+                  {t('admin.users.detail')}
+                </Button>
                 <Button size="small" type="primary" onClick={() => openModal(r, 'recharge')}>
                   {t('admin.users.recharge')}
                 </Button>
@@ -642,6 +647,8 @@ export default function AdminUsersPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <AdminUserDetailDrawer user={detailUser} onClose={() => setDetailUser(null)} />
     </Card>
   );
 }

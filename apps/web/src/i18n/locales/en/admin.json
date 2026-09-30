@@ -115,5 +115,19 @@
   "admin.users.column.group": "Group",
   "admin.users.groupField": "Assigned group",
   "admin.users.groupExtra": "The user uses this group's visible models and ratio by default; a key can override it",
-  "admin.users.groupNone": "None (unrestricted)"
+  "admin.users.groupNone": "None (unrestricted)",
+  "admin.users.detail": "Details",
+  "admin.users.detail.title": "User detail",
+  "admin.users.detail.keys": "API Key",
+  "admin.users.detail.recentCalls": "Recent requests",
+  "admin.users.detail.transactions": "Balance history",
+  "admin.users.detail.noKeys": "This user has no API keys yet",
+  "admin.users.detail.noCalls": "No requests yet",
+  "admin.users.detail.noTransactions": "No transactions yet",
+  "admin.users.detail.keyPrefix": "Prefix",
+  "admin.users.detail.rpm": "RPM",
+  "admin.users.detail.keyActive": "Active",
+  "admin.users.detail.keyDisabled": "Disabled",
+  "admin.users.detail.keyRevoked": "Revoked",
+  "admin.users.detail.cost": "Cost"
 }

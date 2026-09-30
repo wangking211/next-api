@@ -115,5 +115,19 @@
   "admin.users.column.group": "分組",
   "admin.users.groupField": "所屬分組",
   "admin.users.groupExtra": "使用者預設使用該分組的可見模型與倍率；令牌可單獨覆蓋",
-  "admin.users.groupNone": "無（不限制）"
+  "admin.users.groupNone": "無（不限制）",
+  "admin.users.detail": "詳情",
+  "admin.users.detail.title": "使用者詳情",
+  "admin.users.detail.keys": "API Key",
+  "admin.users.detail.recentCalls": "最近呼叫",
+  "admin.users.detail.transactions": "餘額流水",
+  "admin.users.detail.noKeys": "該使用者還沒有 Key",
+  "admin.users.detail.noCalls": "暫無呼叫記錄",
+  "admin.users.detail.noTransactions": "暫無餘額流水",
+  "admin.users.detail.keyPrefix": "前綴",
+  "admin.users.detail.rpm": "RPM",
+  "admin.users.detail.keyActive": "正常",
+  "admin.users.detail.keyDisabled": "停用",
+  "admin.users.detail.keyRevoked": "已吊銷",
+  "admin.users.detail.cost": "費用"
 }

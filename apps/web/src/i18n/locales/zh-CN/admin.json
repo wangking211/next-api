@@ -115,5 +115,19 @@
   "admin.users.column.group": "分组",
   "admin.users.groupField": "所属分组",
   "admin.users.groupExtra": "用户默认使用该分组的可见模型与倍率；令牌可单独覆盖",
-  "admin.users.groupNone": "无（不限制）"
+  "admin.users.groupNone": "无（不限制）",
+  "admin.users.detail": "详情",
+  "admin.users.detail.title": "用户详情",
+  "admin.users.detail.keys": "API Key",
+  "admin.users.detail.recentCalls": "最近调用",
+  "admin.users.detail.transactions": "余额流水",
+  "admin.users.detail.noKeys": "该用户还没有 Key",
+  "admin.users.detail.noCalls": "暂无调用记录",
+  "admin.users.detail.noTransactions": "暂无余额流水",
+  "admin.users.detail.keyPrefix": "前缀",
+  "admin.users.detail.rpm": "RPM",
+  "admin.users.detail.keyActive": "正常",
+  "admin.users.detail.keyDisabled": "停用",
+  "admin.users.detail.keyRevoked": "已吊销",
+  "admin.users.detail.cost": "费用"
 }

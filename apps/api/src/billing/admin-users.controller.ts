@@ -13,6 +13,7 @@ import { Response } from 'express';
 import { Role, UserStatus } from '@prisma/client';
 import { BillingService } from './billing.service';
 import { UsersService } from '../users/users.service';
+import { KeysService } from '../keys/keys.service';
 import type { UserListFilters } from '../users/users.service';
 import { RechargeDto } from './dto/recharge.dto';
 import { AdjustDto } from './dto/adjust.dto';
@@ -35,6 +36,7 @@ export class AdminUsersController {
   constructor(
     private readonly users: UsersService,
     private readonly billing: BillingService,
+    private readonly keys: KeysService,
   ) {}
 
   @Get()
@@ -187,6 +189,13 @@ export class AdminUsersController {
     @Query('pageSize') pageSize?: string,
   ) {
     return this.billing.listTransactions(id, toInt(page, 1), Math.min(toInt(pageSize, 20), 100));
+  }
+
+  /** 用户详情抽屉：该用户的全部 Key（管理端只读视图，先校验用户存在） */
+  @Get(':id/keys')
+  async userKeys(@Param('id') id: string) {
+    await this.users.getOrThrow(id);
+    return this.keys.list(id);
   }
 
   @Post(':id/recharge')
