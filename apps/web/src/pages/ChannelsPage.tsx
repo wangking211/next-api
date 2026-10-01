@@ -58,6 +58,13 @@ export default function ChannelsPage() {
   const selectedModels: string[] = Form.useWatch('models', form) ?? [];
   const ownerTypeValue = Form.useWatch('ownerType', form);
   const shareModeValue = Form.useWatch('shareMode', form) ?? 'PRIVATE';
+  // 表单里只有管理员能看到抽成字段；非管理员回退到该渠道已有的设置
+  const feePercentValue = Form.useWatch('shareFeeBps', form);
+  const effectiveFeePercent =
+    feePercentValue ??
+    (editing?.shareFeeBps != null ? editing.shareFeeBps / 100 : undefined);
+  // 渠道主实际到手比例（提示文案用）
+  const ownerSharePct = 100 - (effectiveFeePercent ?? 20);
 
   // 归属=我的（BYOK）：上游费用用户自付、平台不扣费，隐藏「逐模型定价」（仅影响折算展示，无计费作用）
   const isByok = editing
@@ -126,18 +133,19 @@ export default function ChannelsPage() {
 
   const saveMut = useMutation({
     mutationFn: async (values: any) => {
+      const payload = { ...values };
+      if (payload.shareUntil instanceof dayjs) {
+        payload.shareUntil = payload.shareUntil.toISOString();
+      }
+      // 抽成在表单里是百分比，后端按基点存（1% = 100）
+      if (typeof payload.shareFeeBps === 'number') {
+        payload.shareFeeBps = Math.round(payload.shareFeeBps * 100);
+      }
       if (editing) {
-        const payload = { ...values };
         if (!payload.apiKey) delete payload.apiKey;
-        // DatePicker 返回 dayjs → 后端只接受 ISO 字符串
-        if (payload.shareUntil instanceof dayjs) payload.shareUntil = payload.shareUntil.toISOString();
         return channelsApi.update(editing.id, payload);
       }
-      const createPayload = { ...values };
-      if (createPayload.shareUntil instanceof dayjs) {
-        createPayload.shareUntil = createPayload.shareUntil.toISOString();
-      }
-      return channelsApi.create(createPayload);
+      return channelsApi.create(payload);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['channels'] });
@@ -180,6 +188,7 @@ export default function ChannelsPage() {
       shareQuotaCostUsd: r.shareQuotaCostUsd != null ? Number(r.shareQuotaCostUsd) : undefined,
       shareQuotaRequests: r.shareQuotaRequests ?? undefined,
       shareUntil: r.shareUntil ? dayjs(r.shareUntil) : undefined,
+      shareFeeBps: r.shareFeeBps != null ? r.shareFeeBps / 100 : undefined,
     });
     const p: Record<string, PriceRow> = {};
     for (const mp of r.modelPrices ?? []) {
@@ -614,9 +623,24 @@ export default function ChannelsPage() {
                 >
                   <DatePicker showTime style={{ width: 210 }} />
                 </Form.Item>
+                {isAdmin && (
+                  <Form.Item
+                    name="shareFeeBps"
+                    label={t('channels.form.shareFee')}
+                    tooltip={t('channels.form.shareFeeTip')}
+                  >
+                    <InputNumber
+                      min={0}
+                      max={100}
+                      step={1}
+                      placeholder={t('channels.form.shareFeeDefault')}
+                      style={{ width: 150 }}
+                    />
+                  </Form.Item>
+                )}
               </Space>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {t('channels.form.shareHint')}
+                {t('channels.form.shareHint', { pct: ownerSharePct })}
               </Typography.Text>
             </div>
           )}
