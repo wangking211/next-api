@@ -42,6 +42,8 @@ const CATALOG_PRICE_SELECT = {
 @Injectable()
 export class BillingService {
   private readonly catalogTtl: number;
+  /** 共享渠道平台抽成默认值（基点，1/10000）：渠道可单独覆盖 */
+  private readonly shareFeeBps: number;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -51,6 +53,16 @@ export class BillingService {
   ) {
     this.catalogTtl =
       Number(config?.get<string>('CATALOG_CACHE_TTL_MS', '60000')) || 60_000;
+    const bps = Number(config?.get<string>('CHANNEL_SHARE_FEE_BPS', '2000'));
+    this.shareFeeBps = Number.isFinite(bps) ? Math.max(0, Math.min(10000, Math.floor(bps))) : 2000;
+  }
+
+  /**
+   * 共享渠道的平台抽成（基点）：渠道单独设置优先，否则用全局默认 CHANNEL_SHARE_FEE_BPS（默认 2000 = 20%）。
+   */
+  channelShareFeeBps(channel: { shareFeeBps?: number | null }): number {
+    const raw = channel?.shareFeeBps ?? this.shareFeeBps;
+    return Math.max(0, Math.min(10000, Math.floor(raw)));
   }
 
   async getBalance(userId: string) {
@@ -246,6 +258,8 @@ export class BillingService {
     amount: number,
     requestLogId: string,
     description?: string,
+    /** 输出：实际扣到的金额（并发兜底时可能小于 amount），供调用方决定是否继续分成 */
+    out?: { debited?: number },
   ): Promise<number> {
     const cost = round6(amount);
     if (cost <= 0) return 0;
@@ -306,8 +320,57 @@ export class BillingService {
         },
       });
     }
+    if (out) out.debited = debited;
     // 返点按实际消费额（cost）发放，与扣款是否足额无关
     return this.payCommissions(tx, userId, exists.username, cost, requestLogId);
+  }
+
+  /**
+   * 渠道共享分成：把本次实收按 (1 − 平台抽成) 入账给渠道主，返回入账金额（USD）。
+   *
+   * - 抽成由 `channelShareFeeBps()` 决定（渠道覆盖 > 全局默认），平台留存 = 实收 − 本值
+   * - 渠道主的上游成本发生在自己的上游账户，平台不重复扣，只在账本留痕
+   * - 渠道主调自己的渠道走 BYOK（不扣费），调用方不会走到这里
+   */
+  async payChannelRevenue(
+    tx: Prisma.TransactionClient,
+    args: {
+      ownerUserId: string;
+      cost: number;
+      feeBps: number;
+      requestLogId: string;
+      /** 描述来源（模型名 / 调用方用户名） */
+      label: string;
+    },
+  ): Promise<number> {
+    const cost = round6(args.cost);
+    if (cost <= 0) return 0;
+    const feeBps = Math.max(0, Math.min(10000, Math.floor(args.feeBps)));
+    const revenue = round6(cost * (1 - feeBps / 10000));
+    if (revenue <= 0) return 0;
+
+    const owner = await tx.user.findUnique({
+      where: { id: args.ownerUserId },
+      select: { id: true },
+    });
+    if (!owner) return 0;
+
+    const updated = await tx.user.update({
+      where: { id: args.ownerUserId },
+      data: { balance: { increment: revenue } },
+      select: { balance: true },
+    });
+    await tx.balanceTransaction.create({
+      data: {
+        userId: args.ownerUserId,
+        type: BalanceTxType.CHANNEL_REVENUE,
+        amount: revenue,
+        balanceAfter: round6(Number(updated.balance)),
+        requestLogId: args.requestLogId,
+        description: `渠道共享收益 · ${args.label}`,
+      },
+    });
+    return revenue;
   }
 
   /**

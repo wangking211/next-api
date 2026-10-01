@@ -1,6 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ModelGroupStatus, Prisma } from '@prisma/client';
+import {
+  ChannelOwnerType,
+  ChannelShareMode,
+  ModelGroupStatus,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TtlCacheService } from '../common/ttl-cache.service';
 import { CreateGroupDto, UpdateGroupDto } from './dto/group.dto';
@@ -259,6 +264,46 @@ export class GroupsService {
     if (!groupId) return null;
     return {
       OR: [{ groups: { none: {} } }, { groups: { some: { id: groupId } } }],
+    };
+  }
+
+  /**
+   * 完整渠道可见性条件（含共享渠道），resolve() 与 availableModels() 共用：
+   * - 自有渠道：仅持有者可见（无论是否上架）
+   * - 他人渠道：`shareMode=PUBLIC` 所有人可见；`shareMode=GROUP` 且与本人生效分组一致才可见
+   * - 平台渠道：按分组（未配分组的视为公共渠道）
+   *
+   * ⚠️ 共享分支必须显式限定 `ownerType=USER + shareMode`：分组条件里的
+   * `groups: { none: {} }` 会匹配到「未配分组的私有渠道」，直接 OR 进去会
+   * 把别人的 BYOK 渠道暴露给所有人。
+   */
+  channelScopeWhere(userId: string, groupId: string | null): Prisma.ChannelWhereInput {
+    const own: Prisma.ChannelWhereInput = {
+      ownerType: ChannelOwnerType.USER,
+      ownerUserId: userId,
+    };
+    const publicShared: Prisma.ChannelWhereInput = {
+      ownerType: ChannelOwnerType.USER,
+      shareMode: ChannelShareMode.PUBLIC,
+    };
+    if (!groupId) {
+      return {
+        OR: [own, publicShared, { ownerType: ChannelOwnerType.PLATFORM }],
+      };
+    }
+    const groupCond = this.channelVisibilityWhere(groupId)!;
+    return {
+      OR: [
+        own,
+        publicShared,
+        {
+          AND: [
+            { ownerType: ChannelOwnerType.USER, shareMode: ChannelShareMode.GROUP },
+            groupCond,
+          ],
+        },
+        { AND: [{ ownerType: ChannelOwnerType.PLATFORM }, groupCond] },
+      ],
     };
   }
 }

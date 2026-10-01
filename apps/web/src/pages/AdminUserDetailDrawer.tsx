@@ -69,6 +69,7 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
     COMMISSION: { color: 'purple', label: t('billing.txnType.commission') },
     TRANSFER: { color: 'geekblue', label: t('billing.txnType.transfer') },
     WITHDRAW: { color: 'volcano', label: t('billing.txnType.withdraw') },
+    CHANNEL_REVENUE: { color: 'cyan', label: t('billing.txnType.channelRevenue') },
   };
 
   const KEY_STATUS: Record<ApiKeyStatus, { color: string; label: string }> = {

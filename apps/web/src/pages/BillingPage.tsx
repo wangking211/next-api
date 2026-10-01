@@ -61,6 +61,7 @@ export default function BillingPage() {
     COMMISSION: { color: 'purple', label: t('billing.txnType.commission') },
     TRANSFER: { color: 'geekblue', label: t('billing.txnType.transfer') },
     WITHDRAW: { color: 'volcano', label: t('billing.txnType.withdraw') },
+    CHANNEL_REVENUE: { color: 'cyan', label: t('billing.txnType.channelRevenue') },
   };
 
   const PAY_STATUS_META: Record<PaymentOrder['status'], { color: string; label: string }> = {
@@ -311,6 +312,7 @@ export default function BillingPage() {
                 { label: t('billing.txnType.recharge'), value: 'RECHARGE' },
                 { label: t('billing.txnType.consume'), value: 'CONSUME' },
                 { label: t('billing.txnType.adjust'), value: 'ADJUST' },
+                { label: t('billing.txnType.channelRevenue'), value: 'CHANNEL_REVENUE' },
               ]}
             />
           }

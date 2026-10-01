@@ -2,9 +2,13 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { redactSecrets } from '../common/redact.util';
 import { BillingService, ChannelPricing } from '../billing/billing.service';
 import { MetricsService } from '../observability/metrics.service';
 import { truncate } from './content.util';
+
+/** 有值才脱敏：保持 null/undefined 语义（`truncate()` 依赖它返回 null） */
+const redactOrNull = (v?: string | null): string | null => (v ? redactSecrets(v) : null);
 
 export interface UsageEntry {
   userId: string;
@@ -39,6 +43,11 @@ export interface UsageEntry {
   requestPreview?: string | null;
   /** 输出文本，受 LOG_CONTENT 开关控制 */
   responsePreview?: string | null;
+  /**
+   * 共享渠道分成上下文（网关按渠道算出）：非空表示本次调用有渠道主可分成。
+   * `ownerUserId` 为渠道主；`feeBps` 是平台抽成（已解析：渠道覆盖 > 全局默认）。
+   */
+  share?: { ownerUserId: string; feeBps: number };
 }
 
 export interface LogQuery {
@@ -179,13 +188,14 @@ export class UsageService {
             multiplierSource: entry.multiplierSource ?? null,
             latencyMs: entry.latencyMs,
             status: entry.status,
-            errorMessage: entry.errorMessage ?? null,
+            // 上游文案与请求/响应预览都可能混入密钥 → 入库前统一脱敏
+            errorMessage: redactOrNull(entry.errorMessage),
             isStream: entry.isStream ?? false,
             requestPreview: this.logContent
-              ? truncate(entry.requestPreview, this.maxChars)
+              ? truncate(redactOrNull(entry.requestPreview), this.maxChars)
               : null,
             responsePreview: this.logContent
-              ? truncate(entry.responsePreview, this.maxChars)
+              ? truncate(redactOrNull(entry.responsePreview), this.maxChars)
               : null,
           },
         });
@@ -203,19 +213,45 @@ export class UsageService {
         }
 
         if (entry.chargeable && cost > 0) {
+          const paid: { debited?: number } = {};
           const commission = await this.billing.recordConsumption(
             tx,
             entry.userId,
             cost,
             log.id,
             `调用 ${entry.model}`,
+            paid,
           );
-          if (commission > 0) {
-            await tx.requestLog.update({
-              where: { id: log.id },
-              data: { commission },
+          const patch: { commission?: number; channelRevenue?: number } = {};
+          if (commission > 0) patch.commission = commission;
+
+          // 共享渠道分成：按实收分成给渠道主。
+          // 只有确实足额收到钱才入账（并发封底扣款时可能只收到一部分，避免平台倒亏）。
+          if (entry.share && (paid.debited ?? 0) >= cost - 1e-9) {
+            const revenue = await this.billing.payChannelRevenue(tx, {
+              ownerUserId: entry.share.ownerUserId,
+              cost,
+              feeBps: entry.share.feeBps,
+              requestLogId: log.id,
+              label: entry.model,
             });
+            if (revenue > 0) patch.channelRevenue = revenue;
           }
+          if (Object.keys(patch).length > 0) {
+            await tx.requestLog.update({ where: { id: log.id }, data: patch });
+          }
+        }
+
+        // 共享渠道本轮用量累计（含失败调用：失败同样占用了渠道主的调度额度）。
+        // 累计到 Channel 列上，路由侧无需额外查询即可判断「是否已达额度上限」。
+        if (entry.share && entry.channelId) {
+          await tx.channel.update({
+            where: { id: entry.channelId },
+            data: {
+              shareUsedRequests: { increment: 1 },
+              shareUsedCostUsd: { increment: round6(upstreamCost) },
+            },
+          });
         }
       });
     } catch (e) {

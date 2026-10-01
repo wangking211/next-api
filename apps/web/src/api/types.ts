@@ -325,7 +325,8 @@ export type BalanceTxType =
   | 'ADJUST'
   | 'COMMISSION'
   | 'TRANSFER'
-  | 'WITHDRAW';
+  | 'WITHDRAW'
+  | 'CHANNEL_REVENUE';
 
 export interface BalanceTransaction {
   id: string;

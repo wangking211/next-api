@@ -28,6 +28,7 @@
   "billing.txnType.commission": "Rebate",
   "billing.txnType.transfer": "Transfer",
   "billing.txnType.withdraw": "Withdraw",
+  "billing.txnType.channelRevenue": "Channel share",
   "billing.orders.title": "Top-up orders (last 8)",
   "billing.orders.credits": "Credits received",
   "billing.orders.way": "Method",

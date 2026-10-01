@@ -28,6 +28,7 @@
   "billing.txnType.commission": "返点",
   "billing.txnType.transfer": "转账",
   "billing.txnType.withdraw": "提现",
+  "billing.txnType.channelRevenue": "渠道分成",
   "billing.orders.title": "充值订单（最近 8 笔）",
   "billing.orders.credits": "到账积分",
   "billing.orders.way": "方式",

@@ -99,6 +99,11 @@ function makeService(
         ? { OR: [{ groups: { none: {} } }, { groups: { some: { id: groupId } } }] }
         : null,
     ),
+    // 可见性统一由 GroupsService 给出：这里只回一个可断言的标记，
+    // 「共享渠道 / 平台渠道」的具体条件由 groups.service.spec 覆盖
+    channelScopeWhere: jest.fn((userId: string, groupId: string | null) => ({
+      __scope: `${userId}|${groupId ?? 'none'}`,
+    })),
   };
   return {
     service: new ChannelResolverService(
@@ -111,6 +116,7 @@ function makeService(
     ),
     prisma,
     metrics,
+    groups,
   };
 }
 
@@ -164,7 +170,7 @@ describe('ChannelResolverService', () => {
   });
 
   it('queries enabled channel-model rows for the model', async () => {
-    const { service, prisma } = makeService([]);
+    const { service, prisma, groups } = makeService([]);
     await service.resolve('u1', 'gpt-4o');
     const arg = prisma.channelModel.findMany.mock.calls[0][0];
     expect(arg.where.modelName).toBe('gpt-4o');
@@ -172,28 +178,18 @@ describe('ChannelResolverService', () => {
     // 可用性：启用，或自动禁用已过冷却期
     expect(arg.where.channel.AND[0].OR).toHaveLength(2);
     expect(arg.where.channel.AND[0].OR[0].status).toBe(ChannelStatus.ENABLED);
-    // 渠道分组隔离：自有 BYOK 渠道 + 分组过滤条件（未生效分组时为「全部平台渠道」）
-    expect(arg.where.channel.AND[1].OR).toHaveLength(2);
-    expect(arg.where.channel.AND[1].OR[0].ownerType).toBe(ChannelOwnerType.USER);
-    expect(arg.where.channel.AND[1].OR[1].ownerType).toBe(ChannelOwnerType.PLATFORM);
+    // 渠道可见性：整体来自 GroupsService.channelScopeWhere（含共享渠道，见 groups.service.spec）
+    expect(groups.channelScopeWhere).toHaveBeenCalledWith('u1', null);
+    expect(arg.where.channel.AND[1]).toEqual({ __scope: 'u1|none' });
   });
 
-  it('生效分组存在时，平台渠道只保留公共渠道与同分组渠道（且不波及他人 BYOK）', async () => {
-    const { service, prisma } = makeService([]);
+  it('生效分组存在时，可见性交给 GroupsService 统一计算（含共享渠道）', async () => {
+    const { service, prisma, groups } = makeService([]);
     await service.resolve('u1', 'gpt-4o', { groupId: 'g1' });
     const arg = prisma.channelModel.findMany.mock.calls[0][0];
-    const visibility = arg.where.channel.AND[1];
-    expect(visibility.OR[0]).toEqual({
-      ownerType: ChannelOwnerType.USER,
-      ownerUserId: 'u1',
-    });
-    // 分组条件必须限定 ownerType=PLATFORM，否则未配分组的私有渠道会被一并放行
-    expect(visibility.OR[1]).toEqual({
-      AND: [
-        { ownerType: ChannelOwnerType.PLATFORM },
-        { OR: [{ groups: { none: {} } }, { groups: { some: { id: 'g1' } } }] },
-      ],
-    });
+    // 可见性条件整体来自 GroupsService.channelScopeWhere（内部已限定 ownerType）
+    expect(arg.where.channel.AND[1]).toEqual({ __scope: 'u1|g1' });
+    expect(groups.channelScopeWhere).toHaveBeenCalledWith('u1', 'g1');
   });
 
   it('honors the routing strategy option (CHEAPEST vs FASTEST)', async () => {
@@ -538,27 +534,78 @@ describe('ChannelResolverService catalog 快照缓存', () => {
     await expect(service.availableModels('u1')).resolves.toEqual(['gpt-5.1']);
   });
 
-  it('有分组时可见性必须限定平台渠道，不能漏出别人的 BYOK 渠道', async () => {
-    const { service, prisma } = makeService([]);
+  it('有分组时可见性交给 GroupsService，不再就地拼条件', async () => {
+    const { service, prisma, groups } = makeService([]);
     await service.resolve('u1', 'm', { groupId: 'g1' });
 
     const where = prisma.channelModel.findMany.mock.calls[0][0].where;
-    // 分组分支必须包一层 ownerType=PLATFORM：否则 `groups: { none: {} }`
-    // 会把「未配分组的私有渠道」也匹配进来（可消耗他人上游额度）
-    expect(where.channel.AND[1]).toEqual({
-      OR: [
-        { ownerType: 'USER', ownerUserId: 'u1' },
-        {
-          AND: [
-            { ownerType: 'PLATFORM' },
-            { OR: [{ groups: { none: {} } }, { groups: { some: { id: 'g1' } } }] },
-          ],
-        },
-      ],
-    });
+    expect(where.channel.AND[1]).toEqual({ __scope: 'u1|g1' });
+    expect(groups.channelScopeWhere).toHaveBeenCalledWith('u1', 'g1');
 
     await service.availableModels('u1', 'g1');
     const availWhere = prisma.channelModel.findMany.mock.calls[1][0].where;
-    expect(availWhere.channel.AND[1]).toEqual(where.channel.AND[1]);
+    expect(availWhere.channel.AND[1]).toEqual({ __scope: 'u1|g1' });
+  });
+
+  it('共享额度用尽/到期的渠道不再派发', async () => {
+    const expired = makeCM({
+      channel: makeChannel({
+        id: 'expired',
+        ownerType: ChannelOwnerType.USER,
+        ownerUserId: 'owner',
+        shareMode: 'PUBLIC',
+        shareUntil: new Date(Date.now() - 60_000),
+      }),
+    });
+    const overQuota = makeCM({
+      channel: makeChannel({
+        id: 'over',
+        ownerType: ChannelOwnerType.USER,
+        ownerUserId: 'owner',
+        shareMode: 'PUBLIC',
+        shareQuotaCostUsd: 1,
+        shareUsedCostUsd: 1,
+      }),
+    });
+    const ok = makeCM({
+      channel: makeChannel({
+        id: 'ok',
+        ownerType: ChannelOwnerType.USER,
+        ownerUserId: 'owner',
+        shareMode: 'PUBLIC',
+        shareQuotaCostUsd: 5,
+        shareUsedCostUsd: 1,
+      }),
+    });
+
+    const { service } = makeService([expired, overQuota, ok]);
+    await expect(service.resolve('u1', 'm')).resolves.toHaveLength(1);
+    const res = await service.resolve('u1', 'm');
+    expect(res[0].channel.id).toBe('ok');
+  });
+
+  it('共享紧急度按质量分门槛加优先级（FLUSH > HIGH > NORMAL）', async () => {
+    const flush = makeCM({
+      channel: makeChannel({
+        id: 'flush',
+        ownerType: ChannelOwnerType.USER,
+        ownerUserId: 'owner',
+        shareMode: 'PUBLIC',
+        shareUrgency: 'FLUSH',
+      }),
+    });
+    const normal = makeCM({
+      channel: makeChannel({
+        id: 'normal',
+        ownerType: ChannelOwnerType.USER,
+        ownerUserId: 'owner',
+        shareMode: 'PUBLIC',
+        shareUrgency: 'NORMAL',
+      }),
+    });
+    // 同 tier（都是他人渠道→tier1）、同 priority，仅紧急度不同 → FLUSH 在前
+    const { service } = makeService([normal, flush]);
+    const ids = (await service.resolve('u1', 'm')).map((c) => c.channel.id);
+    expect(ids[0]).toBe('flush');
   });
 });

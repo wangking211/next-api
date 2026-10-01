@@ -3,6 +3,8 @@ import {
   IsArray,
   IsEnum,
   IsInt,
+  IsISO8601,
+  IsNumber,
   IsOptional,
   IsString,
   IsUrl,
@@ -12,7 +14,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ChannelStatus } from '@prisma/client';
+import { ChannelShareMode, ChannelShareUrgency, ChannelStatus } from '@prisma/client';
 import { ChannelModelPriceDto } from './channel-model-price.dto';
 
 export class UpdateChannelDto {
@@ -89,4 +91,37 @@ export class UpdateChannelDto {
   @IsString()
   @MaxLength(64)
   upstreamGroup?: string | null;
+
+  /** 共享模式：PRIVATE 私有 / GROUP 同分组共享 / PUBLIC 公开共享 */
+  @IsOptional()
+  @IsEnum(ChannelShareMode)
+  shareMode?: ChannelShareMode;
+
+  /** 共享紧急度：NORMAL / HIGH / FLUSH（额度快过期时提高派发优先级） */
+  @IsOptional()
+  @IsEnum(ChannelShareUrgency)
+  shareUrgency?: ChannelShareUrgency;
+
+  /** 共享额度：折算上游成本上限（USD）；达到即自动停止接单 */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  shareQuotaCostUsd?: number | null;
+
+  /** 共享额度：调用次数上限；达到即自动停止接单 */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  shareQuotaRequests?: number | null;
+
+  /** 共享到期时间（ISO）；到时自动停止接单 */
+  @IsOptional()
+  @IsISO8601()
+  shareUntil?: string | null;
+
+  /** 平台抽成基点（0-10000，仅管理员可设）；留空用全局默认 */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  shareFeeBps?: number | null;
 }

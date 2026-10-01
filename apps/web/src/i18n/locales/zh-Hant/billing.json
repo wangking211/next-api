@@ -28,6 +28,7 @@
   "billing.txnType.commission": "返點",
   "billing.txnType.transfer": "轉帳",
   "billing.txnType.withdraw": "提領",
+  "billing.txnType.channelRevenue": "渠道分成",
   "billing.orders.title": "儲值訂單（最近 8 筆）",
   "billing.orders.credits": "到帳積分",
   "billing.orders.way": "方式",

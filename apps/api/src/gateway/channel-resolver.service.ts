@@ -1,6 +1,13 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Channel, ChannelOwnerType, ChannelStatus, ModelCatalog, Prisma, RoutingStrategy } from '@prisma/client';
+import {
+  Channel,
+  ChannelOwnerType,
+  ChannelStatus,
+  ModelCatalog,
+  Prisma,
+  RoutingStrategy,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
 import { TtlCacheService } from '../common/ttl-cache.service';
@@ -12,6 +19,7 @@ import {
   ChannelModelPricingRow,
   deriveChannelPricing,
 } from '../billing/pricing.util';
+import { shareExhausted, shareUrgencyBonus } from './channel-share.util';
 import {
   DEFAULT_STRATEGY,
   applySticky,
@@ -135,23 +143,12 @@ export class ChannelResolverService {
     model: string,
     opts: RouteOptions = {},
   ): Promise<ResolvedChannel[]> {
-    const groupCond = this.groups.channelVisibilityWhere(opts.groupId ?? null);
-    // 自有 BYOK 渠道始终只对持有者可见；平台渠道按生效分组隔离（无分组时退回「全部平台渠道」）。
-    // ⚠️ 分组条件必须限定 ownerType=PLATFORM：`groups: { none: {} }` 会匹配到「未配分组的私有渠道」，
-    // 否则任何用户都能路由到别人的 BYOK 渠道（消耗对方上游额度）。
-    const visibility: Prisma.ChannelWhereInput = groupCond
-      ? {
-          OR: [
-            { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
-            { AND: [{ ownerType: ChannelOwnerType.PLATFORM }, groupCond] },
-          ],
-        }
-      : {
-          OR: [
-            { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
-            { ownerType: ChannelOwnerType.PLATFORM },
-          ],
-        };
+    // 渠道可见性（含共享渠道）：自有 BYOK / 他人公开共享 / 他人同分组共享 / 平台渠道按分组。
+    // ⚠️ 共享与分组条件都必须显式限定 ownerType，否则会把别人的私有渠道暴露出去。
+    const visibility: Prisma.ChannelWhereInput = this.groups.channelScopeWhere(
+      userId,
+      opts.groupId ?? null,
+    );
     const [rows, catalog] = await Promise.all([
       this.prisma.channelModel.findMany({
         where: {
@@ -180,6 +177,8 @@ export class ChannelResolverService {
         continue; // 解密失败的渠道跳过
       }
       if (!apiKey) continue;
+      // 共享渠道的额度/到期闸门：达到上限或已到期就不再派发（渠道主「烧额度」诉求）
+      if (this.shareExhausted(cm.channel)) continue;
       if (cm.channel.status !== ChannelStatus.ENABLED) {
         recoveries.push(this.recoverChannel(cm.channel));
       }
@@ -200,8 +199,11 @@ export class ChannelResolverService {
             catalog as CatalogPricingRow | null,
           ),
         },
-        tier: cm.channel.ownerType === ChannelOwnerType.USER ? 0 : 1,
-        priority: cm.priority ?? cm.channel.priority,
+        tier: cm.channel.ownerType === ChannelOwnerType.USER &&
+          cm.channel.ownerUserId === userId
+          ? 0
+          : 1,
+        priority: (cm.priority ?? cm.channel.priority) + this.shareUrgencyBonus(cm.channel, cm.qualityScore),
         cost: rawCost > 0 ? rawCost : Number.POSITIVE_INFINITY,
         weight: Math.max(cm.weight ?? cm.channel.weight, 1),
         qualityScore: Number(cm.qualityScore ?? 1) || 1,
@@ -413,23 +415,9 @@ export class ChannelResolverService {
     return set.has(strip(canonical));
   }
 
-  /** 汇总用户当前可实际调用的模型（自有+平台启用渠道所支持的模型） */
+  /** 汇总用户当前可实际调用的模型（自有+共享+平台启用渠道所支持的模型） */
   async availableModels(userId: string, groupId?: string | null): Promise<string[]> {
-    const groupCond = this.groups.channelVisibilityWhere(groupId ?? null);
-    // 与 resolve() 同口径：分组可见性只作用于平台渠道，BYOK 渠道仅持有者可见
-    const visibility: Prisma.ChannelWhereInput = groupCond
-      ? {
-          OR: [
-            { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
-            { AND: [{ ownerType: ChannelOwnerType.PLATFORM }, groupCond] },
-          ],
-        }
-      : {
-          OR: [
-            { ownerType: ChannelOwnerType.USER, ownerUserId: userId },
-            { ownerType: ChannelOwnerType.PLATFORM },
-          ],
-        };
+    const visibility = this.groups.channelScopeWhere(userId, groupId ?? null);
     const rows = await this.prisma.channelModel.findMany({
       where: {
         enabled: true,
@@ -437,11 +425,26 @@ export class ChannelResolverService {
           AND: [this.availabilityWhere(this.reenableCutoff()), visibility],
         },
       },
-      distinct: ['modelName'],
-      select: { modelName: true },
+      select: { modelName: true, channel: true },
     });
-    const names = rows.map((r) => r.modelName).sort();
+    const names = [
+      ...new Set(
+        rows
+          .filter((r) => !this.shareExhausted(r.channel))
+          .map((r) => r.modelName),
+      ),
+    ].sort();
     return this.filterCatalogEnabled(names);
+  }
+
+  /** 共享渠道是否已「用尽」（额度/到期）——实现见 channel-share.util */
+  private shareExhausted(channel?: Channel | null, now = Date.now()): boolean {
+    return shareExhausted(channel, now);
+  }
+
+  /** 共享紧急度 → 优先级加成——实现见 channel-share.util */
+  private shareUrgencyBonus(channel: Channel, qualityScore: unknown): number {
+    return shareUrgencyBonus(channel, qualityScore);
   }
 
   /**

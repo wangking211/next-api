@@ -30,6 +30,7 @@ import {
   toAnthropicErrorBody,
 } from './anthropic-format';
 import { UsageService } from '../usage/usage.service';
+import type { UsageEntry } from '../usage/usage.service';
 import { BillingService } from '../billing/billing.service';
 import type { ChannelPricing } from '../billing/pricing.util';
 import { GroupsService } from '../groups/groups.service';
@@ -37,7 +38,8 @@ import { VideoTaskService } from './video-task.service';
 import { SseUsageCollector } from '../usage/sse-usage.collector';
 import { estimatePromptTokens, estimateTokensFromText } from '../usage/token.util';
 import { flattenMessages, extractAssistantText } from '../usage/content.util';
-import { Channel, ChannelOwnerType } from '@prisma/client';
+import { redactSecrets } from '../common/redact.util';
+import { Channel, ChannelOwnerType, ChannelShareMode } from '@prisma/client';
 
 /** 仅提取上游错误消息，避免把上游原始错误体（可能含内部细节）原样透传给客户端 */
 function upstreamErrorMessage(e: UpstreamError): string {
@@ -46,7 +48,8 @@ function upstreamErrorMessage(e: UpstreamError): string {
     (typeof body?.error?.message === 'string' && body.error.message) ||
     (typeof body?.message === 'string' && body.message) ||
     e.message;
-  return String(msg).slice(0, 500);
+  // 上游文案里常混着渠道密钥（如 `token 无效：sk-...`）→ 回传前统一脱敏
+  return redactSecrets(String(msg)).slice(0, 500);
 }
 
 /** 上游错误的可判定文本：message + code + type（UpstreamError.message 只有 "Upstream error 429"，语义在 body 里） */
@@ -368,7 +371,7 @@ export class GatewayController {
       const upstreamModel = upstreamModelName ?? model;
       const upstreamBody =
         upstreamModel === model ? body : { ...body, model: upstreamModel };
-      if (channel.ownerType === ChannelOwnerType.PLATFORM) {
+      if (this.isChargeable(channel, user.id)) {
         // 预授权：按该渠道的售价预估上限，余额不足则跳过（定价随 resolve 结果带出，免再查）
         const required =
           ((promptFallback / 1_000_000) * pricing.priceInput +
@@ -398,7 +401,8 @@ export class GatewayController {
             attemptStart,
             promptFallback,
             requestPreview,
-            chargeable: channel.ownerType === ChannelOwnerType.PLATFORM,
+            chargeable: this.isChargeable(channel, user.id),
+            share: this.shareContext(channel, user.id),
             abort: upstreamAbort,
             idleMs: this.streamIdleMs,
             isClientClosed: () => clientClosed,
@@ -429,7 +433,8 @@ export class GatewayController {
             ...usage,
             latencyMs: Date.now() - startedAt,
             status: result.status,
-            chargeable: channel.ownerType === ChannelOwnerType.PLATFORM,
+            chargeable: this.isChargeable(channel, user.id),
+            share: this.shareContext(channel, user.id),
             isStream: false,
             requestPreview,
             responsePreview: this.logContent
@@ -506,6 +511,42 @@ export class GatewayController {
   }
 
   /** 余额/倍率按用户缓存（同一次请求的多个候选渠道共享，避免重复查库） */
+  /**
+   * 该渠道是否是「他人上架的共享渠道」——决定收费与分成口径。
+   * 自有渠道（含自己上架的）走 BYOK：不收费、不分成（消耗的是自己的上游额度）。
+   */
+  private isSharedFromOthers(channel: Channel, callerUserId: string): boolean {
+    return (
+      channel.ownerType === ChannelOwnerType.USER &&
+      channel.shareMode !== ChannelShareMode.PRIVATE &&
+      !!channel.ownerUserId &&
+      channel.ownerUserId !== callerUserId
+    );
+  }
+
+  /**
+   * 本次调用是否向调用方收费：
+   * - 平台渠道：收费
+   * - 他人已上架的共享渠道：收费（实收按比例分给渠道主）
+   * - 自己的 BYOK 渠道：免费
+   * 预授权与落账必须用同一判定，否则会出现「不预授权但扣费」的白嫖窗口。
+   */
+  private isChargeable(channel: Channel, callerUserId: string): boolean {
+    return (
+      channel.ownerType === ChannelOwnerType.PLATFORM ||
+      this.isSharedFromOthers(channel, callerUserId)
+    );
+  }
+
+  /** 共享分成上下文（落账时给渠道主入账用）；非共享场景返回 undefined */
+  private shareContext(channel: Channel, callerUserId: string): UsageEntry['share'] {
+    if (!this.isSharedFromOthers(channel, callerUserId)) return undefined;
+    return {
+      ownerUserId: channel.ownerUserId as string,
+      feeBps: this.billing.channelShareFeeBps(channel),
+    };
+  }
+
   private balanceGuards(userId: string, presetMultiplier?: number) {
     let cachedBalance: number | null = null;
     let cachedMultiplier: number | null = presetMultiplier ?? null;
@@ -629,7 +670,8 @@ export class GatewayController {
       latencyMs: Date.now() - ctx.startedAt,
       status: e.status || 502,
       errorMessage: e.message,
-      chargeable: ctx.channel.ownerType === ChannelOwnerType.PLATFORM,
+      chargeable: this.isChargeable(ctx.channel, ctx.userId),
+      share: this.shareContext(ctx.channel, ctx.userId),
       isStream: ctx.isStream,
       requestPreview: ctx.requestPreview,
       pricing: ctx.pricing,
@@ -752,7 +794,7 @@ export class GatewayController {
         unsupported = true; // 如 anthropic/gemini 暂无兼容端点 → 换下一家
         continue;
       }
-      if (channel.ownerType === ChannelOwnerType.PLATFORM) {
+      if (this.isChargeable(channel, user.id)) {
         // 预授权：embeddings 只有输入 token（输出恒为 0），按输入预估上限（定价随 resolve 带出）
         const required =
           (promptFallback / 1_000_000) * pricing.priceInput * (await guards.getUserMultiplier());
@@ -788,7 +830,8 @@ export class GatewayController {
             ...usage,
             latencyMs: Date.now() - startedAt,
             status: result.status,
-            chargeable: channel.ownerType === ChannelOwnerType.PLATFORM,
+            chargeable: this.isChargeable(channel, user.id),
+            share: this.shareContext(channel, user.id),
             isStream: false,
             requestPreview,
             responsePreview: embeddingsResponsePreview(result.json),
@@ -961,10 +1004,7 @@ export class GatewayController {
       const pricePerCall = pricing.pricePerCall;
       const costPerCall = pricing.costPerCall;
       // 预授权：按次价 × 张数 × 倍率（未配置按次价时不做按次预授权）
-      if (
-        channel.ownerType === ChannelOwnerType.PLATFORM &&
-        pricePerCall > 0
-      ) {
+      if (this.isChargeable(channel, user.id) && pricePerCall > 0) {
         const required = pricePerCall * n * billingInfo.value;
         if ((await guards.getBalance()) < required) {
           insufficientBalance = true;
@@ -998,7 +1038,8 @@ export class GatewayController {
             ...usage,
             latencyMs: Date.now() - startedAt,
             status: result.status,
-            chargeable: channel.ownerType === ChannelOwnerType.PLATFORM,
+            chargeable: this.isChargeable(channel, user.id),
+            share: this.shareContext(channel, user.id),
             isStream: false,
             requestPreview,
             responsePreview: `[images ${images}]`,
@@ -1173,7 +1214,7 @@ export class GatewayController {
       const pricePerCall = pricing.pricePerCall;
       const costPerCall = pricing.costPerCall;
       // 预授权：按次价 × 倍率（未配置按次价时不做预授权）
-      if (channel.ownerType === ChannelOwnerType.PLATFORM && pricePerCall > 0) {
+      if (this.isChargeable(channel, user.id) && pricePerCall > 0) {
         const required = pricePerCall * billingInfo.value;
         if ((await guards.getBalance()) < required) {
           insufficientBalance = true;
@@ -1209,7 +1250,8 @@ export class GatewayController {
             ...usage,
             latencyMs: Date.now() - startedAt,
             status: result.status,
-            chargeable: channel.ownerType === ChannelOwnerType.PLATFORM,
+            chargeable: this.isChargeable(channel, user.id),
+            share: this.shareContext(channel, user.id),
             isStream: false,
             requestPreview,
             responsePreview: taskId ? `[video task ${taskId}]` : '[video task]',
@@ -1512,6 +1554,8 @@ export class GatewayController {
       multiplierSource?: string;
       /** 渠道×模型定价（随 resolve 带出）：落账免再查 */
       pricing?: ChannelPricing;
+      /** 共享分成上下文（他人上架的渠道）：落账时给渠道主入账 */
+      share?: UsageEntry['share'];
       /** TPM 预扣上下文（guard 注入；流结束后回填实际用量） */
       tpm?: GatewayAuthContext['tpm'];
     },
@@ -1600,6 +1644,7 @@ export class GatewayController {
         multiplier: meta.multiplier,
         multiplierSource: meta.multiplierSource,
         pricing: meta.pricing,
+        share: meta.share,
       }),
     ];
 

@@ -41,6 +41,8 @@ model User {
   updatedAt    DateTime   @updatedAt
   /// 最后活跃（最近一次网关调用/登录）：物化自 RequestLog，用于列表按活跃时间排序
   lastActiveAt DateTime?
+  /// 令牌版本：「退出全部设备」/强制下线时 +1，使已签发的 JWT 立即失效（对应 `tv` claim）
+  tokenVersion Int      @default(0)
 
   apiKeys     ApiKey[]
   channels    Channel[]
@@ -81,6 +83,8 @@ enum BalanceTxType {
   COMMISSION
   TRANSFER
   WITHDRAW
+  /// 渠道共享收益（渠道主把自有渠道上架给他人使用后按实收分成入账）
+  CHANNEL_REVENUE
 }
 
 enum WithdrawalStatus {
@@ -247,6 +251,23 @@ enum ChannelStatus {
   DISABLED
 }
 
+/// 渠道共享模式：决定自有渠道是否/如何开放给他人使用
+enum ChannelShareMode {
+  /// 私有：仅持有者可见（默认）
+  PRIVATE
+  /// 同分组共享：绑定分组内的用户可见
+  GROUP
+  /// 公开共享：所有用户可见
+  PUBLIC
+}
+
+/// 共享紧急度：额度/时间快用不完时提高派发优先级的诉求
+enum ChannelShareUrgency {
+  NORMAL
+  HIGH
+  FLUSH
+}
+
 model Channel {
   id          String           @id @default(uuid())
   ownerType   ChannelOwnerType
@@ -263,6 +284,23 @@ model Channel {
   region      ModelOrigin?
   /// 上游计费分组名（如 TokenFleet 的 group_test），仅用于成本核算与展示
   upstreamGroup String?
+  /// 共享模式（仅自有渠道有意义）：PRIVATE 私有 / GROUP 同分组共享 / PUBLIC 公开共享
+  shareMode   ChannelShareMode @default(PRIVATE)
+  /// 平台抽成基点（1/10000），仅管理员可设；null = 用全局默认 CHANNEL_SHARE_FEE_BPS
+  shareFeeBps Int?
+  /// —— 本轮共享目标（达到任一项即自动停止接单，适合「把本月用不完的额度烧掉」）——
+  /// 折算上游成本上限 USD：以渠道成本价（costInput/costOutput）累计，最贴合「用掉多少额度」
+  shareQuotaCostUsd Decimal? @db.Decimal(18, 6)
+  /// 调用次数上限
+  shareQuotaRequests Int?
+  /// 到期时间（到时自动停止接单）
+  shareUntil DateTime?
+  /// 共享紧急度：NORMAL 常态 / HIGH 加急 / FLUSH 清仓（额度快过期时提高派发优先级）
+  shareUrgency ChannelShareUrgency @default(NORMAL)
+  /// 本轮已被他人消耗的折算成本（热路径同事务累加）
+  shareUsedCostUsd Decimal @default(0) @db.Decimal(18, 6)
+  /// 本轮已被他人调用的次数
+  shareUsedRequests Int @default(0)
   weight      Int              @default(1)
   priority    Int              @default(0)
   status      ChannelStatus    @default(ENABLED)
@@ -404,6 +442,8 @@ model RequestLog {
   chargeable       Boolean  @default(true)
   /// 本次调用支付给各级代理的返点合计（USD）
   commission       Decimal  @default(0) @db.Decimal(18, 6)
+  /// 本次调用支付给渠道主的分成（共享渠道，USD）；平台留存 = chargeable 实收 − 本值
+  channelRevenue   Decimal  @default(0) @db.Decimal(18, 6)
   /// 本次调用生效的售价倍率与来源（user / group / agent / default），用于账单审计
   multiplierApplied Decimal? @db.Decimal(6, 4)
   multiplierSource  String?

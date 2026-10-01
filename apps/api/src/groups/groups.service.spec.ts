@@ -144,6 +144,34 @@ describe('GroupsService 分组模型解析', () => {
   });
 });
 
+describe('GroupsService 渠道可见性（含共享渠道）', () => {
+  const { service } = makeService({});
+
+  it('无生效分组：自有 + 他人公开共享 + 全部平台渠道', () => {
+    const where: any = service.channelScopeWhere('u1', null);
+    expect(where.OR).toEqual([
+      { ownerType: 'USER', ownerUserId: 'u1' },
+      { ownerType: 'USER', shareMode: 'PUBLIC' },
+      { ownerType: 'PLATFORM' },
+    ]);
+  });
+
+  it('有生效分组：共享与平台分支都必须限定 ownerType（否则会漏出他人私有渠道）', () => {
+    const where: any = service.channelScopeWhere('u1', 'g1');
+    const groupCond = { OR: [{ groups: { none: {} } }, { groups: { some: { id: 'g1' } } }] };
+    expect(where.OR).toEqual([
+      { ownerType: 'USER', ownerUserId: 'u1' },
+      { ownerType: 'USER', shareMode: 'PUBLIC' },
+      { AND: [{ ownerType: 'USER', shareMode: 'GROUP' }, groupCond] },
+      { AND: [{ ownerType: 'PLATFORM' }, groupCond] },
+    ]);
+    // 关键回归点：任何分组条件都必须包在 ownerType 之下
+    for (const branch of where.OR.slice(2)) {
+      expect(branch.AND[0]).toHaveProperty('ownerType');
+    }
+  });
+});
+
 describe('GroupsService 分组行缓存', () => {
   const idLookups = (prisma: any) =>
     prisma.modelGroup.findFirst.mock.calls.filter((c: any[]) => c[0]?.where?.id).length;

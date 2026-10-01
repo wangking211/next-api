@@ -99,6 +99,7 @@ describe('UsageService 计费口径', () => {
       1,
       'log1',
       '调用 gpt-4o',
+      expect.anything(),
     );
     expect(tx.requestLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ chargeable: true, cost: 1 }),

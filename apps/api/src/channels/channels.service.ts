@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Channel, ChannelModel, ChannelOwnerType, ChannelStatus, Prisma, Role } from '@prisma/client';
+import { Channel, ChannelModel, ChannelOwnerType, ChannelShareMode, ChannelShareUrgency, ChannelStatus, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
 import { AuthUser } from '../common/interfaces/auth.interface';
@@ -13,6 +13,7 @@ import { UpstreamError } from '../gateway/types';
 import { assertPublicHttpUrl, safeFetch, UnsafeUrlError, upstreamAllowsPrivate } from '../common/url-safety';
 import { joinUrl } from '../gateway/providers/stream.util';
 import { GroupsService } from '../groups/groups.service';
+import { shareExhausted } from '../gateway/channel-share.util';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
 import { ChannelModelPriceDto } from './dto/channel-model-price.dto';
@@ -229,21 +230,8 @@ export class ChannelsService {
   /** 当前用户可调用的模型，按渠道分组（自有 BYOK + 平台，按生效分组过滤），用于控制台展示。 */
   async availableModels(user: AuthUser) {
     const group = await this.groups.effectiveGroup({ id: user.id });
-    const groupCond = this.groups.channelVisibilityWhere(group.id);
-    // 与网关 resolve() 同口径：分组可见性只作用于平台渠道，BYOK 渠道仅持有者可见
-    const visibility = groupCond
-      ? {
-          OR: [
-            { ownerType: ChannelOwnerType.USER, ownerUserId: user.id },
-            { AND: [{ ownerType: ChannelOwnerType.PLATFORM }, groupCond] },
-          ],
-        }
-      : {
-          OR: [
-            { ownerType: ChannelOwnerType.USER, ownerUserId: user.id },
-            { ownerType: ChannelOwnerType.PLATFORM },
-          ],
-        };
+    // 与网关 resolve() 同口径（含共享渠道）：自有 BYOK / 他人公开共享 / 他人同分组共享 / 平台按分组
+    const visibility = this.groups.channelScopeWhere(user.id, group.id);
     const rows = await this.prisma.channelModel.findMany({
       where: {
         enabled: true,
@@ -254,7 +242,20 @@ export class ChannelsService {
       },
       select: {
         modelName: true,
-        channel: { select: { id: true, name: true, ownerType: true, provider: true } },
+        channel: {
+          select: {
+            id: true,
+            name: true,
+            ownerType: true,
+            provider: true,
+            shareMode: true,
+            shareUntil: true,
+            shareQuotaCostUsd: true,
+            shareQuotaRequests: true,
+            shareUsedCostUsd: true,
+            shareUsedRequests: true,
+          },
+        },
       },
       orderBy: { modelName: 'asc' },
     });
@@ -264,6 +265,8 @@ export class ChannelsService {
       { id: string; name: string; ownerType: string; provider: string; models: string[] }
     >();
     for (const r of rows) {
+      // 共享渠道已达额度/到期 → 不再对外展示（与网关路由同口径）
+      if (shareExhausted(r.channel)) continue;
       // 模型分组可见性：分组未配置可见模型 = 不限制
       if (!this.groups.isModelVisible(group, r.modelName)) continue;
       flat.add(r.modelName);
@@ -299,6 +302,13 @@ export class ChannelsService {
             ? { connect: dto.groups.map((id) => ({ id })) }
             : undefined,
         upstreamGroup: dto.upstreamGroup ?? null,
+        // 共享设置：仅自有渠道有意义；抽成只有管理员能设
+        shareMode: dto.shareMode ?? ChannelShareMode.PRIVATE,
+        shareUrgency: dto.shareUrgency ?? ChannelShareUrgency.NORMAL,
+        shareQuotaCostUsd: dto.shareQuotaCostUsd ?? null,
+        shareQuotaRequests: dto.shareQuotaRequests ?? null,
+        shareUntil: dto.shareUntil ? new Date(dto.shareUntil) : null,
+        shareFeeBps: user.role === Role.ADMIN ? (dto.shareFeeBps ?? null) : null,
         weight: dto.weight ?? 1,
         priority: dto.priority ?? 0,
         dailyRequestLimit: dto.dailyRequestLimit ?? null,
@@ -337,10 +347,21 @@ export class ChannelsService {
         baseUrl: dto.baseUrl,
         models: dto.models,
         groups:
-          user.role === Role.ADMIN && dto.groups !== undefined
-            ? { set: dto.groups.map((id) => ({ id })) }
-            : undefined,
+          dto.groups !== undefined ? { set: dto.groups.map((id) => ({ id })) } : undefined,
         upstreamGroup: dto.upstreamGroup,
+        // 共享设置（自有渠道有意义）
+        shareMode: dto.shareMode,
+        shareUrgency: dto.shareUrgency,
+        shareQuotaCostUsd: dto.shareQuotaCostUsd,
+        shareQuotaRequests: dto.shareQuotaRequests,
+        shareUntil:
+          dto.shareUntil === undefined
+            ? undefined
+            : dto.shareUntil
+              ? new Date(dto.shareUntil)
+              : null,
+        // 抽成仅管理员可改
+        shareFeeBps: user.role === Role.ADMIN ? dto.shareFeeBps : undefined,
         weight: dto.weight,
         priority: dto.priority,
         status: dto.status,
