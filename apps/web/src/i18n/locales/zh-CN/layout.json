@@ -29,6 +29,8 @@
   "layout.title.groups": "模型分组",
   "layout.title.fallback": "控制台",
   "layout.user.signOut": "退出登录",
+  "layout.user.signOutAll": "退出全部设备",
+  "layout.user.signOutAllConfirm": "将吊销该账号在所有设备上的登录状态，包括当前设备，需重新登录。确定继续？",
   "layout.user.adminTag": "管理员",
   "layout.error.title": "页面出错了",
   "layout.error.subTitle": "请刷新页面重试；若问题持续，请联系管理员。",

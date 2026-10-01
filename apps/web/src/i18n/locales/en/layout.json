@@ -29,6 +29,8 @@
   "layout.title.groups": "Model Groups",
   "layout.title.fallback": "Console",
   "layout.user.signOut": "Sign out",
+  "layout.user.signOutAll": "Sign out everywhere",
+  "layout.user.signOutAllConfirm": "This revokes every active session for this account, including this device. You will need to sign in again. Continue?",
   "layout.user.adminTag": "Admin",
   "layout.error.title": "Something went wrong",
   "layout.error.subTitle": "Please refresh the page and try again. If the problem persists, contact the administrator.",

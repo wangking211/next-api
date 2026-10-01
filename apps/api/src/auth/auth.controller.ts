@@ -27,4 +27,14 @@ export class AuthController {
   me(@CurrentUser() user: AuthUser) {
     return this.auth.me(user.id);
   }
+
+  /**
+   * 退出全部设备：自增 tokenVersion，使该用户名下所有已签发令牌立即失效
+   * （包括调用本接口的这一个）。用于密钥/令牌疑似泄露后的快速止损。
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('logout-all')
+  logoutAll(@CurrentUser() user: AuthUser) {
+    return this.auth.revokeAllSessions(user.id);
+  }
 }

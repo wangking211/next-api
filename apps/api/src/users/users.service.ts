@@ -180,6 +180,14 @@ export class UsersService {  constructor(private readonly prisma: PrismaService)
     }
   }
 
+  /** 吊销该用户全部已签发令牌（tokenVersion +1）：退出全部设备/强制下线的实现基础。 */
+  async incrementTokenVersion(userId: string): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { tokenVersion: { increment: 1 } },
+    });
+  }
+
   /** 按当前筛选导出用户 CSV（上限 1 万行，含最后活跃时间） */
   async exportCsv(f: UserListFilters = {}): Promise<{ csv: string; count: number }> {
     const { page: _p, pageSize: _ps, ...rest } = f;

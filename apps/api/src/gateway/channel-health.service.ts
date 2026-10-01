@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ChannelStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { redactSecrets } from '../common/redact.util';
 
 @Injectable()
 export class ChannelHealthService {
@@ -38,13 +39,15 @@ export class ChannelHealthService {
 
   /** 调用失败：累计失败次数，达到阈值自动禁用并告警。 */
   async recordFailure(channelId: string, message: string): Promise<void> {
+    // 上游文案常带渠道密钥 → 先脱敏，再落库与告警
+    const msg = redactSecrets(message);
     try {
       const channel = await this.prisma.channel.update({
         where: { id: channelId },
         data: {
           failureCount: { increment: 1 },
           lastErrorAt: new Date(),
-          lastErrorMsg: message.slice(0, 500),
+          lastErrorMsg: msg.slice(0, 500),
         },
       });
 
@@ -61,7 +64,7 @@ export class ChannelHealthService {
           this.logger.warn(
             `渠道 "${channel.name}" 连续失败 ${channel.failureCount} 次，已自动禁用`,
           );
-          await this.sendAlert(channel, message);
+          await this.sendAlert(channel, msg);
         }
       }
     } catch {
@@ -72,12 +75,14 @@ export class ChannelHealthService {
   /** 上游限流（429）：只记录错误现场，不累计 failureCount —— 连续限流不应直接打死渠道，
    *  抑制由路由层的 (渠道,模型) 冷却承担（且冷却会指数退避）。 */
   async recordRateLimited(channelId: string, message: string): Promise<void> {
+    // 先脱敏再落库/打日志（上游限流文案里也会带密钥）
+    const msg = redactSecrets(message);
     try {
       await this.prisma.channel.updateMany({
         where: { id: channelId },
-        data: { lastErrorAt: new Date(), lastErrorMsg: message.slice(0, 500) },
+        data: { lastErrorAt: new Date(), lastErrorMsg: msg.slice(0, 500) },
       });
-      this.logger.warn(`渠道 ${channelId} 触发上游限流(429): ${message.slice(0, 200)}`);
+      this.logger.warn(`渠道 ${channelId} 触发上游限流(429): ${msg.slice(0, 200)}`);
     } catch {
       /* ignore */
     }

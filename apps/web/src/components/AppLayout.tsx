@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { Layout, Menu, Tag, Dropdown, Avatar, Typography } from 'antd';
+import { Layout, Menu, Tag, Dropdown, Avatar, Typography, Modal } from 'antd';
 import {
   DashboardOutlined,
   KeyOutlined,
@@ -29,7 +29,7 @@ const { Text } = Typography;
 export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuth();
+  const { user, logout, logoutAll } = useAuth();
   const { t } = useTranslation();
 
   const isAdmin = user?.role === 'ADMIN';
@@ -117,6 +117,22 @@ export default function AppLayout() {
           <Dropdown
             menu={{
               items: [
+                {
+                  key: 'logout-all',
+                  icon: <LogoutOutlined />,
+                  label: t('layout.user.signOutAll'),
+                  onClick: () => {
+                    Modal.confirm({
+                      title: t('layout.user.signOutAllConfirm'),
+                      okText: t('common.ok'),
+                      cancelText: t('common.cancel'),
+                      onOk: () => {
+                        void logoutAll().then(() => navigate('/login'));
+                      },
+                    });
+                  },
+                },
+                { type: 'divider' },
                 {
                   key: 'logout',
                   icon: <LogoutOutlined />,

@@ -18,6 +18,8 @@ interface AuthContextValue {
   login: (identifier: string, password: string) => Promise<void>;
   register: (email: string, username: string, password: string) => Promise<void>;
   logout: () => void;
+  /** 退出全部设备：先吊销服务端全部令牌，再清理本地状态 */
+  logoutAll: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -66,9 +68,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const logoutAll = useCallback(async () => {
+    // 先吊销服务端全部令牌；失败也不阻断本地退出，避免卡在已失效的会话里
+    await authApi.logoutAll().catch(() => undefined);
+    localStorage.removeItem(TOKEN_KEY);
+    queryClient.clear();
+    setUser(null);
+  }, []);
+
   const value = useMemo(
-    () => ({ user, loading, login, register, logout }),
-    [user, loading, login, register, logout],
+    () => ({ user, loading, login, register, logout, logoutAll }),
+    [user, loading, login, register, logout, logoutAll],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

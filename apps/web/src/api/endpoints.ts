@@ -53,6 +53,11 @@ export const authApi = {
     const { data } = await api.get<UserInfo>('/auth/me');
     return data;
   },
+  /** 吊销该账号已签发的全部令牌（退出全部设备） */
+  async logoutAll() {
+    const { data } = await api.post<UserInfo>('/auth/logout-all');
+    return data;
+  },
 };
 
 /** 无需登录的公开数据（落地页） */

@@ -59,8 +59,20 @@ export class AuthService {
       email: user.email,
       username: user.username,
       role: user.role,
+      // 令牌版本随签发写入：tokenVersion 变更后旧 token 立即失效
+      tv: user.tokenVersion ?? 0,
     });
     return { accessToken: token, user: this.sanitize(user) };
+  }
+
+  /**
+   * 吊销该用户名下**已签发的所有令牌**（退出全部设备/强制下线）。
+   * JWT 本身无状态，靠 tokenVersion 自增让旧 `tv` 失效；下次请求的守卫比对即 401。
+   */
+  async revokeAllSessions(userId: string): Promise<SafeUser> {
+    const user = await this.users.getOrThrow(userId);
+    await this.users.incrementTokenVersion(userId);
+    return this.sanitize(user);
   }
 
   async register(dto: RegisterDto, ip?: string) {

@@ -29,6 +29,8 @@
   "layout.title.groups": "模型分組",
   "layout.title.fallback": "控制台",
   "layout.user.signOut": "登出",
+  "layout.user.signOutAll": "登出全部裝置",
+  "layout.user.signOutAllConfirm": "將註銷該帳號在所有裝置上的登入狀態，包含目前裝置，需重新登入。確定繼續？",
   "layout.user.adminTag": "管理員",
   "layout.error.title": "頁面發生錯誤",
   "layout.error.subTitle": "請重新整理頁面重試；若問題持續，請聯絡管理員。",
