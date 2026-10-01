@@ -3,6 +3,7 @@ import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import { RedisService } from '../redis/redis.service';
 import { ConfigService } from '@nestjs/config';
+import * as bcrypt from 'bcryptjs';
 
 /**
  * 登录/注册的来源 IP 维度限流（LOGIN_IP_LIMIT / LOGIN_IP_WINDOW）。
@@ -29,9 +30,10 @@ function svc(opts: { ipCount?: string | null; redisDown?: boolean } = {}) {
     },
   };
   const users = {
-    findByEmailOrUsername: jest.fn(async () => null),
-    findByEmail: jest.fn(async () => null),
-    findByUsername: jest.fn(async () => null),
+    findByEmailOrUsername: jest.fn(async (_identifier?: string): Promise<any> => null),
+    findByEmail: jest.fn(async (_email?: string): Promise<any> => null),
+    findByUsername: jest.fn(async (_username?: string): Promise<any> => null),
+    findByUsernameInsensitive: jest.fn(async (_username?: string): Promise<any> => null),
     create: jest.fn(),
   };
   const auth = new AuthService(
@@ -86,5 +88,39 @@ describe('AuthService 登录 IP 限流', () => {
       .catch(() => undefined);
     expect(redis.client.incr).toHaveBeenCalledWith('login:ip:1.2.3.4');
     expect(redis.client.expire).toHaveBeenCalledWith('login:ip:1.2.3.4', 300);
+  });
+});
+
+/**
+ * 登录/注册失败带稳定错误码：控制台据此换本地化文案，
+ * 避免中文界面直接显示后端的英文 message。
+ */
+describe('AuthService 登录/注册错误码', () => {
+  it('账号或密码错误 → 401 + AUTH_INVALID_CREDENTIALS', async () => {
+    const { auth } = svc({});
+    await expect(auth.login({ identifier: 'nobody', password: 'x' })).rejects.toMatchObject({
+      status: 401,
+      response: { code: 'AUTH_INVALID_CREDENTIALS' },
+    });
+  });
+
+  it('账号被封禁 → 401 + AUTH_ACCOUNT_BANNED（与密码错误可区分）', async () => {
+    const { auth, users } = svc({});
+    const passwordHash = await bcrypt.hash('correct-password', 4);
+    users.findByEmailOrUsername.mockResolvedValue({ id: 'u1', status: 'BANNED', passwordHash });
+
+    await expect(
+      auth.login({ identifier: 'banned', password: 'correct-password' }),
+    ).rejects.toMatchObject({ status: 401, response: { code: 'AUTH_ACCOUNT_BANNED' } });
+  });
+
+  it('注册命中用户名（大小写不敏感）→ 409 + AUTH_USERNAME_TAKEN', async () => {
+    const { auth, users } = svc({});
+    users.findByUsernameInsensitive.mockResolvedValue({ id: 'u2' });
+
+    await expect(
+      auth.register({ email: 'New@Example.com', username: 'Admin', password: 'abcd1234' }),
+    ).rejects.toMatchObject({ status: 409, response: { code: 'AUTH_USERNAME_TAKEN' } });
+    expect(users.findByUsernameInsensitive).toHaveBeenCalledWith('Admin');
   });
 });

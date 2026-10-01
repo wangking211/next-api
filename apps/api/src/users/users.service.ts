@@ -39,9 +39,35 @@ export class UsersService {  constructor(private readonly prisma: PrismaService)
     return this.prisma.user.findUnique({ where: { username } });
   }
 
-  findByEmailOrUsername(identifier: string): Promise<User | null> {
+  /** 注册查重：用户名大小写不敏感，避免 Admin 与 admin 并存（登录侧同样不区分大小写）。 */
+  findByUsernameInsensitive(username: string): Promise<User | null> {
+    const value = username.trim();
+    if (!value) return Promise.resolve(null);
     return this.prisma.user.findFirst({
-      where: { OR: [{ email: identifier }, { username: identifier }] },
+      where: { username: { equals: value, mode: 'insensitive' } },
+    });
+  }
+
+  /**
+   * 登录标识：邮箱或用户名。
+   *
+   * 邮箱注册时已小写化、用户名按输入原样存，因此先按原样精确匹配（绝大多数登录一次命中），
+   * 未命中再按大小写不敏感回退——用户不该因为多打一个大写字母就被判「密码错误」。
+   */
+  async findByEmailOrUsername(identifier: string): Promise<User | null> {
+    const value = identifier.trim();
+    if (!value) return null;
+    const exact = await this.prisma.user.findFirst({
+      where: { OR: [{ email: value }, { username: value }] },
+    });
+    if (exact) return exact;
+    return this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: { equals: value, mode: 'insensitive' } },
+          { username: { equals: value, mode: 'insensitive' } },
+        ],
+      },
     });
   }
 

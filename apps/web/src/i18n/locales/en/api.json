@@ -5,5 +5,11 @@
   "api.notFound": "The requested resource was not found.",
   "api.tooManyRequests": "Too many requests. Please try again shortly.",
   "api.serverError": "The server had an error. Please try again later.",
-  "api.networkError": "Network error. Check your connection and try again."
+  "api.networkError": "Network error. Check your connection and try again.",
+  "api.authInvalidCredentials": "Incorrect username or password",
+  "api.authAccountBanned": "This account has been banned. Contact an administrator.",
+  "api.authIpThrottled": "Too many requests from this network. Please try again later.",
+  "api.authEmailTaken": "This email is already registered",
+  "api.authUsernameTaken": "This username is already taken",
+  "api.authIdentifierTaken": "This email or username is already registered"
 }

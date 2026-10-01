@@ -130,3 +130,53 @@ describe('UsersService.list 筛选与排序', () => {
     expect(prisma.user.findMany.mock.calls[0][0].where.apiKeys).toEqual({ some: {} });
   });
 });
+
+/**
+ * 登录标识查找：邮箱注册时已小写化、用户名按输入原样存，
+ * 所以先精确匹配、未命中再大小写不敏感回退（用户不该因为多打一个大写字母被当成密码错误）。
+ */
+describe('UsersService 登录标识查找', () => {
+  function svc(results: Array<unknown>) {
+    const findFirst = jest.fn();
+    for (const r of results) findFirst.mockResolvedValueOnce(r);
+    const prisma = { user: { findFirst } };
+    return { service: new UsersService(prisma as unknown as PrismaService), findFirst };
+  }
+
+  it('原样命中时只查一次，不再做大小写回退', async () => {
+    const { service, findFirst } = svc([{ id: 'u1' }]);
+    await expect(service.findByEmailOrUsername('admin')).resolves.toMatchObject({ id: 'u1' });
+    expect(findFirst).toHaveBeenCalledTimes(1);
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { OR: [{ email: 'admin' }, { username: 'admin' }] },
+    });
+  });
+
+  it('大小写不同时回退到 insensitive 查询（并先 trim）', async () => {
+    const { service, findFirst } = svc([null, { id: 'u1' }]);
+    await expect(service.findByEmailOrUsername('  Admin  ')).resolves.toMatchObject({ id: 'u1' });
+    expect(findFirst).toHaveBeenCalledTimes(2);
+    expect(findFirst.mock.calls[1][0]).toEqual({
+      where: {
+        OR: [
+          { email: { equals: 'Admin', mode: 'insensitive' } },
+          { username: { equals: 'Admin', mode: 'insensitive' } },
+        ],
+      },
+    });
+  });
+
+  it('空标识直接返回 null 且不发查询', async () => {
+    const { service, findFirst } = svc([]);
+    await expect(service.findByEmailOrUsername('   ')).resolves.toBeNull();
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it('注册查重按大小写不敏感匹配用户名', async () => {
+    const { service, findFirst } = svc([{ id: 'u2' }]);
+    await service.findByUsernameInsensitive(' Admin ');
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { username: { equals: 'Admin', mode: 'insensitive' } },
+    });
+  });
+});

@@ -5,5 +5,11 @@
   "api.notFound": "请求的资源不存在",
   "api.tooManyRequests": "请求过于频繁，请稍后再试",
   "api.serverError": "服务器出错了，请稍后重试",
-  "api.networkError": "网络异常，请检查网络后重试"
+  "api.networkError": "网络异常，请检查网络后重试",
+  "api.authInvalidCredentials": "用户名或密码不正确",
+  "api.authAccountBanned": "账号已被封禁，请联系管理员",
+  "api.authIpThrottled": "当前网络请求过于频繁，请稍后再试",
+  "api.authEmailTaken": "该邮箱已被注册",
+  "api.authUsernameTaken": "该用户名已被占用",
+  "api.authIdentifierTaken": "邮箱或用户名已被注册"
 }

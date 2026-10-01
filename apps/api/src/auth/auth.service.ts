@@ -82,10 +82,14 @@ export class AuthService {
     const email = dto.email.toLowerCase().trim();
     const [byEmail, byUsername] = await Promise.all([
       this.users.findByEmail(email),
-      this.users.findByUsername(dto.username),
+      this.users.findByUsernameInsensitive(dto.username),
     ]);
-    if (byEmail) throw new ConflictException('Email already registered');
-    if (byUsername) throw new ConflictException('Username already taken');
+    if (byEmail) {
+      throw new ConflictException({ code: 'AUTH_EMAIL_TAKEN', message: 'Email already registered' });
+    }
+    if (byUsername) {
+      throw new ConflictException({ code: 'AUTH_USERNAME_TAKEN', message: 'Username already taken' });
+    }
 
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
     let user: User;
@@ -98,7 +102,10 @@ export class AuthService {
     } catch (e) {
       // 并发/重复注册命中唯一约束时返回 409，而非 500
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-        throw new ConflictException('Email or username already registered');
+        throw new ConflictException({
+          code: 'AUTH_IDENTIFIER_TAKEN',
+          message: 'Email or username already registered',
+        });
       }
       throw e;
     }
@@ -117,10 +124,16 @@ export class AuthService {
     const ok = !!user && (await bcrypt.compare(dto.password, user.passwordHash));
     if (!ok) {
       await this.registerLoginFailure(throttleKey);
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException({
+        code: 'AUTH_INVALID_CREDENTIALS',
+        message: 'Invalid credentials',
+      });
     }
     if (user!.status === 'BANNED') {
-      throw new UnauthorizedException('Account is banned');
+      throw new UnauthorizedException({
+        code: 'AUTH_ACCOUNT_BANNED',
+        message: 'Account is banned',
+      });
     }
     await this.clearLoginFailures(throttleKey);
     // 登录也计入「最后活跃」（尽力而为，内部已吞错，失败不影响登录）
@@ -135,7 +148,10 @@ export class AuthService {
       const count = Number(await this.redis.client.get(key)) || 0;
       if (count >= this.loginFailLimit) {
         throw new HttpException(
-          'Too many failed login attempts. Please try again later.',
+          {
+            code: 'AUTH_TOO_MANY_ATTEMPTS',
+            message: 'Too many failed login attempts. Please try again later.',
+          },
           429,
         );
       }
@@ -170,7 +186,10 @@ export class AuthService {
       const count = Number(await this.redis.client.get(`login:ip:${ip}`)) || 0;
       if (count >= this.loginIpLimit) {
         throw new HttpException(
-          'Too many requests from your IP. Please try again later.',
+          {
+            code: 'AUTH_IP_THROTTLED',
+            message: 'Too many requests from your IP. Please try again later.',
+          },
           429,
         );
       }

@@ -5,5 +5,11 @@
   "api.notFound": "請求的資源不存在",
   "api.tooManyRequests": "請求過於頻繁，請稍後再試",
   "api.serverError": "伺服器出錯了，請稍後重試",
-  "api.networkError": "網路異常，請檢查網路後重試"
+  "api.networkError": "網路異常，請檢查網路後重試",
+  "api.authInvalidCredentials": "使用者名稱或密碼不正確",
+  "api.authAccountBanned": "帳號已被封鎖，請聯絡管理員",
+  "api.authIpThrottled": "目前網路請求過於頻繁，請稍後再試",
+  "api.authEmailTaken": "此電子郵件已被註冊",
+  "api.authUsernameTaken": "此使用者名稱已被使用",
+  "api.authIdentifierTaken": "電子郵件或使用者名稱已被註冊"
 }
