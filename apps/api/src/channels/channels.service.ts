@@ -269,6 +269,7 @@ export class ChannelsService {
             id: true,
             name: true,
             ownerType: true,
+            ownerUserId: true,
             provider: true,
             shareMode: true,
             shareUntil: true,
@@ -284,7 +285,7 @@ export class ChannelsService {
     const flat = new Set<string>();
     const byChannel = new Map<
       string,
-      { id: string; name: string; ownerType: string; provider: string; models: string[] }
+      (typeof rows)[number]['channel'] & { models: string[] }
     >();
     for (const r of rows) {
       // 共享渠道已达额度/到期 → 不再对外展示（与网关路由同口径）

@@ -3,12 +3,14 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { channelsApi } from '../api/endpoints';
 import QueryError from '../components/QueryError';
+import { useAuth } from '../auth/AuthContext';
 
 const { Paragraph, Text } = Typography;
 
 export default function AvailableModelsPage() {
   const { t } = useTranslation();
   const { message } = App.useApp();
+  const { user } = useAuth();
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['available-models'],
     queryFn: ({ signal }) => channelsApi.availableModels(signal),
@@ -58,8 +60,15 @@ export default function AvailableModelsPage() {
               <Text strong>{ch.name}</Text>
               {ch.ownerType === 'PLATFORM' ? (
                 <Tag color="gold">{t('models.platform')}</Tag>
-              ) : (
+              ) : ch.ownerUserId && ch.ownerUserId === user?.id ? (
                 <Tag color="blue">{t('models.mine')}</Tag>
+              ) : (
+                // 别人共享过来的渠道：按共享范围标注，避免误标成「我的」
+                <Tag color="purple">
+                  {t(
+                    ch.shareMode === 'GROUP' ? 'channels.share.group' : 'channels.share.public',
+                  )}
+                </Tag>
               )}
               <Tag>{ch.provider}</Tag>
             </Space>

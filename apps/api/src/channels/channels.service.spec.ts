@@ -308,3 +308,74 @@ describe('ChannelsService.list（累计共享收益）', () => {
     expect(prisma.requestLog.groupBy).not.toHaveBeenCalled();
   });
 });
+
+describe('ChannelsService.availableModels（归属/共享范围透出）', () => {
+  function modelsService(rows: any[]) {
+    const prisma = { channelModel: { findMany: jest.fn().mockResolvedValue(rows) } };
+    const groups = {
+      effectiveGroup: jest.fn().mockResolvedValue({ id: 'g1' }),
+      channelScopeWhere: jest.fn().mockReturnValue({ scope: true }),
+      isModelVisible: jest.fn().mockReturnValue(true),
+    };
+    const service = new ChannelsService(
+      prisma as unknown as PrismaService,
+      {} as unknown as CryptoService,
+      {} as unknown as ProviderRegistry,
+      groups as unknown as GroupsService,
+    );
+    return { service, prisma, groups };
+  }
+
+  const ch = (over: Record<string, unknown>) => ({
+    shareUntil: null,
+    shareQuotaCostUsd: null,
+    shareQuotaRequests: null,
+    shareUsedCostUsd: 0,
+    shareUsedRequests: 0,
+    ...over,
+  });
+
+  it('带出 ownerUserId 与 shareMode，前端据此区分「我的」与「别人共享给我的」', async () => {
+    const { service, groups } = modelsService([
+      {
+        modelName: 'm1',
+        channel: ch({ id: 'c1', name: 'mine', ownerType: 'USER', ownerUserId: 'u1', provider: 'openai', shareMode: 'PRIVATE' }),
+      },
+      {
+        modelName: 'm2',
+        channel: ch({ id: 'c2', name: 'shared', ownerType: 'USER', ownerUserId: 'u2', provider: 'openai', shareMode: 'PUBLIC' }),
+      },
+    ]);
+
+    const res = await service.availableModels(user);
+
+    // 可见性仍走 channelScopeWhere 这个唯一出口
+    expect(groups.channelScopeWhere).toHaveBeenCalledWith('u1', 'g1');
+    expect(res.channels).toHaveLength(2);
+    expect(res.channels[0]).toMatchObject({ ownerUserId: 'u1', shareMode: 'PRIVATE' });
+    expect(res.channels[1]).toMatchObject({ ownerUserId: 'u2', shareMode: 'PUBLIC' });
+    expect(res.models).toEqual(['m1', 'm2']);
+  });
+
+  it('共享渠道已用尽额度则不展示', async () => {
+    const { service } = modelsService([
+      {
+        modelName: 'm1',
+        channel: ch({
+          id: 'c2',
+          name: 'done',
+          ownerType: 'USER',
+          ownerUserId: 'u2',
+          provider: 'openai',
+          shareMode: 'PUBLIC',
+          shareQuotaRequests: 10,
+          shareUsedRequests: 10,
+        }),
+      },
+    ]);
+
+    const res = await service.availableModels(user);
+    expect(res.channels).toEqual([]);
+    expect(res.models).toEqual([]);
+  });
+});

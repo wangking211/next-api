@@ -455,6 +455,10 @@ export interface AvailableChannelModels {
     id: string;
     name: string;
     ownerType: 'PLATFORM' | 'USER';
+    /** 渠道主：前端据此区分「我的渠道」与「别人共享给我的渠道」 */
+    ownerUserId: string | null;
+    /** 共享范围；他人的 PRIVATE 渠道不可见，本页只会出现 PRIVATE（我的）/ GROUP / PUBLIC */
+    shareMode: 'PRIVATE' | 'GROUP' | 'PUBLIC';
     provider: string;
     models: string[];
   }[];
