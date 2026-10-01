@@ -76,6 +76,23 @@ export function buildChannelColumns({
       },
     },
     {
+      title: t('channels.table.revenue'),
+      dataIndex: 'revenue',
+      width: 110,
+      render: (v: string) => {
+        const n = Number(v ?? 0);
+        // 无共享分账（平台渠道 / 还没人调用）时不占视觉重量
+        if (!Number.isFinite(n) || n <= 0) {
+          return <Typography.Text type="secondary">-</Typography.Text>;
+        }
+        return (
+          <Typography.Text type="success" strong>
+            ${n.toFixed(2)}
+          </Typography.Text>
+        );
+      },
+    },
+    {
       title: t('channels.table.groups'),
       dataIndex: 'groups',
       width: 170,

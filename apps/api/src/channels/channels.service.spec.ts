@@ -263,3 +263,48 @@ describe('ChannelsService.fetchUpstreamModels', () => {
     ).rejects.toThrow(/API Key/);
   });
 });
+
+describe('ChannelsService.list（累计共享收益）', () => {
+  function listService(rows: any[], revenue: any[]) {
+    const prisma = {
+      channel: {
+        findMany: jest.fn().mockResolvedValue(rows),
+        count: jest.fn().mockResolvedValue(rows.length),
+      },
+      requestLog: { groupBy: jest.fn().mockResolvedValue(revenue) },
+    };
+    const service = new ChannelsService(
+      prisma as unknown as PrismaService,
+      { decrypt: jest.fn().mockReturnValue('upstream-key') } as unknown as CryptoService,
+      { resolve: jest.fn() } as unknown as ProviderRegistry,
+      {} as unknown as GroupsService,
+    );
+    return { service, prisma };
+  }
+
+  const base = { apiKeyEnc: 'enc', priority: 0, weight: 1, models: ['m1'] };
+
+  it('聚合当前页每个渠道的 channelRevenue，缺失记 0', async () => {
+    const { service, prisma } = listService(
+      [{ id: 'c1', ...base }, { id: 'c2', ...base }],
+      [{ channelId: 'c1', _sum: { channelRevenue: 1.25 } }],
+    );
+    const res = await service.list(user, { page: 1, pageSize: 20 });
+    // 只聚合本页 id（走 [channelId, createdAt] 索引）
+    expect(prisma.requestLog.groupBy).toHaveBeenCalledWith({
+      by: ['channelId'],
+      where: { channelId: { in: ['c1', 'c2'] } },
+      _sum: { channelRevenue: true },
+    });
+    expect(res.items[0].revenue).toBe('1.25');
+    expect(res.items[1].revenue).toBe('0');
+    expect(res.total).toBe(2);
+  });
+
+  it('空页不发聚合查询', async () => {
+    const { service, prisma } = listService([], []);
+    const res = await service.list(user, {});
+    expect(res.items).toEqual([]);
+    expect(prisma.requestLog.groupBy).not.toHaveBeenCalled();
+  });
+});

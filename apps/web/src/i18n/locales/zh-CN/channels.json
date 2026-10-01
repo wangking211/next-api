@@ -98,6 +98,7 @@
   "channels.pricing.costPerCall": "按次成本($/次)",
   "channels.pricing.pricePerCall": "按次售价($/次)",
   "channels.table.share": "共享",
+  "channels.table.revenue": "收益",
   "channels.form.shareSection": "共享设置",
   "channels.form.shareMode": "共享范围",
   "channels.form.shareModeTip": "私有 = 仅自己可调用；同分组 = 绑定分组内的成员可调用；公开 = 所有登录用户可调用",

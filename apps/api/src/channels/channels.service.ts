@@ -224,7 +224,29 @@ export class ChannelsService {
       }),
       this.prisma.channel.count({ where }),
     ]);
-    return { items: items.map((c) => this.view(c)), total, page, pageSize };
+    return {
+      items: await this.withRevenue(items.map((c) => this.view(c))),
+      total,
+      page,
+      pageSize,
+    };
+  }
+
+  /**
+   * 补上「累计共享收益」：他人共享调用产生的分账实收（RequestLog.channelRevenue，渠道主到手部分）。
+   * 只聚合当前页的 id，走 [channelId, createdAt] 索引，代价与页大小成正比。
+   */
+  private async withRevenue<T extends { id: string }>(
+    rows: T[],
+  ): Promise<Array<T & { revenue: string }>> {
+    if (!rows.length) return [];
+    const agg = await this.prisma.requestLog.groupBy({
+      by: ['channelId'],
+      where: { channelId: { in: rows.map((r) => r.id) } },
+      _sum: { channelRevenue: true },
+    });
+    const byChannel = new Map(agg.map((a) => [a.channelId, a._sum.channelRevenue ?? 0]));
+    return rows.map((r) => ({ ...r, revenue: String(byChannel.get(r.id) ?? 0) }));
   }
 
   /** 当前用户可调用的模型，按渠道分组（自有 BYOK + 平台，按生效分组过滤），用于控制台展示。 */

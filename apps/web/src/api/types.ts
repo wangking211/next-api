@@ -143,6 +143,8 @@ export interface ChannelInfo {
   shareUsedCostUsd: string;
   /** 已消耗的共享调用次数（累计） */
   shareUsedRequests: number;
+  /** 该渠道累计分到渠道主账上的共享收益（USD，十进制字符串） */
+  revenue?: string;
   /** 平台抽成基点（仅管理员可设，null = 全局默认 CHANNEL_SHARE_FEE_BPS） */
   shareFeeBps: number | null;
   createdAt: string;
