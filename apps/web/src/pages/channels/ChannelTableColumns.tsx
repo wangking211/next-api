@@ -36,6 +36,46 @@ export function buildChannelColumns({
     },
     { title: t('channels.table.provider'), dataIndex: 'provider' },
     {
+      title: t('channels.table.share'),
+      dataIndex: 'shareMode',
+      width: 160,
+      render: (_: unknown, r: ChannelInfo) => {
+        if (!r.shareMode || r.shareMode === 'PRIVATE') {
+          return <Typography.Text type="secondary">-</Typography.Text>;
+        }
+        const used = Number(r.shareUsedCostUsd ?? 0);
+        const quotaCost = r.shareQuotaCostUsd != null ? Number(r.shareQuotaCostUsd) : null;
+        const quotaReq = r.shareQuotaRequests ?? null;
+        const usedReq = r.shareUsedRequests ?? 0;
+        const until = r.shareUntil ? new Date(r.shareUntil).getTime() : null;
+        // 与路由侧 shareExhausted() 同口径：到期或额度用尽即不再接单
+        const exhausted =
+          (until != null && until <= Date.now()) ||
+          (quotaCost != null && quotaCost > 0 && used >= quotaCost) ||
+          (quotaReq != null && quotaReq > 0 && usedReq >= quotaReq);
+        const tips = [
+          quotaCost != null
+            ? t('channels.share.quotaCost', { used: used.toFixed(2), quota: quotaCost })
+            : null,
+          quotaReq != null
+            ? t('channels.share.quotaRequests', { used: usedReq, quota: quotaReq })
+            : null,
+          until ? t('channels.share.until', { until: new Date(until).toLocaleString() }) : null,
+        ].filter(Boolean);
+        const label = t(
+          r.shareMode === 'PUBLIC' ? 'channels.share.public' : 'channels.share.group',
+        );
+        return (
+          <Tooltip title={tips.length ? tips.join(' · ') : undefined}>
+            <Tag color={exhausted ? 'default' : r.shareMode === 'PUBLIC' ? 'purple' : 'geekblue'}>
+              {label}
+              {exhausted ? ` · ${t('channels.share.exhausted')}` : ''}
+            </Tag>
+          </Tooltip>
+        );
+      },
+    },
+    {
       title: t('channels.table.groups'),
       dataIndex: 'groups',
       width: 170,

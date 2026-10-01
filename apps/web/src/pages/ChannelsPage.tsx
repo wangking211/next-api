@@ -3,15 +3,19 @@ import {
   App,
   Button,
   Card,
+  DatePicker,
+  Divider,
   Form,
   Input,
   InputNumber,
   Modal,
+  Radio,
   Select,
   Space,
   Table,
   Typography,
 } from 'antd';
+import dayjs from 'dayjs';
 import { PlusOutlined } from '@ant-design/icons';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -53,6 +57,7 @@ export default function ChannelsPage() {
   const [fetchingModels, setFetchingModels] = useState(false);
   const selectedModels: string[] = Form.useWatch('models', form) ?? [];
   const ownerTypeValue = Form.useWatch('ownerType', form);
+  const shareModeValue = Form.useWatch('shareMode', form) ?? 'PRIVATE';
 
   // 归属=我的（BYOK）：上游费用用户自付、平台不扣费，隐藏「逐模型定价」（仅影响折算展示，无计费作用）
   const isByok = editing
@@ -124,9 +129,15 @@ export default function ChannelsPage() {
       if (editing) {
         const payload = { ...values };
         if (!payload.apiKey) delete payload.apiKey;
+        // DatePicker 返回 dayjs → 后端只接受 ISO 字符串
+        if (payload.shareUntil instanceof dayjs) payload.shareUntil = payload.shareUntil.toISOString();
         return channelsApi.update(editing.id, payload);
       }
-      return channelsApi.create(values);
+      const createPayload = { ...values };
+      if (createPayload.shareUntil instanceof dayjs) {
+        createPayload.shareUntil = createPayload.shareUntil.toISOString();
+      }
+      return channelsApi.create(createPayload);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['channels'] });
@@ -164,6 +175,11 @@ export default function ChannelsPage() {
       upstreamGroup: r.upstreamGroup ?? undefined,
       dailyRequestLimit: r.dailyRequestLimit ?? undefined,
       dailyTokenLimit: r.dailyTokenLimit ?? undefined,
+      shareMode: r.shareMode ?? 'PRIVATE',
+      shareUrgency: r.shareUrgency ?? 'NORMAL',
+      shareQuotaCostUsd: r.shareQuotaCostUsd != null ? Number(r.shareQuotaCostUsd) : undefined,
+      shareQuotaRequests: r.shareQuotaRequests ?? undefined,
+      shareUntil: r.shareUntil ? dayjs(r.shareUntil) : undefined,
     });
     const p: Record<string, PriceRow> = {};
     for (const mp of r.modelPrices ?? []) {
@@ -383,7 +399,14 @@ export default function ChannelsPage() {
             })
           }
           requiredMark={false}
-          initialValues={{ provider: 'openai', weight: 1, priority: 0, ownerType: 'USER' }}
+          initialValues={{
+            provider: 'openai',
+            weight: 1,
+            priority: 0,
+            ownerType: 'USER',
+            shareMode: 'PRIVATE',
+            shareUrgency: 'NORMAL',
+          }}
         >
           <Form.Item
             name="name"
@@ -431,7 +454,8 @@ export default function ChannelsPage() {
               }
             />
           </Form.Item>
-          {isAdmin && (
+          {/* 管理员可随时绑定；自有渠道在「同分组共享」时也需要选目标分组 */}
+          {(isAdmin || (isByok && shareModeValue === 'GROUP')) && (
             <Form.Item
               name="groups"
               label={t('channels.form.groups')}
@@ -524,6 +548,78 @@ export default function ChannelsPage() {
               <InputNumber min={0} placeholder={t('channels.form.unlimited')} style={{ width: 150 }} />
             </Form.Item>
           </Space>
+
+          {/* 共享设置：只有自有渠道才有意义（平台渠道本来就是平台的） */}
+          {isByok && (
+            <div>
+              <Divider orientation="left" plain style={{ margin: '4px 0 12px' }}>
+                {t('channels.form.shareSection')}
+              </Divider>
+              <Space size={16} wrap>
+                <Form.Item
+                  name="shareMode"
+                  label={t('channels.form.shareMode')}
+                  tooltip={t('channels.form.shareModeTip')}
+                >
+                  <Radio.Group
+                    optionType="button"
+                    options={[
+                      { label: t('channels.share.private'), value: 'PRIVATE' },
+                      { label: t('channels.share.group'), value: 'GROUP' },
+                      { label: t('channels.share.public'), value: 'PUBLIC' },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item
+                  name="shareUrgency"
+                  label={t('channels.form.shareUrgency')}
+                  tooltip={t('channels.form.shareUrgencyTip')}
+                >
+                  <Select
+                    style={{ width: 120 }}
+                    options={[
+                      { label: t('channels.share.normal'), value: 'NORMAL' },
+                      { label: t('channels.share.high'), value: 'HIGH' },
+                      { label: t('channels.share.flush'), value: 'FLUSH' },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item
+                  name="shareQuotaCostUsd"
+                  label={t('channels.form.shareQuotaCost')}
+                  tooltip={t('channels.form.shareQuotaCostTip')}
+                >
+                  <InputNumber
+                    min={0}
+                    step={0.5}
+                    placeholder={t('channels.form.unlimited')}
+                    style={{ width: 150 }}
+                  />
+                </Form.Item>
+                <Form.Item
+                  name="shareQuotaRequests"
+                  label={t('channels.form.shareQuotaRequests')}
+                  tooltip={t('channels.form.shareQuotaRequestsTip')}
+                >
+                  <InputNumber
+                    min={0}
+                    placeholder={t('channels.form.unlimited')}
+                    style={{ width: 150 }}
+                  />
+                </Form.Item>
+                <Form.Item
+                  name="shareUntil"
+                  label={t('channels.form.shareUntil')}
+                  tooltip={t('channels.form.shareUntilTip')}
+                >
+                  <DatePicker showTime style={{ width: 210 }} />
+                </Form.Item>
+              </Space>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {t('channels.form.shareHint')}
+              </Typography.Text>
+            </div>
+          )}
         </Form>
 
         {modalTest && (

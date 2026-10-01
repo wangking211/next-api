@@ -129,6 +129,22 @@ export interface ChannelInfo {
   groups: GroupTag[];
   /** 上游分组名（透传给上游的参数） */
   upstreamGroup: string | null;
+  /** 共享模式：PRIVATE 私有 / GROUP 同分组共享 / PUBLIC 公开共享 */
+  shareMode: 'PRIVATE' | 'GROUP' | 'PUBLIC';
+  /** 共享紧急度：NORMAL / HIGH / FLUSH（额度快过期时提高派发优先级） */
+  shareUrgency: 'NORMAL' | 'HIGH' | 'FLUSH';
+  /** 共享额度：折算上游成本上限（USD，十进制字符串），null = 不限 */
+  shareQuotaCostUsd: string | null;
+  /** 共享额度：调用次数上限，null = 不限 */
+  shareQuotaRequests: number | null;
+  /** 共享到期时间，null = 不限 */
+  shareUntil: string | null;
+  /** 已消耗的共享额度（累计，十进制字符串） */
+  shareUsedCostUsd: string;
+  /** 已消耗的共享调用次数（累计） */
+  shareUsedRequests: number;
+  /** 平台抽成基点（仅管理员可设，null = 全局默认 CHANNEL_SHARE_FEE_BPS） */
+  shareFeeBps: number | null;
   createdAt: string;
   modelPrices?: ChannelModelPrice[];
 }
