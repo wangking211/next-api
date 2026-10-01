@@ -195,6 +195,69 @@ describe('UsageService 计费口径', () => {
 });
 
 /**
+ * 共享分成落账：钱进渠道主余额的同时，累计值也要闭环到 Channel.shareRevenue
+ * ——渠道列表读「收益」走这一列（O(1)），不逐 RequestLog 聚合。
+ */
+describe('UsageService 共享分成落账', () => {
+  function shareSetup() {
+    const ctx = makeService();
+    const tx = ctx.tx as any;
+    const billing = ctx.billing as any;
+    tx.channel = { update: jest.fn().mockResolvedValue({}) };
+    tx.requestLog.update = jest.fn().mockResolvedValue({});
+    // 足额扣款（paid.debited = cost）才分成
+    billing.recordConsumption = jest.fn().mockImplementation(async (...args: any[]) => {
+      args[5].debited = args[2];
+      return 0;
+    });
+    billing.payChannelRevenue = jest.fn().mockResolvedValue(0.8);
+    return { ...ctx, tx, billing };
+  }
+
+  const shareEntry: UsageEntry = {
+    ...baseEntry,
+    chargeable: true,
+    share: { ownerUserId: 'owner1', feeBps: 2000 },
+  };
+
+  it('收益写入 RequestLog.channelRevenue，并同事务累加 Channel.shareRevenue', async () => {
+    const { service, tx, billing } = shareSetup();
+
+    await service.record(shareEntry);
+
+    expect(billing.payChannelRevenue).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ ownerUserId: 'owner1', feeBps: 2000 }),
+    );
+    expect(tx.requestLog.update).toHaveBeenCalledWith({
+      where: { id: 'log1' },
+      data: expect.objectContaining({ channelRevenue: 0.8 }),
+    });
+    expect(tx.channel.update).toHaveBeenCalledWith({
+      where: { id: 'ch1' },
+      data: expect.objectContaining({
+        shareUsedRequests: { increment: 1 },
+        shareRevenue: { increment: 0.8 },
+      }),
+    });
+  });
+
+  it('分成为 0 时不写 shareRevenue 增量，但共享用量照常累计', async () => {
+    const { service, tx, billing } = shareSetup();
+    billing.payChannelRevenue.mockResolvedValue(0);
+
+    await service.record(shareEntry);
+
+    expect(tx.requestLog.update).not.toHaveBeenCalled();
+    expect(tx.channel.update).toHaveBeenCalledWith({
+      where: { id: 'ch1' },
+      data: expect.objectContaining({ shareUsedRequests: { increment: 1 } }),
+    });
+    expect(tx.channel.update.mock.calls[0][0].data.shareRevenue).toBeUndefined();
+  });
+});
+
+/**
  * 越权回归：日志查询的 userId 过滤绝不能覆盖属主约束
  * （曾因 controller 把 targetUserId 放进 query、service 展开在 scope 之后而可读他人日志）。
  */

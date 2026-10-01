@@ -212,6 +212,8 @@ export class UsageService {
           });
         }
 
+        // 本轮分给渠道主的收益（与明细同事务落账，>0 时一并累加到 Channel.shareRevenue）
+        let bookedRevenue = 0;
         if (entry.chargeable && cost > 0) {
           const paid: { debited?: number } = {};
           const commission = await this.billing.recordConsumption(
@@ -235,7 +237,10 @@ export class UsageService {
               requestLogId: log.id,
               label: entry.model,
             });
-            if (revenue > 0) patch.channelRevenue = revenue;
+            if (revenue > 0) {
+              patch.channelRevenue = revenue;
+              bookedRevenue = revenue;
+            }
           }
           if (Object.keys(patch).length > 0) {
             await tx.requestLog.update({ where: { id: log.id }, data: patch });
@@ -243,13 +248,17 @@ export class UsageService {
         }
 
         // 共享渠道本轮用量累计（含失败调用：失败同样占用了渠道主的调度额度）。
-        // 累计到 Channel 列上，路由侧无需额外查询即可判断「是否已达额度上限」。
+        // 累计到 Channel 列上，路由侧无需额外查询即可判断「是否已达额度上限」；
+        // 分成收益同理累加（shareRevenue），渠道列表读收益 O(1)，不逐请求聚合。
         if (entry.share && entry.channelId) {
           await tx.channel.update({
             where: { id: entry.channelId },
             data: {
               shareUsedRequests: { increment: 1 },
               shareUsedCostUsd: { increment: round6(upstreamCost) },
+              ...(bookedRevenue > 0
+                ? { shareRevenue: { increment: round6(bookedRevenue) } }
+                : {}),
             },
           });
         }

@@ -265,13 +265,13 @@ describe('ChannelsService.fetchUpstreamModels', () => {
 });
 
 describe('ChannelsService.list（累计共享收益）', () => {
-  function listService(rows: any[], revenue: any[]) {
+  function listService(rows: any[]) {
     const prisma = {
       channel: {
         findMany: jest.fn().mockResolvedValue(rows),
         count: jest.fn().mockResolvedValue(rows.length),
       },
-      requestLog: { groupBy: jest.fn().mockResolvedValue(revenue) },
+      requestLog: { groupBy: jest.fn(), findMany: jest.fn(), count: jest.fn() },
     };
     const service = new ChannelsService(
       prisma as unknown as PrismaService,
@@ -284,28 +284,24 @@ describe('ChannelsService.list（累计共享收益）', () => {
 
   const base = { apiKeyEnc: 'enc', priority: 0, weight: 1, models: ['m1'] };
 
-  it('聚合当前页每个渠道的 channelRevenue，缺失记 0', async () => {
-    const { service, prisma } = listService(
-      [{ id: 'c1', ...base }, { id: 'c2', ...base }],
-      [{ channelId: 'c1', _sum: { channelRevenue: 1.25 } }],
-    );
+  it('收益读 Channel.shareRevenue（O(1)），不逐 RequestLog 聚合', async () => {
+    const { service, prisma } = listService([
+      { id: 'c1', ...base, shareRevenue: 1.25 },
+      { id: 'c2', ...base, shareRevenue: 0 },
+    ]);
     const res = await service.list(user, { page: 1, pageSize: 20 });
-    // 只聚合本页 id（走 [channelId, createdAt] 索引）
-    expect(prisma.requestLog.groupBy).toHaveBeenCalledWith({
-      by: ['channelId'],
-      where: { channelId: { in: ['c1', 'c2'] } },
-      _sum: { channelRevenue: true },
-    });
     expect(res.items[0].revenue).toBe('1.25');
     expect(res.items[1].revenue).toBe('0');
     expect(res.total).toBe(2);
+    // 收益在热路径累加到渠道列上，读侧零额外查询（否则随渠道请求量线性退化）
+    expect(prisma.requestLog.groupBy).not.toHaveBeenCalled();
+    expect(prisma.requestLog.findMany).not.toHaveBeenCalled();
   });
 
-  it('空页不发聚合查询', async () => {
-    const { service, prisma } = listService([], []);
+  it('该列缺省（未回填/旧渠道）时按 0 展示', async () => {
+    const { service } = listService([{ id: 'c1', ...base }]);
     const res = await service.list(user, {});
-    expect(res.items).toEqual([]);
-    expect(prisma.requestLog.groupBy).not.toHaveBeenCalled();
+    expect(res.items[0].revenue).toBe('0');
   });
 });
 
