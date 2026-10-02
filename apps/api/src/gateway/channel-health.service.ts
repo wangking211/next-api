@@ -32,8 +32,9 @@ export class ChannelHealthService {
         where: { id: channelId, failureCount: { gt: 0 } },
         data: { failureCount: 0, lastErrorMsg: null },
       });
-    } catch {
-      /* ignore */
+    } catch (e) {
+      // 清零失败仅意味着失败计数暂未复位（下次成功还会再试），留痕不抛出
+      this.logger.warn(`渠道 ${channelId} 成功计数清零写库失败: ${(e as Error)?.message}`);
     }
   }
 
@@ -41,6 +42,8 @@ export class ChannelHealthService {
   async recordFailure(channelId: string, message: string): Promise<void> {
     // 上游文案常带渠道密钥 → 先脱敏，再落库与告警
     const msg = redactSecrets(message);
+    // 标记当前写库步骤，catch 时能定位失败在哪一段（累计 vs 自动禁用）
+    let step = '失败计数累计';
     try {
       const channel = await this.prisma.channel.update({
         where: { id: channelId },
@@ -55,6 +58,7 @@ export class ChannelHealthService {
         channel.failureCount >= this.threshold &&
         channel.status === ChannelStatus.ENABLED
       ) {
+        step = '自动禁用';
         // 条件更新：并发下只有一个请求能完成"启用→禁用"转换，避免重复告警
         const disabled = await this.prisma.channel.updateMany({
           where: { id: channelId, status: ChannelStatus.ENABLED },
@@ -67,8 +71,9 @@ export class ChannelHealthService {
           await this.sendAlert(channel, msg);
         }
       }
-    } catch {
-      /* ignore */
+    } catch (e) {
+      // 写库失败不抛出：健康记录不应让网关请求报错，但必须留痕（否则失败计数静默丢失）
+      this.logger.error(`渠道 ${channelId} ${step}写库失败: ${(e as Error)?.message}`);
     }
   }
 
@@ -83,8 +88,11 @@ export class ChannelHealthService {
         data: { lastErrorAt: new Date(), lastErrorMsg: msg.slice(0, 500) },
       });
       this.logger.warn(`渠道 ${channelId} 触发上游限流(429): ${msg.slice(0, 200)}`);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      // 写库失败时下面那条 429 warn 不会执行 → catch 里带上限流原文，现场不留白
+      this.logger.warn(
+        `渠道 ${channelId} 限流(429)现场写库失败（${msg.slice(0, 200)}）: ${(e as Error)?.message}`,
+      );
     }
   }
 
@@ -106,7 +114,7 @@ export class ChannelHealthService {
         }),
       });
     } catch (e: any) {
-      this.logger.warn(`告警 webhook 发送失败: ${e?.message}`);
+      this.logger.warn(`告警 webhook 发送失败（渠道 ${channel?.id}）: ${e?.message}`);
     }
   }
 }

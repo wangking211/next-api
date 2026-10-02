@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { ChannelHealthService } from './channel-health.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
@@ -94,5 +95,70 @@ describe('ChannelHealthService', () => {
       expect.objectContaining({ method: 'POST' }),
     );
     fetchSpy.mockRestore();
+  });
+
+  describe('静默 catch 可观测性（写库失败必须留痕，且不抛出）', () => {
+    let warnSpy: jest.SpyInstance;
+    let errorSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+
+    const loggedCalls = () => [...warnSpy.mock.calls, ...errorSpy.mock.calls].map((c) => String(c[0]));
+
+    it('recordSuccess: 清零写库失败时记录 warn（含 channelId 与错误信息）且不抛出', async () => {
+      const { service, prisma } = makeService();
+      prisma.channel.updateMany.mockRejectedValueOnce(new Error('db down'));
+
+      await expect(service.recordSuccess('c1')).resolves.toBeUndefined();
+
+      const logged = loggedCalls();
+      expect(logged.some((m) => m.includes('c1') && m.includes('db down'))).toBe(true);
+    });
+
+    it('recordFailure: 失败计数写库失败时记录 warn/error（含 channelId 与错误信息）且不抛出', async () => {
+      const { service, prisma } = makeService();
+      prisma.channel.update.mockRejectedValueOnce(new Error('connection refused'));
+
+      await expect(service.recordFailure('c1', 'boom')).resolves.toBeUndefined();
+
+      const logged = loggedCalls();
+      expect(logged.some((m) => m.includes('c1') && m.includes('connection refused'))).toBe(true);
+    });
+
+    it('recordFailure: 自动禁用写库失败时同样留痕且不抛出', async () => {
+      const { service, prisma } = makeService(3);
+      prisma.channel.update.mockResolvedValueOnce({
+        id: 'c1',
+        name: 'bad',
+        provider: 'openai',
+        ownerType: 'USER',
+        failureCount: 3,
+        status: ChannelStatus.ENABLED,
+      });
+      prisma.channel.updateMany.mockRejectedValueOnce(new Error('deadlock detected'));
+
+      await expect(service.recordFailure('c1', 'boom')).resolves.toBeUndefined();
+
+      const logged = loggedCalls();
+      expect(logged.some((m) => m.includes('c1') && m.includes('deadlock detected'))).toBe(true);
+    });
+
+    it('recordRateLimited: 限流现场写库失败时记录 warn（含 channelId 与错误信息）且不抛出', async () => {
+      const { service, prisma } = makeService();
+      prisma.channel.updateMany.mockRejectedValueOnce(new Error('redis gone'));
+
+      await expect(service.recordRateLimited('c1', 'upstream 429')).resolves.toBeUndefined();
+
+      const logged = loggedCalls();
+      expect(logged.some((m) => m.includes('c1') && m.includes('redis gone'))).toBe(true);
+    });
   });
 });
