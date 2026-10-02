@@ -1,4 +1,5 @@
 import { UsageInfo } from '../gateway/types';
+import { splitNextSseBlock } from '../gateway/providers/stream.util';
 
 /**
  * 消费 OpenAI 格式的 SSE 分片：提取 usage、累计输出文本（用于缺失 usage 时估算与内容记录）。
@@ -11,11 +12,12 @@ export class SseUsageCollector {
 
   push(chunk: string): void {
     this.buffer += chunk;
-    let idx: number;
-    while ((idx = this.buffer.indexOf('\n\n')) !== -1) {
-      const block = this.buffer.slice(0, idx);
-      this.buffer = this.buffer.slice(idx + 2);
-      this.handleBlock(block);
+    // 分块复用 canonical 的 splitNextSseBlock（兼容 CRLF）；indexOf('\n\n') 漏掉 \r\n\r\n
+    let next = splitNextSseBlock(this.buffer);
+    while (next) {
+      this.handleBlock(next.block);
+      this.buffer = next.rest;
+      next = splitNextSseBlock(this.buffer);
     }
   }
 

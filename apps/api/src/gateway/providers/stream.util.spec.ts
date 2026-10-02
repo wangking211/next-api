@@ -1,6 +1,7 @@
 import {
   combineSignals,
   resolveTimeoutMs,
+  splitNextSseBlock,
   DEFAULT_UPSTREAM_TIMEOUT_MS,
 } from './stream.util';
 
@@ -34,5 +35,34 @@ describe('combineSignals', () => {
     await new Promise((r) => setTimeout(r, 60));
     expect(sig.aborted).toBe(true);
     expect(sig.reason?.name).toBe('TimeoutError');
+  });
+});
+
+describe('splitNextSseBlock', () => {
+  it('splits on LF boundary', () => {
+    expect(splitNextSseBlock('data: a\n\ndata: b')).toEqual({
+      block: 'data: a',
+      rest: 'data: b',
+    });
+  });
+
+  it('splits on CRLF boundary (\\r\\n\\r\\n contains no \\n\\n — old indexOf never matched)', () => {
+    expect(splitNextSseBlock('data: a\r\n\r\ndata: b')).toEqual({
+      block: 'data: a',
+      rest: 'data: b',
+    });
+  });
+
+  it('keeps an internal CRLF line break inside the block and strips the boundary only', () => {
+    expect(splitNextSseBlock('data: a\r\ndata: b\r\n\r\nrest')).toEqual({
+      block: 'data: a\r\ndata: b',
+      rest: 'rest',
+    });
+  });
+
+  it('returns null until a complete block arrives', () => {
+    expect(splitNextSseBlock('data: a\n')).toBeNull();
+    expect(splitNextSseBlock('data: a\r\n')).toBeNull();
+    expect(splitNextSseBlock('')).toBeNull();
   });
 });

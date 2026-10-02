@@ -77,4 +77,26 @@ describe('SseUsageCollector', () => {
     c.push('data: [DONE]\n\n');
     expect(c.result(1)).toEqual({ promptTokens: 1, completionTokens: 0, totalTokens: 1 });
   });
+
+  it('parses CRLF-separated blocks identically to LF', () => {
+    // 回归：'\r\n\r\n' 不含子串 '\n\n' → 旧 indexOf('\n\n') 永不切块，
+    // usage 与输出文本全部丢失（计费/内容落盘归零）
+    const crlf = (obj: unknown) => `data: ${JSON.stringify(obj)}\r\n\r\n`;
+    const c = new SseUsageCollector();
+    c.push(crlf({ choices: [{ delta: { content: 'Hello' } }] }));
+    c.push(crlf({ choices: [{ delta: { content: ' world' } }] }));
+    c.push(
+      crlf({
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+      }),
+    );
+    c.push('data: [DONE]\r\n\r\n');
+    expect(c.text).toBe('Hello world');
+    expect(c.result(999)).toEqual({
+      promptTokens: 5,
+      completionTokens: 2,
+      totalTokens: 7,
+    });
+  });
 });

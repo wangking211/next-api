@@ -46,7 +46,25 @@ export function describeFetchError(e: any): string {
   return msg;
 }
 
-/** 解析上游 SSE 流，逐个产出事件（兼容 \n\n 与 \r\n\r\n 分隔） */
+/**
+ * 从缓冲区切出下一个完整 SSE 事件块（canonical 分隔逻辑，兼容 \n\n 与 \r\n\r\n）。
+ * 所有 SSE 分块解析必须复用此函数：早期实现用 indexOf('\n\n')，而 CRLF 分隔的
+ * '\r\n\r\n' 不含子串 '\n\n' → 永不切块，用量收集/协议翻译全部丢失。
+ * sseEvents（权威解析器）即基于此函数；行级 \r 剥离由各 handleBlock 负责。
+ * @returns 无完整块时返回 null（剩余内容原样留在 buffer 中）
+ */
+export function splitNextSseBlock(
+  buffer: string,
+): { block: string; rest: string } | null {
+  const match = /\r?\n\r?\n/.exec(buffer);
+  if (!match) return null;
+  return {
+    block: buffer.slice(0, match.index),
+    rest: buffer.slice(match.index + match[0].length),
+  };
+}
+
+/** 规范（canonical）SSE 解析器：分块逻辑见 splitNextSseBlock，兼容 \n\n 与 \r\n\r\n 分隔 */
 export async function* sseEvents(
   stream: ReadableStream<Uint8Array>,
 ): AsyncGenerator<SseEvent> {
@@ -58,13 +76,12 @@ export async function* sseEvents(
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      let match: RegExpExecArray | null;
-      const sep = /\r?\n\r?\n/;
-      while ((match = sep.exec(buffer)) !== null) {
-        const raw = buffer.slice(0, match.index);
-        buffer = buffer.slice(match.index + match[0].length);
-        const parsed = parseSseBlock(raw);
+      let next = splitNextSseBlock(buffer);
+      while (next) {
+        buffer = next.rest;
+        const parsed = parseSseBlock(next.block);
         if (parsed) yield parsed;
+        next = splitNextSseBlock(buffer);
       }
     }
     if (buffer.trim()) {
