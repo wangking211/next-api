@@ -68,8 +68,7 @@ export class ExchangeRateService {
 
   private async fetchLive(): Promise<number> {
     const url =
-      this.config.get<string>('PAY_RATE_API_URL', '') ||
-      'https://open.er-api.com/v6/latest/USD';
+      this.config.get<string>('PAY_RATE_API_URL', '') || 'https://open.er-api.com/v6/latest/USD';
     const timeout = Number(this.config.get<string>('PAY_RATE_TIMEOUT_MS', '5000')) || 5000;
     const ttl = Number(this.config.get<string>('PAY_RATE_TTL_MS', '')) || 6 * 3600 * 1000;
 
@@ -86,9 +85,7 @@ export class ExchangeRateService {
       }
       await this.redisSet(ExchangeRateService.CACHE_KEY, rate, ttl);
       await this.redisSet(ExchangeRateService.LAST_KEY, rate);
-      this.logger.log(
-        `实时汇率 1 USD = ${rate} CNY（缓存 ${Math.round(ttl / 60000)} 分钟）`,
-      );
+      this.logger.log(`实时汇率 1 USD = ${rate} CNY（缓存 ${Math.round(ttl / 60000)} 分钟）`);
       return rate;
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
@@ -98,9 +95,10 @@ export class ExchangeRateService {
         return last;
       }
       this.logger.error(`实时汇率获取失败且无历史值: ${reason}`);
-      throw new BadRequestException(
-        '实时汇率获取失败，请稍后重试或由管理员配置固定汇率',
-      );
+      throw new BadRequestException({
+        code: 'BILLING_EXCHANGE_RATE_UNAVAILABLE',
+        message: '实时汇率获取失败，请稍后重试或由管理员配置固定汇率',
+      });
     }
   }
 

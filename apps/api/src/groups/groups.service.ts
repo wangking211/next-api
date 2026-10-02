@@ -1,11 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  ChannelOwnerType,
-  ChannelShareMode,
-  ModelGroupStatus,
-  Prisma,
-} from '@prisma/client';
+import { ChannelOwnerType, ChannelShareMode, ModelGroupStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TtlCacheService } from '../common/ttl-cache.service';
 import { CreateGroupDto, UpdateGroupDto } from './dto/group.dto';
@@ -47,8 +42,7 @@ export class GroupsService {
     @Optional() private readonly cache?: TtlCacheService,
     @Optional() config?: ConfigService,
   ) {
-    this.rowsTtl =
-      Number(config?.get<string>('GROUP_CACHE_TTL_MS', '60000')) || 60_000;
+    this.rowsTtl = Number(config?.get<string>('GROUP_CACHE_TTL_MS', '60000')) || 60_000;
   }
 
   private toView(g: GroupRow & { _count?: Record<string, number> }) {
@@ -79,7 +73,12 @@ export class GroupsService {
 
   private async assertNameFree(name: string, exceptId?: string) {
     const dup = await this.prisma.modelGroup.findUnique({ where: { name }, select: { id: true } });
-    if (dup && dup.id !== exceptId) throw new BadRequestException(`分组标识 "${name}" 已存在`);
+    if (dup && dup.id !== exceptId)
+      throw new BadRequestException({
+        code: 'GROUP_IDENTIFIER_EXISTS',
+        message: `分组标识 "${name}" 已存在`,
+        details: { name },
+      });
   }
 
   /** 目录中实际存在的模型名（过滤不存在项，避免分组引用脏数据） */
@@ -119,8 +118,15 @@ export class GroupsService {
   }
 
   async update(id: string, dto: UpdateGroupDto) {
-    const current = await this.prisma.modelGroup.findUnique({ where: { id }, select: { id: true } });
-    if (!current) throw new NotFoundException('分组不存在');
+    const current = await this.prisma.modelGroup.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!current)
+      throw new NotFoundException({
+        code: 'GROUP_NOT_FOUND',
+        message: '分组不存在',
+      });
     const models =
       dto.models === undefined
         ? undefined
@@ -143,10 +149,7 @@ export class GroupsService {
           status: dto.status,
           priority: dto.priority,
           isDefault: dto.isDefault,
-          models:
-            models === undefined
-              ? undefined
-              : { set: models.map((name) => ({ name })) },
+          models: models === undefined ? undefined : { set: models.map((name) => ({ name })) },
         },
         select: GROUP_SELECT,
       });
@@ -157,9 +160,20 @@ export class GroupsService {
 
   /** 删除分组：用户/令牌分组置空，渠道与模型的关联级联清除 */
   async remove(id: string) {
-    const g = await this.prisma.modelGroup.findUnique({ where: { id }, select: { id: true, isDefault: true } });
-    if (!g) throw new NotFoundException('分组不存在');
-    if (g.isDefault) throw new BadRequestException('默认分组不可删除，请先把其它分组设为默认');
+    const g = await this.prisma.modelGroup.findUnique({
+      where: { id },
+      select: { id: true, isDefault: true },
+    });
+    if (!g)
+      throw new NotFoundException({
+        code: 'GROUP_NOT_FOUND',
+        message: '分组不存在',
+      });
+    if (g.isDefault)
+      throw new BadRequestException({
+        code: 'GROUP_DEFAULT_UNREMOVABLE',
+        message: '默认分组不可删除，请先把其它分组设为默认',
+      });
     await this.prisma.modelGroup.delete({ where: { id } });
     this.invalidateRows();
     return { success: true };
@@ -297,10 +311,7 @@ export class GroupsService {
         own,
         publicShared,
         {
-          AND: [
-            { ownerType: ChannelOwnerType.USER, shareMode: ChannelShareMode.GROUP },
-            groupCond,
-          ],
+          AND: [{ ownerType: ChannelOwnerType.USER, shareMode: ChannelShareMode.GROUP }, groupCond],
         },
         { AND: [{ ownerType: ChannelOwnerType.PLATFORM }, groupCond] },
       ],

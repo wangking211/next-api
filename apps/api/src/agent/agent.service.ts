@@ -58,12 +58,9 @@ export class AgentService {
     return {
       balance: user ? Number(user.balance) : 0,
       rebateRate: user?.rebateRate != null ? Number(user.rebateRate) : null,
-      priceMultiplier:
-        user?.priceMultiplier != null ? Number(user.priceMultiplier) : null,
+      priceMultiplier: user?.priceMultiplier != null ? Number(user.priceMultiplier) : null,
       memberCount,
-      commissionTotal: commissionAgg._sum.amount
-        ? Number(commissionAgg._sum.amount)
-        : 0,
+      commissionTotal: commissionAgg._sum.amount ? Number(commissionAgg._sum.amount) : 0,
       membersUsage30d: {
         requests: usage?._count._all ?? 0,
         tokens: usage?._sum.totalTokens ?? 0,
@@ -116,8 +113,7 @@ export class AgentService {
         email: m.email,
         status: m.status,
         balance: Number(m.balance),
-        priceMultiplier:
-          m.priceMultiplier != null ? Number(m.priceMultiplier) : null,
+        priceMultiplier: m.priceMultiplier != null ? Number(m.priceMultiplier) : null,
         createdAt: m.createdAt,
         usage30d: {
           requests: u?._count._all ?? 0,
@@ -135,8 +131,16 @@ export class AgentService {
       this.prisma.user.findUnique({ where: { email } }),
       this.prisma.user.findUnique({ where: { username: dto.username } }),
     ]);
-    if (byEmail) throw new ConflictException('Email already registered');
-    if (byUsername) throw new ConflictException('Username already taken');
+    if (byEmail)
+      throw new ConflictException({
+        code: 'AGENT_EMAIL_TAKEN',
+        message: 'Email already registered',
+      });
+    if (byUsername)
+      throw new ConflictException({
+        code: 'AGENT_USERNAME_TAKEN',
+        message: 'Username already taken',
+      });
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const user = await this.prisma.user.create({
@@ -163,14 +167,21 @@ export class AgentService {
   /** 代理用自身余额给名下成员充值（转账，双方各记流水） */
   async rechargeMember(agentId: string, memberId: string, amountUsd: number) {
     const cost = round6(amountUsd);
-    if (cost <= 0) throw new BadRequestException('Amount must be positive');
+    if (cost <= 0)
+      throw new BadRequestException({
+        code: 'AGENT_AMOUNT_POSITIVE',
+        message: 'Amount must be positive',
+      });
 
     const member = await this.prisma.user.findUnique({
       where: { id: memberId },
       select: { id: true, agentId: true, username: true },
     });
     if (!member || member.agentId !== agentId) {
-      throw new NotFoundException('Member not found');
+      throw new NotFoundException({
+        code: 'AGENT_MEMBER_NOT_FOUND',
+        message: 'Member not found',
+      });
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -178,14 +189,22 @@ export class AgentService {
         where: { id: agentId },
         select: { username: true },
       });
-      if (!agent) throw new NotFoundException('Agent not found');
+      if (!agent)
+        throw new NotFoundException({
+          code: 'AGENT_NOT_FOUND',
+          message: 'Agent not found',
+        });
       // 条件扣减（与 withdrawal.service 同款）：命中 0 行 = 余额不足。
       // 先读后扣在并发充值下会把代理余额打成负数
       const dec = await tx.user.updateMany({
         where: { id: agentId, balance: { gte: cost } },
         data: { balance: { decrement: cost } },
       });
-      if (dec.count === 0) throw new BadRequestException('代理余额不足');
+      if (dec.count === 0)
+        throw new BadRequestException({
+          code: 'AGENT_BALANCE_INSUFFICIENT',
+          message: '代理余额不足',
+        });
       const au = await tx.user.findUniqueOrThrow({
         where: { id: agentId },
         select: { balance: true },

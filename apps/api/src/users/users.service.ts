@@ -25,7 +25,8 @@ export interface UserListFilters {
 }
 
 @Injectable()
-export class UsersService {  constructor(private readonly prisma: PrismaService) {}
+export class UsersService {
+  constructor(private readonly prisma: PrismaService) {}
 
   findById(id: string): Promise<User | null> {
     return this.prisma.user.findUnique({ where: { id } });
@@ -89,7 +90,11 @@ export class UsersService {  constructor(private readonly prisma: PrismaService)
 
   async getOrThrow(id: string): Promise<User> {
     const user = await this.findById(id);
-    if (!user) throw new NotFoundException('User not found');
+    if (!user)
+      throw new NotFoundException({
+        code: 'USER_NOT_FOUND',
+        message: 'User not found',
+      });
     return user;
   }
 
@@ -291,14 +296,16 @@ export class UsersService {  constructor(private readonly prisma: PrismaService)
     },
   ) {
     const user = await this.findById(id);
-    if (!user) throw new NotFoundException('User not found');
+    if (!user)
+      throw new NotFoundException({
+        code: 'USER_NOT_FOUND',
+        message: 'User not found',
+      });
     return this.prisma.user.update({
       where: { id },
       data: {
         ...(data.role !== undefined ? { role: data.role } : {}),
-        ...(data.priceMultiplier !== undefined
-          ? { priceMultiplier: data.priceMultiplier }
-          : {}),
+        ...(data.priceMultiplier !== undefined ? { priceMultiplier: data.priceMultiplier } : {}),
         ...(data.agentId !== undefined ? { agentId: data.agentId } : {}),
         ...(data.rebateRate !== undefined ? { rebateRate: data.rebateRate } : {}),
         ...(data.groupId !== undefined ? { groupId: data.groupId } : {}),

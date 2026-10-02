@@ -1,9 +1,4 @@
-import {
-  CanActivate,
-  ExecutionContext,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UserStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -20,7 +15,10 @@ export class JwtAuthGuard implements CanActivate {
     const req = context.switchToHttp().getRequest();
     const auth: string | undefined = req.headers['authorization'];
     if (!auth || !auth.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Missing bearer token');
+      throw new UnauthorizedException({
+        code: 'AUTH_TOKEN_MISSING',
+        message: 'Missing bearer token',
+      });
     }
     const token = auth.slice('Bearer '.length).trim();
 
@@ -28,21 +26,41 @@ export class JwtAuthGuard implements CanActivate {
     try {
       payload = await this.jwt.verifyAsync<JwtPayload>(token);
     } catch {
-      throw new UnauthorizedException('Invalid or expired token');
+      throw new UnauthorizedException({
+        code: 'AUTH_TOKEN_INVALID',
+        message: 'Invalid or expired token',
+      });
     }
 
     // 回查数据库：用户被封禁/删除/降权/被强制下线即时生效，而非等 7 天 token 过期
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, email: true, username: true, role: true, status: true, tokenVersion: true },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        role: true,
+        status: true,
+        tokenVersion: true,
+      },
     });
-    if (!user) throw new UnauthorizedException('Invalid or expired token');
+    if (!user)
+      throw new UnauthorizedException({
+        code: 'AUTH_TOKEN_INVALID',
+        message: 'Invalid or expired token',
+      });
     if (user.status === UserStatus.BANNED) {
-      throw new UnauthorizedException('Account is banned');
+      throw new UnauthorizedException({
+        code: 'AUTH_ACCOUNT_BANNED',
+        message: 'Account is banned',
+      });
     }
     // 令牌吊销：tokenVersion 已自增（退出全部设备/强制下线），旧 token 一律拒绝
     if ((payload.tv ?? 0) !== (user.tokenVersion ?? 0)) {
-      throw new UnauthorizedException('Token revoked');
+      throw new UnauthorizedException({
+        code: 'AUTH_TOKEN_REVOKED',
+        message: 'Token revoked',
+      });
     }
 
     const authUser: AuthUser = {

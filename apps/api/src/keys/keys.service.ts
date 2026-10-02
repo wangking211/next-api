@@ -90,7 +90,11 @@ export class KeysService {
 
   private async findOwned(userId: string, id: string) {
     const key = await this.prisma.apiKey.findFirst({ where: { id, userId } });
-    if (!key) throw new NotFoundException('API key not found');
+    if (!key)
+      throw new NotFoundException({
+        code: 'API_KEY_NOT_FOUND',
+        message: 'API key not found',
+      });
     return key;
   }
 

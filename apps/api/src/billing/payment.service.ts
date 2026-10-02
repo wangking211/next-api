@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BalanceTxType, PaymentOrderStatus, Role } from '@prisma/client';
 import { randomBytes } from 'crypto';
@@ -66,8 +61,8 @@ export class PaymentService {
   isConfigured(): boolean {
     return Boolean(
       this.config.get<string>('JAIPAY_MCH_NO') &&
-        this.config.get<string>('JAIPAY_APP_ID') &&
-        this.config.get<string>('JAIPAY_APP_SECRET'),
+      this.config.get<string>('JAIPAY_APP_ID') &&
+      this.config.get<string>('JAIPAY_APP_SECRET'),
     );
   }
 
@@ -85,7 +80,10 @@ export class PaymentService {
 
   private jaiPayConfig(): JaiPayConfig {
     if (!this.isConfigured()) {
-      throw new BadRequestException('在线支付未开通，请联系管理员或使用兑换码充值');
+      throw new BadRequestException({
+        code: 'PAYMENT_NOT_ENABLED',
+        message: '在线支付未开通，请联系管理员或使用兑换码充值',
+      });
     }
     const { creditsPerUsd } = this.rawRate();
     return {
@@ -108,7 +106,10 @@ export class PaymentService {
     const cfg = this.jaiPayConfig();
     const code = (wayCode || DEFAULT_WAY_CODE).toUpperCase();
     if (!ALLOWED_WAY_CODES.has(code)) {
-      throw new BadRequestException('不支持的支付方式');
+      throw new BadRequestException({
+        code: 'PAYMENT_METHOD_UNSUPPORTED',
+        message: '不支持的支付方式',
+      });
     }
 
     const cnyPerUsd = await this.exchangeRate.getCnyPerUsd();
@@ -160,23 +161,31 @@ export class PaymentService {
           e instanceof Error ? e.message : String(e)
         }`,
       );
-      throw new BadRequestException(
-        `无法连接支付网关: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      throw new BadRequestException({
+        code: 'PAYMENT_GATEWAY_UNREACHABLE',
+        message: `无法连接支付网关: ${e instanceof Error ? e.message : String(e)}`,
+        details: { reason: e instanceof Error ? e.message : String(e) },
+      });
     }
 
     const json: any = await res.json().catch(() => null);
     if (!res.ok || !json) {
       // 5xx / 响应不可解析同样属于结果未知，保持 PENDING
-      this.logger.warn(
-        `下单响应异常（HTTP ${res.status}），订单保持待支付: ${mchOrderNo}`,
-      );
-      throw new BadRequestException(`下单失败（${res.status}）: ${res.statusText}`);
+      this.logger.warn(`下单响应异常（HTTP ${res.status}），订单保持待支付: ${mchOrderNo}`);
+      throw new BadRequestException({
+        code: 'PAYMENT_ORDER_CREATE_FAILED',
+        message: `下单失败（${res.status}）: ${res.statusText}`,
+        details: { status: String(res.status), detail: String(res.statusText ?? '') },
+      });
     }
     if (json.code !== 0) {
       // 网关明确拒绝：可确定订单未创建成功，标记失败避免悬挂
       await this.markFailed(order.id);
-      throw new BadRequestException(`下单失败（${json.code}）: ${json.msg}`);
+      throw new BadRequestException({
+        code: 'PAYMENT_ORDER_CREATE_FAILED',
+        message: `下单失败（${json.code}）: ${json.msg}`,
+        details: { status: String(json.code), detail: String(json.msg ?? '') },
+      });
     }
 
     const data = json.data ?? {};
@@ -213,7 +222,10 @@ export class PaymentService {
   async getOrder(user: AuthUser, id: string) {
     const order = await this.prisma.paymentOrder.findUnique({ where: { id } });
     if (!order || (order.userId !== user.id && user.role !== Role.ADMIN)) {
-      throw new NotFoundException('订单不存在');
+      throw new NotFoundException({
+        code: 'PAYMENT_ORDER_NOT_FOUND',
+        message: '订单不存在',
+      });
     }
     return this.view(order);
   }
@@ -226,7 +238,10 @@ export class PaymentService {
     const cfg = this.jaiPayConfig();
     if (!jaiPayVerify(query, cfg.appSecret)) {
       this.logger.warn(`支付回调签名校验失败: ${JSON.stringify(query).slice(0, 500)}`);
-      throw new BadRequestException('签名校验失败');
+      throw new BadRequestException({
+        code: 'PAYMENT_SIGNATURE_INVALID',
+        message: '签名校验失败',
+      });
     }
 
     const mchOrderNo = query.mchOrderNo ?? '';
@@ -239,11 +254,7 @@ export class PaymentService {
       where: { mchOrderNo },
     });
     if (!order) {
-      await this.recordAnomaly(
-        'unknown-order',
-        query,
-        '收到支付成功回调但本地无对应订单',
-      );
+      await this.recordAnomaly('unknown-order', query, '收到支付成功回调但本地无对应订单');
       return { ok: true, skipped: 'unknown-order' };
     }
 
@@ -281,10 +292,7 @@ export class PaymentService {
           payOrderId: query.payOrderId ?? order.payOrderId,
           channel: query.ifCode ?? null,
           channelOrderNo: query.channelOrderNo ?? null,
-          paidAt:
-            Number.isFinite(successAt) && successAt > 0
-              ? new Date(successAt)
-              : new Date(),
+          paidAt: Number.isFinite(successAt) && successAt > 0 ? new Date(successAt) : new Date(),
           notifyRaw: JSON.stringify(query).slice(0, 4000),
         },
       });
@@ -320,9 +328,7 @@ export class PaymentService {
       );
     }
 
-    this.logger.log(
-      `在线充值到账: ${mchOrderNo} +${order.creditUsd} USD（${order.credits} 积分）`,
-    );
+    this.logger.log(`在线充值到账: ${mchOrderNo} +${order.creditUsd} USD（${order.credits} 积分）`);
     return { ok: true };
   }
 
@@ -359,9 +365,7 @@ export class PaymentService {
         },
       });
     } catch (e) {
-      this.logger.warn(
-        `支付异常落库失败: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      this.logger.warn(`支付异常落库失败: ${e instanceof Error ? e.message : String(e)}`);
     }
 
     const webhook = this.config.get<string>('ALERT_WEBHOOK_URL', '') || '';
@@ -382,9 +386,7 @@ export class PaymentService {
         signal: AbortSignal.timeout(5000),
       });
     } catch (e) {
-      this.logger.warn(
-        `支付异常告警发送失败: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      this.logger.warn(`支付异常告警发送失败: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 

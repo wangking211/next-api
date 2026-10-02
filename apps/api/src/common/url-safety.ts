@@ -2,7 +2,19 @@ import { isIP } from 'net';
 import { lookup } from 'dns/promises';
 
 /** baseUrl 指向私网/回环/链路本地等内部地址时抛出 */
-export class UnsafeUrlError extends Error {}
+export class UnsafeUrlError extends Error {
+  /** 稳定错误码：控制台据此换本地化文案（前端 errorMessage 认 code） */
+  readonly code: string;
+  /** 动态参数（主机名/地址/重定向次数），供 i18n 插值 */
+  readonly details?: Record<string, string | number>;
+
+  /** message 保留原文，供 API 消费者与日志使用；code 才是给控制台换语言用的稳定标识 */
+  constructor(opts: { code: string; message: string; details?: Record<string, string | number> }) {
+    super(opts.message);
+    this.code = opts.code;
+    this.details = opts.details;
+  }
+}
 
 function isPrivateIPv4(ip: string): boolean {
   const parts = ip.split('.').map(Number);
@@ -43,14 +55,24 @@ export async function assertPublicHttpUrl(raw: string): Promise<void> {
   try {
     url = new URL(raw);
   } catch {
-    throw new UnsafeUrlError('baseUrl 不是合法的 URL');
+    throw new UnsafeUrlError({
+      code: 'URL_UNSAFE_INVALID_URL',
+      message: 'baseUrl 不是合法的 URL',
+    });
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new UnsafeUrlError('baseUrl 仅支持 http/https');
+    throw new UnsafeUrlError({
+      code: 'URL_UNSAFE_SCHEME',
+      message: 'baseUrl 仅支持 http/https',
+    });
   }
 
   const host = url.hostname.replace(/^\[|\]$/g, '');
-  if (!host) throw new UnsafeUrlError('baseUrl 缺少主机名');
+  if (!host)
+    throw new UnsafeUrlError({
+      code: 'URL_UNSAFE_NO_HOST',
+      message: 'baseUrl 缺少主机名',
+    });
   const lowered = host.toLowerCase();
   if (
     lowered === 'localhost' ||
@@ -59,11 +81,18 @@ export async function assertPublicHttpUrl(raw: string): Promise<void> {
     lowered.endsWith('.internal') ||
     lowered.endsWith('.lan')
   ) {
-    throw new UnsafeUrlError('baseUrl 不允许指向内部主机');
+    throw new UnsafeUrlError({
+      code: 'URL_UNSAFE_INTERNAL_HOST',
+      message: 'baseUrl 不允许指向内部主机',
+    });
   }
 
   if (isIP(host)) {
-    if (isPrivateIp(host)) throw new UnsafeUrlError('baseUrl 不允许指向私网/回环地址');
+    if (isPrivateIp(host))
+      throw new UnsafeUrlError({
+        code: 'URL_UNSAFE_PRIVATE_ADDRESS',
+        message: 'baseUrl 不允许指向私网/回环地址',
+      });
     return;
   }
 
@@ -71,12 +100,25 @@ export async function assertPublicHttpUrl(raw: string): Promise<void> {
   try {
     addrs = await lookup(host, { all: true });
   } catch {
-    throw new UnsafeUrlError(`baseUrl 主机名无法解析: ${host}`);
+    throw new UnsafeUrlError({
+      code: 'URL_UNSAFE_DNS_FAILED',
+      message: `baseUrl 主机名无法解析: ${host}`,
+      details: { host },
+    });
   }
-  if (addrs.length === 0) throw new UnsafeUrlError(`baseUrl 主机名无法解析: ${host}`);
+  if (addrs.length === 0)
+    throw new UnsafeUrlError({
+      code: 'URL_UNSAFE_DNS_FAILED',
+      message: `baseUrl 主机名无法解析: ${host}`,
+      details: { host },
+    });
   for (const a of addrs) {
     if (isPrivateIp(a.address)) {
-      throw new UnsafeUrlError(`baseUrl 解析到私网/回环地址 (${a.address})，已拒绝`);
+      throw new UnsafeUrlError({
+        code: 'URL_UNSAFE_RESOLVED_PRIVATE',
+        message: `baseUrl 解析到私网/回环地址 (${a.address})，已拒绝`,
+        details: { address: a.address },
+      });
     }
   }
 }
@@ -86,10 +128,7 @@ export async function assertPublicHttpUrl(raw: string): Promise<void> {
  * 与渠道保存、探测、模型列表拉取共用同一开关，避免两套规则漂移。
  */
 export function upstreamAllowsPrivate(): boolean {
-  return (
-    process.env.NODE_ENV !== 'production' ||
-    process.env.ALLOW_PRIVATE_UPSTREAM === 'true'
-  );
+  return process.env.NODE_ENV !== 'production' || process.env.ALLOW_PRIVATE_UPSTREAM === 'true';
 }
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -118,12 +157,23 @@ export async function safeFetch(
     try {
       next = new URL(location, current).toString();
     } catch {
-      throw new UnsafeUrlError('上游返回了无法解析的重定向地址');
+      throw new UnsafeUrlError({
+        code: 'URL_UNSAFE_REDIRECT_UNPARSEABLE',
+        message: '上游返回了无法解析的重定向地址',
+      });
     }
     if (hop === maxRedirects) {
-      throw new UnsafeUrlError(`上游重定向次数超过 ${maxRedirects} 次，已拒绝`);
+      throw new UnsafeUrlError({
+        code: 'URL_UNSAFE_REDIRECT_LIMIT',
+        message: `上游重定向次数超过 ${maxRedirects} 次，已拒绝`,
+        details: { count: maxRedirects },
+      });
     }
     current = next;
   }
-  throw new UnsafeUrlError(`上游重定向次数超过 ${maxRedirects} 次，已拒绝`);
+  throw new UnsafeUrlError({
+    code: 'URL_UNSAFE_REDIRECT_LIMIT',
+    message: `上游重定向次数超过 ${maxRedirects} 次，已拒绝`,
+    details: { count: maxRedirects },
+  });
 }

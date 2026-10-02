@@ -67,7 +67,10 @@ export class ModelsService {
     const byOrigin: Record<string, number> = { DOMESTIC: 0, OVERSEAS: 0 };
     const byVendor: Record<string, number> = {};
     // 按 (vendor, origin) 分组批量落库：模型种类有限 → 查询数与表规模无关
-    const pending = new Map<string, { vendor: string | null; origin: ModelOrigin; ids: string[] }>();
+    const pending = new Map<
+      string,
+      { vendor: string | null; origin: ModelOrigin; ids: string[] }
+    >();
     for (const r of rows) {
       const { vendor, origin } = inferVendorOrigin(r.name);
       byOrigin[origin] = (byOrigin[origin] ?? 0) + 1;
@@ -93,7 +96,11 @@ export class ModelsService {
 
   async update(id: string, dto: UpdateModelDto) {
     const exists = await this.prisma.modelCatalog.findUnique({ where: { id } });
-    if (!exists) throw new NotFoundException('Model not found');
+    if (!exists)
+      throw new NotFoundException({
+        code: 'MODEL_NOT_FOUND',
+        message: 'Model not found',
+      });
     const row = await this.prisma.modelCatalog.update({ where: { id }, data: { ...dto } });
     this.invalidateCatalog();
     return row;
@@ -101,7 +108,11 @@ export class ModelsService {
 
   async remove(id: string) {
     const exists = await this.prisma.modelCatalog.findUnique({ where: { id } });
-    if (!exists) throw new NotFoundException('Model not found');
+    if (!exists)
+      throw new NotFoundException({
+        code: 'MODEL_NOT_FOUND',
+        message: 'Model not found',
+      });
     await this.prisma.modelCatalog.delete({ where: { id } });
     this.invalidateCatalog();
     return { success: true };

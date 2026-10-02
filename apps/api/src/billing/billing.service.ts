@@ -51,8 +51,7 @@ export class BillingService {
     @Optional() private readonly cache?: TtlCacheService,
     @Optional() config?: ConfigService,
   ) {
-    this.catalogTtl =
-      Number(config?.get<string>('CATALOG_CACHE_TTL_MS', '60000')) || 60_000;
+    this.catalogTtl = Number(config?.get<string>('CATALOG_CACHE_TTL_MS', '60000')) || 60_000;
     const bps = Number(config?.get<string>('CHANNEL_SHARE_FEE_BPS', '2000'));
     this.shareFeeBps = Number.isFinite(bps) ? Math.max(0, Math.min(10000, Math.floor(bps))) : 2000;
   }
@@ -70,7 +69,11 @@ export class BillingService {
       where: { id: userId },
       select: { balance: true },
     });
-    if (!user) throw new NotFoundException('User not found');
+    if (!user)
+      throw new NotFoundException({
+        code: 'USER_NOT_FOUND',
+        message: 'User not found',
+      });
     return { balance: Number(user.balance) };
   }
 
@@ -78,10 +81,7 @@ export class BillingService {
    * 计算某模型在指定渠道的售价与成本（USD/1M tokens）。
    * 成本 = 官方价 × costDiscount；售价 = 官方价 × priceDiscount；绝对字段存在时优先。
    */
-  async getChannelPricing(
-    channelId: string | null,
-    model: string,
-  ): Promise<ChannelPricing> {
+  async getChannelPricing(channelId: string | null, model: string): Promise<ChannelPricing> {
     const [cm, catalog] = await Promise.all([
       channelId
         ? this.prisma.channelModel.findUnique({
@@ -105,10 +105,8 @@ export class BillingService {
    */
   async catalogRow(model: string): Promise<CatalogPricingRow | null> {
     if (this.cache) {
-      const rows = await this.cache.getOrLoad<ModelCatalog[]>(
-        'catalog:all',
-        this.catalogTtl,
-        () => this.prisma.modelCatalog.findMany(),
+      const rows = await this.cache.getOrLoad<ModelCatalog[]>('catalog:all', this.catalogTtl, () =>
+        this.prisma.modelCatalog.findMany(),
       );
       return rows.find((r) => r.name === model) ?? null;
     }
@@ -184,12 +182,7 @@ export class BillingService {
     return { value: 1, source: 'default' };
   }
 
-  async listTransactions(
-    userId: string,
-    page = 1,
-    pageSize = 20,
-    type?: BalanceTxType,
-  ) {
+  async listTransactions(userId: string, page = 1, pageSize = 20, type?: BalanceTxType) {
     const where: Prisma.BalanceTransactionWhereInput = {
       userId,
       ...(type ? { type } : {}),
@@ -214,14 +207,22 @@ export class BillingService {
     description?: string,
   ) {
     const delta = round6(amount);
-    if (delta === 0) throw new BadRequestException('Amount must be non-zero');
+    if (delta === 0)
+      throw new BadRequestException({
+        code: 'BILLING_AMOUNT_NON_ZERO',
+        message: 'Amount must be non-zero',
+      });
 
     return this.prisma.$transaction(async (tx) => {
       const exists = await tx.user.findUnique({
         where: { id: userId },
         select: { id: true },
       });
-      if (!exists) throw new NotFoundException('User not found');
+      if (!exists)
+        throw new NotFoundException({
+          code: 'USER_NOT_FOUND',
+          message: 'User not found',
+        });
 
       // 原子自增，避免读-改-写丢更新
       const updated = await tx.user.update({
@@ -244,7 +245,13 @@ export class BillingService {
   }
 
   recharge(operatorId: string, userId: string, amount: number, description?: string) {
-    return this.applyChange(operatorId, userId, Math.abs(amount), BalanceTxType.RECHARGE, description);
+    return this.applyChange(
+      operatorId,
+      userId,
+      Math.abs(amount),
+      BalanceTxType.RECHARGE,
+      description,
+    );
   }
 
   adjust(operatorId: string, userId: string, amount: number, description?: string) {
@@ -490,9 +497,16 @@ export class BillingService {
 
   async disableCode(id: string) {
     const code = await this.prisma.redeemCode.findUnique({ where: { id } });
-    if (!code) throw new NotFoundException('兑换码不存在');
+    if (!code)
+      throw new NotFoundException({
+        code: 'REDEEM_CODE_NOT_FOUND',
+        message: '兑换码不存在',
+      });
     if (code.status === RedeemCodeStatus.USED) {
-      throw new BadRequestException('兑换码已被使用，无法作废');
+      throw new BadRequestException({
+        code: 'REDEEM_CODE_REVOKE_USED',
+        message: '兑换码已被使用，无法作废',
+      });
     }
     return this.prisma.redeemCode.update({
       where: { id },
@@ -503,19 +517,36 @@ export class BillingService {
   /** 用户兑换：加余额 + 标记已用，原子操作并防并发重复兑换。 */
   async redeem(userId: string, rawCode: string) {
     const code = normalizeCode(rawCode);
-    if (!code) throw new BadRequestException('请输入兑换码');
+    if (!code)
+      throw new BadRequestException({
+        code: 'REDEEM_CODE_REQUIRED',
+        message: '请输入兑换码',
+      });
 
     return this.prisma.$transaction(async (tx) => {
       const rc = await tx.redeemCode.findUnique({ where: { code } });
-      if (!rc) throw new BadRequestException('兑换码无效');
+      if (!rc)
+        throw new BadRequestException({
+          code: 'REDEEM_CODE_INVALID',
+          message: '兑换码无效',
+        });
       if (rc.status === RedeemCodeStatus.USED) {
-        throw new BadRequestException('兑换码已被使用');
+        throw new BadRequestException({
+          code: 'REDEEM_CODE_USED',
+          message: '兑换码已被使用',
+        });
       }
       if (rc.status === RedeemCodeStatus.DISABLED) {
-        throw new BadRequestException('兑换码已作废');
+        throw new BadRequestException({
+          code: 'REDEEM_CODE_REVOKED',
+          message: '兑换码已作废',
+        });
       }
       if (rc.expiresAt && rc.expiresAt.getTime() < Date.now()) {
-        throw new BadRequestException('兑换码已过期');
+        throw new BadRequestException({
+          code: 'REDEEM_CODE_EXPIRED',
+          message: '兑换码已过期',
+        });
       }
 
       const claimed = await tx.redeemCode.updateMany({
@@ -527,7 +558,10 @@ export class BillingService {
         },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException('兑换码已被使用');
+        throw new BadRequestException({
+          code: 'REDEEM_CODE_USED',
+          message: '兑换码已被使用',
+        });
       }
 
       const amount = Number(rc.amount);

@@ -4,13 +4,27 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Channel, ChannelModel, ChannelOwnerType, ChannelShareMode, ChannelShareUrgency, ChannelStatus, Prisma, Role } from '@prisma/client';
+import {
+  Channel,
+  ChannelModel,
+  ChannelOwnerType,
+  ChannelShareMode,
+  ChannelShareUrgency,
+  ChannelStatus,
+  Prisma,
+  Role,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
 import { AuthUser } from '../common/interfaces/auth.interface';
 import { ProviderRegistry } from '../gateway/providers/provider.registry';
 import { UpstreamError } from '../gateway/types';
-import { assertPublicHttpUrl, safeFetch, UnsafeUrlError, upstreamAllowsPrivate } from '../common/url-safety';
+import {
+  assertPublicHttpUrl,
+  safeFetch,
+  UnsafeUrlError,
+  upstreamAllowsPrivate,
+} from '../common/url-safety';
 import { joinUrl } from '../gateway/providers/stream.util';
 import { GroupsService } from '../groups/groups.service';
 import { shareExhausted } from '../gateway/channel-share.util';
@@ -77,9 +91,7 @@ function extractModelIds(json: any): string[] {
     .map((s) => s.trim())
     .filter((s) => s && !s.startsWith('tunedModels/'))
     .map((s) => s.replace(/^models\//, ''));
-  return [...new Set(ids)]
-    .sort((a, b) => a.localeCompare(b))
-    .slice(0, 1000);
+  return [...new Set(ids)].sort((a, b) => a.localeCompare(b)).slice(0, 1000);
 }
 
 @Injectable()
@@ -97,14 +109,20 @@ export class ChannelsService {
     try {
       await assertPublicHttpUrl(baseUrl);
     } catch (e) {
-      throw new BadRequestException(e instanceof UnsafeUrlError ? e.message : 'baseUrl 不安全');
+      throw new BadRequestException(
+        e instanceof UnsafeUrlError
+          ? { code: e.code, message: e.message, details: e.details }
+          : { code: 'CHANNEL_BASE_URL_UNSAFE', message: 'baseUrl 不安全' },
+      );
     }
   }
 
-  private view(c: Channel & {
-    modelPrices?: ChannelModel[];
-    groups?: { id: string; name: string; displayName: string }[];
-  }) {
+  private view(
+    c: Channel & {
+      modelPrices?: ChannelModel[];
+      groups?: { id: string; name: string; displayName: string }[];
+    },
+  ) {
     let preview: string;
     try {
       const key = this.crypto.decrypt(c.apiKeyEnc);
@@ -236,7 +254,10 @@ export class ChannelsService {
     const [items, total] = await Promise.all([
       this.prisma.channel.findMany({
         where,
-        include: { modelPrices: true, groups: { select: { id: true, name: true, displayName: true } } },
+        include: {
+          modelPrices: true,
+          groups: { select: { id: true, name: true, displayName: true } },
+        },
         orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -280,10 +301,7 @@ export class ChannelsService {
       orderBy: { modelName: 'asc' },
     });
     const flat = new Set<string>();
-    const byChannel = new Map<
-      string,
-      (typeof rows)[number]['channel'] & { models: string[] }
-    >();
+    const byChannel = new Map<string, (typeof rows)[number]['channel'] & { models: string[] }>();
     for (const r of rows) {
       // 共享渠道已达额度/到期 → 不再对外展示（与网关路由同口径）
       if (shareExhausted(r.channel)) continue;
@@ -300,11 +318,12 @@ export class ChannelsService {
   async create(user: AuthUser, dto: CreateChannelDto) {
     const wantPlatform = dto.ownerType === ChannelOwnerType.PLATFORM;
     if (wantPlatform && user.role !== Role.ADMIN) {
-      throw new ForbiddenException('Only admins can create platform channels');
+      throw new ForbiddenException({
+        code: 'CHANNEL_PLATFORM_ADMIN_ONLY',
+        message: 'Only admins can create platform channels',
+      });
     }
-    const ownerType = wantPlatform
-      ? ChannelOwnerType.PLATFORM
-      : ChannelOwnerType.USER;
+    const ownerType = wantPlatform ? ChannelOwnerType.PLATFORM : ChannelOwnerType.USER;
 
     await this.assertSafeBaseUrl(dto.baseUrl);
 
@@ -348,13 +367,18 @@ export class ChannelsService {
 
   private async findAccessible(user: AuthUser, id: string): Promise<Channel> {
     const channel = await this.prisma.channel.findUnique({ where: { id } });
-    if (!channel) throw new NotFoundException('Channel not found');
+    if (!channel)
+      throw new NotFoundException({
+        code: 'CHANNEL_NOT_FOUND',
+        message: 'Channel not found',
+      });
     const isAdmin = user.role === Role.ADMIN;
-    const isOwner =
-      channel.ownerType === ChannelOwnerType.USER &&
-      channel.ownerUserId === user.id;
+    const isOwner = channel.ownerType === ChannelOwnerType.USER && channel.ownerUserId === user.id;
     if (!isAdmin && !isOwner) {
-      throw new NotFoundException('Channel not found');
+      throw new NotFoundException({
+        code: 'CHANNEL_NOT_FOUND',
+        message: 'Channel not found',
+      });
     }
     return channel;
   }
@@ -497,9 +521,7 @@ export class ChannelsService {
         results[i] = await this.runUpstreamTest({ ...input, model: models[i] });
       }
     };
-    await Promise.all(
-      Array.from({ length: Math.min(concurrency, models.length) }, () => worker()),
-    );
+    await Promise.all(Array.from({ length: Math.min(concurrency, models.length) }, () => worker()));
     const ok = results.filter((r) => r.ok).length;
     return {
       results,
@@ -508,17 +530,16 @@ export class ChannelsService {
   }
 
   /** 测试已保存渠道；不指定模型时测试该渠道全部模型。 */
-  async testChannel(
-    user: AuthUser,
-    id: string,
-    opts: { model?: string; models?: string[] } = {},
-  ) {
+  async testChannel(user: AuthUser, id: string, opts: { model?: string; models?: string[] } = {}) {
     const channel = await this.findAccessible(user, id);
     let apiKey: string;
     try {
       apiKey = this.crypto.decrypt(channel.apiKeyEnc);
     } catch {
-      throw new BadRequestException('渠道密钥无法解密，请重新填写上游 Key');
+      throw new BadRequestException({
+        code: 'CHANNEL_KEY_UNREADABLE',
+        message: '渠道密钥无法解密，请重新填写上游 Key',
+      });
     }
     const models = this.resolveTestModels(opts, channel.models);
     return this.runUpstreamTests(
@@ -542,21 +563,24 @@ export class ChannelsService {
     let apiKey = dto.apiKey?.trim();
     if (!apiKey) {
       if (!dto.channelId) {
-        throw new BadRequestException('请提供上游 API Key');
+        throw new BadRequestException({
+          code: 'CHANNEL_UPSTREAM_KEY_REQUIRED',
+          message: '请提供上游 API Key',
+        });
       }
       const channel = await this.findAccessible(user, dto.channelId);
       try {
         apiKey = this.crypto.decrypt(channel.apiKeyEnc);
       } catch {
-        throw new BadRequestException('已存密钥无法解密，请重新填写');
+        throw new BadRequestException({
+          code: 'CHANNEL_STORED_KEY_UNREADABLE',
+          message: '已存密钥无法解密，请重新填写',
+        });
       }
     }
     const models = this.resolveTestModels(dto, []);
     if (dto.baseUrl) await this.assertSafeBaseUrl(dto.baseUrl);
-    return this.runUpstreamTests(
-      { provider: dto.provider, baseUrl: dto.baseUrl, apiKey },
-      models,
-    );
+    return this.runUpstreamTests({ provider: dto.provider, baseUrl: dto.baseUrl, apiKey }, models);
   }
 
   /**
@@ -576,12 +600,23 @@ export class ChannelsService {
         try {
           apiKey = this.crypto.decrypt(channel.apiKeyEnc);
         } catch {
-          throw new BadRequestException('已存密钥无法解密，请重新填写');
+          throw new BadRequestException({
+            code: 'CHANNEL_STORED_KEY_UNREADABLE',
+            message: '已存密钥无法解密，请重新填写',
+          });
         }
       }
     }
-    if (!baseUrl) throw new BadRequestException('请填写 Base URL');
-    if (!apiKey) throw new BadRequestException('请提供上游 API Key');
+    if (!baseUrl)
+      throw new BadRequestException({
+        code: 'CHANNEL_BASE_URL_REQUIRED',
+        message: '请填写 Base URL',
+      });
+    if (!apiKey)
+      throw new BadRequestException({
+        code: 'CHANNEL_UPSTREAM_KEY_REQUIRED',
+        message: '请提供上游 API Key',
+      });
     await this.assertSafeBaseUrl(baseUrl);
     const models = await this.listUpstreamModels(dto.provider, baseUrl, apiKey);
     return { models, total: models.length };
@@ -604,24 +639,33 @@ export class ChannelsService {
     let res: Awaited<ReturnType<typeof fetch>> | undefined;
     for (const url of urls) {
       const target =
-        provider === 'gemini'
-          ? `${url}?pageSize=1000&key=${encodeURIComponent(apiKey)}`
-          : url;
+        provider === 'gemini' ? `${url}?pageSize=1000&key=${encodeURIComponent(apiKey)}` : url;
       try {
         // 用户可控的上游地址：逐跳校验 + 不自动跟随重定向（防止 302 转内网绕过 SSRF 校验）
         res = await safeFetch(target, { headers, signal: AbortSignal.timeout(15000) });
       } catch (e) {
         throw new BadRequestException(
           e instanceof UnsafeUrlError
-            ? e.message
-            : `无法连接上游: ${e instanceof Error ? e.message : String(e)}`,
+            ? { code: e.code, message: e.message, details: e.details }
+            : {
+                code: 'CHANNEL_UPSTREAM_UNREACHABLE',
+                message: `无法连接上游: ${e instanceof Error ? e.message : String(e)}`,
+                details: { reason: e instanceof Error ? e.message : String(e) },
+              },
         );
       }
       if (res.status !== 404 || url === urls[urls.length - 1]) break;
     }
-    if (!res) throw new BadRequestException('模型列表请求失败');
+    if (!res)
+      throw new BadRequestException({
+        code: 'CHANNEL_MODEL_LIST_FETCH_FAILED',
+        message: '模型列表请求失败',
+      });
     if (res.status === 404) {
-      throw new BadRequestException('上游没有模型列表接口（404），请检查 Base URL');
+      throw new BadRequestException({
+        code: 'CHANNEL_MODEL_LIST_NOT_FOUND',
+        message: '上游没有模型列表接口（404），请检查 Base URL',
+      });
     }
     if (!res.ok) {
       const text = await res.text().catch(() => '');
@@ -631,19 +675,28 @@ export class ChannelsService {
       } catch {
         /* 非 JSON 响应，用原文提示 */
       }
-      throw new BadRequestException(
-        `上游返回 ${res.status}: ${extractUpstreamError(body, text.slice(0, 300) || res.statusText)}`,
-      );
+      const upstreamDetail = extractUpstreamError(body, text.slice(0, 300) || res.statusText);
+      throw new BadRequestException({
+        code: 'CHANNEL_UPSTREAM_ERROR',
+        message: `上游返回 ${res.status}: ${upstreamDetail}`,
+        details: { status: String(res.status), detail: upstreamDetail },
+      });
     }
     let json: unknown;
     try {
       json = await res.json();
     } catch {
-      throw new BadRequestException('上游模型列表不是有效 JSON');
+      throw new BadRequestException({
+        code: 'CHANNEL_MODEL_LIST_INVALID_JSON',
+        message: '上游模型列表不是有效 JSON',
+      });
     }
     const models = extractModelIds(json);
     if (!models.length) {
-      throw new BadRequestException('上游未返回任何模型，请检查 Key 与 Base URL');
+      throw new BadRequestException({
+        code: 'CHANNEL_MODEL_LIST_EMPTY',
+        message: '上游未返回任何模型，请检查 Key 与 Base URL',
+      });
     }
     return models;
   }
@@ -665,7 +718,10 @@ export class ChannelsService {
       .filter(Boolean);
     const unique = [...new Set(list)];
     if (unique.length === 0) {
-      throw new BadRequestException('请提供用于测试的模型名');
+      throw new BadRequestException({
+        code: 'CHANNEL_TEST_MODEL_REQUIRED',
+        message: '请提供用于测试的模型名',
+      });
     }
     // 单次测试上限（可用 TEST_MAX_MODELS 调整）
     const max = Number(process.env.TEST_MAX_MODELS ?? 100) || 100;

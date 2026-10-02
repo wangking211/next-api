@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { BalanceTxType, WithdrawalStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -17,7 +13,11 @@ export class WithdrawalService {
   /** 用户发起提现：冻结（扣减）余额并生成待审批申请 */
   async create(userId: string, amountUsd: number, note?: string) {
     const amount = round6(amountUsd);
-    if (amount <= 0) throw new BadRequestException('Amount must be positive');
+    if (amount <= 0)
+      throw new BadRequestException({
+        code: 'WITHDRAW_AMOUNT_POSITIVE',
+        message: 'Amount must be positive',
+      });
     return this.prisma.$transaction(async (tx) => {
       // 原子冻结：条件更新保证并发下不会超额提现（余额足够才会 count=1）
       const frozen = await tx.user.updateMany({
@@ -29,8 +29,15 @@ export class WithdrawalService {
           where: { id: userId },
           select: { id: true },
         });
-        if (!exists) throw new NotFoundException('User not found');
-        throw new BadRequestException('余额不足');
+        if (!exists)
+          throw new NotFoundException({
+            code: 'USER_NOT_FOUND',
+            message: 'User not found',
+          });
+        throw new BadRequestException({
+          code: 'BALANCE_INSUFFICIENT',
+          message: '余额不足',
+        });
       }
       const upd = await tx.user.findUnique({
         where: { id: userId },
@@ -70,17 +77,16 @@ export class WithdrawalService {
   }
 
   /** 管理员审批：通过=打款完成；驳回=退回余额 */
-  async review(
-    operatorId: string,
-    id: string,
-    action: 'APPROVE' | 'REJECT',
-  ) {
+  async review(operatorId: string, id: string, action: 'APPROVE' | 'REJECT') {
     return this.prisma.$transaction(async (tx) => {
       const w = await tx.withdrawalRequest.findUnique({ where: { id } });
-      if (!w) throw new NotFoundException('Withdrawal not found');
+      if (!w)
+        throw new NotFoundException({
+          code: 'WITHDRAW_NOT_FOUND',
+          message: 'Withdrawal not found',
+        });
 
-      const status =
-        action === 'APPROVE' ? WithdrawalStatus.APPROVED : WithdrawalStatus.REJECTED;
+      const status = action === 'APPROVE' ? WithdrawalStatus.APPROVED : WithdrawalStatus.REJECTED;
       // 原子领取：只有把 PENDING 改成终态的那一次调用才执行资金动作，
       // 并发（双击 / 两个管理员）下不会重复退款或重复审批。
       const claimed = await tx.withdrawalRequest.updateMany({
@@ -88,7 +94,10 @@ export class WithdrawalService {
         data: { status, reviewedById: operatorId, reviewedAt: new Date() },
       });
       if (claimed.count !== 1) {
-        throw new BadRequestException('该提现已处理');
+        throw new BadRequestException({
+          code: 'WITHDRAW_ALREADY_PROCESSED',
+          message: '该提现已处理',
+        });
       }
 
       if (action === 'REJECT') {
