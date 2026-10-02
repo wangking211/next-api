@@ -336,4 +336,33 @@ describe('AnthropicStreamTranslator', () => {
     const msgDelta = parseEvents(sse).find((e) => e.event === 'message_delta');
     expect(msgDelta!.data.delta.stop_reason).toBe('max_tokens');
   });
+
+  it('emits deltas incrementally for CRLF-separated chunks (not deferred to flush)', () => {
+    // 回归：'\r\n\r\n' 不含子串 '\n\n' → 旧 indexOf('\n\n') 永不切块，
+    // push 全程返回空、事件积压到 flush 才一次性吐出（流式对客户端失效）
+    const t = new AnthropicStreamTranslator('m', 5);
+    t.begin();
+    const events = t.push(
+      'data: {"choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}\r\n\r\n',
+    );
+    const names = parseEvents(events.join('')).map((e) => e.event);
+    expect(names).toContain('content_block_start');
+    expect(names).toContain('content_block_delta');
+  });
+
+  it('produces the same event sequence for CRLF and LF payloads end-to-end', () => {
+    const run = (sep: string) => {
+      const t = new AnthropicStreamTranslator('m', 5);
+      let sse = t.begin().join('');
+      const chunks = [
+        `data: {"id":"c","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}${sep}`,
+        `data: {"id":"c","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}${sep}`,
+        `data: [DONE]${sep}`,
+      ];
+      for (const c of chunks) sse += t.push(c).join('');
+      sse += t.flush().join('');
+      return parseEvents(sse).map((e) => e.event);
+    };
+    expect(run('\r\n\r\n')).toEqual(run('\n\n'));
+  });
 });

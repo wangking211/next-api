@@ -6,6 +6,8 @@
  * 因此这里只需要在 /v1/messages 边界做一次转换。
  */
 
+import { splitNextSseBlock } from './providers/stream.util';
+
 // ---------------------------------------------------------------------------
 // 入站：Anthropic 请求 → OpenAI 请求
 // ---------------------------------------------------------------------------
@@ -302,11 +304,12 @@ export class AnthropicStreamTranslator {
   push(chunk: string): string[] {
     const events: string[] = [];
     this.buffer += chunk;
-    let idx: number;
-    while ((idx = this.buffer.indexOf('\n\n')) !== -1) {
-      const block = this.buffer.slice(0, idx);
-      this.buffer = this.buffer.slice(idx + 2);
-      this.handleBlock(block, events);
+    // 分块复用 canonical 的 splitNextSseBlock（兼容 CRLF）；indexOf('\n\n') 漏掉 \r\n\r\n
+    let next = splitNextSseBlock(this.buffer);
+    while (next) {
+      this.handleBlock(next.block, events);
+      this.buffer = next.rest;
+      next = splitNextSseBlock(this.buffer);
     }
     return events;
   }
