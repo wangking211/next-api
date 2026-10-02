@@ -25,6 +25,9 @@ describe('inferVendorOrigin', () => {
     ['doubao-pro-32k', 'volcengine'],
     ['ernie-4.5', 'baidu'],
     ['hunyuan-turbo', 'tencent'],
+    ['hy3', 'tencent'],
+    ['hy4-preview', 'tencent'],
+    ['hy-MT2-30B-A3B', 'tencent'],
   ];
 
   it.each(overseas)('%s → %s / OVERSEAS', (name, vendor) => {
