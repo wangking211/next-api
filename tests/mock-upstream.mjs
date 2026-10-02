@@ -171,6 +171,40 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ---- OpenAI 兼容 videos：建任务 / 状态（供 /v1/video/generations 兼容端点 e2e） ----
+  // 建任务把 seconds 回显进 id：e2e 借 task_id 断言 duration -> seconds 换名真的到了上游
+  if (req.method === 'POST' && url.endsWith('/videos')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        id: 'task_mock_' + (body?.seconds ?? 'none'),
+        object: 'video',
+        model: body?.model,
+        status: 'queued',
+        progress: 0,
+        created_at: Math.floor(Date.now() / 1000),
+        seconds: String(body?.seconds ?? ''),
+      }),
+    );
+    return;
+  }
+  const vTask = url.match(/\/videos\/(task_mock_[A-Za-z0-9_-]+)/);
+  if (req.method === 'GET' && vTask) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        id: vTask[1],
+        object: 'video',
+        model: 'seed-test',
+        status: 'completed',
+        progress: 100,
+        created_at: 1790000000,
+        seconds: '5',
+      }),
+    );
+    return;
+  }
+
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: { message: `no mock route for ${url}` } }));
 });

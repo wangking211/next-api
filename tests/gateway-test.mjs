@@ -219,6 +219,66 @@ check('embeddings missing model -> 400', embNoModel.status === 400, embNoModel.d
 const embNoKey = await api('POST', '/v1/embeddings', { body: { model: 'gpt-test', input: 'x' } });
 check('embeddings no api key -> 401', embNoKey.status === 401, embNoKey.data);
 
+// 8.6. 视频端点（OpenAI 形状回归 + /v1/video/generations 兼容形状）
+const chVideo = await mk('good-video', 'openai', 'http://localhost:4001/good/v1', ['seed-test'], 1);
+check('setup: video channel created', !!chVideo.data?.id, chVideo.data);
+
+const vOai = await api('POST', '/v1/videos', {
+  token: sk,
+  body: { model: 'seed-test', prompt: 'waves', seconds: 4 },
+});
+check(
+  'videos (OpenAI shape) unchanged: {id,object,status}',
+  vOai.status === 200 && vOai.data?.id === 'task_mock_4' && vOai.data?.object === 'video',
+  vOai.data,
+);
+
+const vgNoKey = await api('POST', '/v1/video/generations', { body: { model: 'seed-test', prompt: 'x' } });
+check('video/generations no api key -> 401', vgNoKey.status === 401, vgNoKey.status);
+
+const vgNoModel = await api('POST', '/v1/video/generations', { token: sk, body: { prompt: 'x' } });
+check(
+  'video/generations missing model -> 400',
+  vgNoModel.status === 400 &&
+    JSON.stringify(vgNoModel.data).includes('Missing required field: model'),
+  vgNoModel.data,
+);
+
+const vg = await api('POST', '/v1/video/generations', {
+  token: sk,
+  body: { model: 'seed-test', prompt: 'a cat waves', duration: 4 },
+});
+check(
+  'compat create -> {task_id,status}（task_id 回显证明 duration→seconds 到达上游）',
+  vg.status === 200 && vg.data?.task_id === 'task_mock_4' && vg.data?.status === 'queued',
+  vg.data,
+);
+check(
+  'compat create drops OpenAI fields',
+  vg.data?.id === undefined && vg.data?.object === undefined && vg.data?.progress === undefined,
+  vg.data,
+);
+
+const vgSt = await api('GET', '/v1/video/generations/task_mock_4', { token: sk });
+check(
+  'compat status -> {task_id,status}',
+  vgSt.status === 200 && vgSt.data?.task_id === 'task_mock_4' && vgSt.data?.status === 'completed',
+  vgSt.data,
+);
+check(
+  'compat status url points at our content endpoint',
+  vgSt.data?.url === API + '/v1/videos/task_mock_4/content' && vgSt.data?.format === 'mp4',
+  vgSt.data,
+);
+check(
+  'compat status metadata carries duration/progress',
+  vgSt.data?.metadata?.duration === 5 && vgSt.data?.metadata?.progress === 100,
+  vgSt.data,
+);
+
+const vgBadId = await api('GET', '/v1/video/generations/bad%21id', { token: sk });
+check('compat status bad task id -> 400', vgBadId.status === 400, vgBadId.data);
+
 // 9. /v1/models
 const models = await fetch(API + '/v1/models', { headers: { Authorization: `Bearer ${sk}` } });
 const modelsJson = await models.json();
