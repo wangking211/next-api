@@ -23,6 +23,7 @@ import { ChannelHealthService } from './channel-health.service';
 import { RoutingMetricsService } from './routing-metrics.service';
 import { GatewayAuthContext, GatewayRequest, ResolvedChannel, StreamResult, UpstreamError, openaiError } from './types';
 import { detectRequiredCapabilities } from './capabilities';
+import { trackClientClose } from './client-close';
 import {
   AnthropicStreamTranslator,
   anthropicToOpenAiRequest,
@@ -357,13 +358,9 @@ export class GatewayController {
       this.defaultMaxOutputTokens;
     let insufficientBalance = false;
 
-    // 客户端断开时中止上游请求，避免连接泄漏
+    // 客户端断开时中止上游请求，避免连接泄漏（closeTracker 仅在提前断开时置位，正常完成的 close 不算）
     const upstreamAbort = new AbortController();
-    let clientClosed = false;
-    res.on('close', () => {
-      clientClosed = true;
-      upstreamAbort.abort();
-    });
+    const closeTracker = trackClientClose(res, () => upstreamAbort.abort());
 
     for (let i = 0; i < channels.length; i++) {
       const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
@@ -405,7 +402,7 @@ export class GatewayController {
             share: this.shareContext(channel, user.id),
             abort: upstreamAbort,
             idleMs: this.streamIdleMs,
-            isClientClosed: () => clientClosed,
+            isClientClosed: () => closeTracker.isClosed(),
             apiFormat,
             multiplier: billingInfo.value,
             multiplierSource: billingInfo.source,
@@ -462,7 +459,7 @@ export class GatewayController {
       } catch (e) {
         // 客户端已断开：中止是本端触发的，不计渠道失败、不再故障转移
         //（全部候选共享同一 signal，继续试只会连败触发冷却/自动禁用）
-        if (clientClosed) return;
+        if (closeTracker.isClosed()) return;
         if (e instanceof UpstreamError) {
           lastError = e;
           const action = await this.handleUpstreamFailure(e, {
@@ -775,13 +772,9 @@ export class GatewayController {
     let insufficientBalance = false;
     const guards = this.balanceGuards(user.id, billingInfo.value);
 
-    // 客户端断开时中止上游请求，避免连接泄漏
+    // 客户端断开时中止上游请求，避免连接泄漏（closeTracker 仅在提前断开时置位）
     const upstreamAbort = new AbortController();
-    let clientClosed = false;
-    res.on('close', () => {
-      clientClosed = true;
-      upstreamAbort.abort();
-    });
+    const closeTracker = trackClientClose(res, () => upstreamAbort.abort());
 
     for (let i = 0; i < channels.length; i++) {
       const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
@@ -850,7 +843,7 @@ export class GatewayController {
         return res.status(result.status).json(result.json);
       } catch (e) {
         // 客户端已断开：中止是本端触发的，不计渠道失败、不再故障转移
-        if (clientClosed) return;
+        if (closeTracker.isClosed()) return;
         if (e instanceof UpstreamError) {
           lastError = e;
           const action = await this.handleUpstreamFailure(e, {
@@ -983,12 +976,9 @@ export class GatewayController {
     let insufficientBalance = false;
     const guards = this.balanceGuards(user.id, billingInfo.value);
 
+    // 客户端断开时中止上游请求，避免连接泄漏（closeTracker 仅在提前断开时置位）
     const upstreamAbort = new AbortController();
-    let clientClosed = false;
-    res.on('close', () => {
-      clientClosed = true;
-      upstreamAbort.abort();
-    });
+    const closeTracker = trackClientClose(res, () => upstreamAbort.abort());
 
     for (let i = 0; i < channels.length; i++) {
       const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
@@ -1063,7 +1053,7 @@ export class GatewayController {
         return res.status(result.status).json(result.json);
       } catch (e) {
         // 客户端已断开：中止是本端触发的，不计渠道失败、不再故障转移
-        if (clientClosed) return;
+        if (closeTracker.isClosed()) return;
         if (e instanceof UpstreamError) {
           lastError = e;
           const action = await this.handleUpstreamFailure(e, {
@@ -1194,12 +1184,9 @@ export class GatewayController {
     let unsupported = false;
     const guards = this.balanceGuards(user.id, billingInfo.value);
 
+    // 客户端断开时中止上游请求，避免连接泄漏（closeTracker 仅在提前断开时置位）
     const upstreamAbort = new AbortController();
-    let clientClosed = false;
-    res.on('close', () => {
-      clientClosed = true;
-      upstreamAbort.abort();
-    });
+    const closeTracker = trackClientClose(res, () => upstreamAbort.abort());
 
     for (let i = 0; i < channels.length; i++) {
       const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
@@ -1274,7 +1261,7 @@ export class GatewayController {
         ]);
         return res.status(result.status).json(result.json);
       } catch (e) {
-        if (clientClosed) return;
+        if (closeTracker.isClosed()) return;
         if (e instanceof UpstreamError) {
           lastError = e;
           const action = await this.handleUpstreamFailure(e, {
@@ -1595,7 +1582,6 @@ export class GatewayController {
       }
     };
 
-    const clientClosed = meta.isClientClosed?.() ?? false;
     try {
       armIdle();
       for await (const chunk of result.chunks) {
@@ -1613,12 +1599,14 @@ export class GatewayController {
       clearIdle();
       if (translator) {
         for (const ev of translator.flush(
-          clientClosed ? undefined : (errorMessage ?? undefined),
+          meta.isClientClosed?.() ? undefined : (errorMessage ?? undefined),
         ))
           res.write(ev);
       }
     }
 
+    // 实时读取客户端状态：循环前的快照会漏掉「流中断开」，导致客户端断开被误报为 500/计渠道失败
+    const clientClosed = meta.isClientClosed?.() ?? false;
     const status = clientClosed ? 499 : errorMessage ? 500 : 200;
     // 优先使用 provider 在流式翻译中采集到的真实用量（如 Anthropic 不产出 usage 分片），
     // 缺失时才回退到 SSE 收集器（解析 usage 分片或按输出长度估算）。
