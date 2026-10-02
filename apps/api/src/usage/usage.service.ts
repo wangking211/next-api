@@ -167,8 +167,9 @@ export class UsageService {
       chargeable: entry.chargeable === true,
     });
 
-    try {
-      await this.prisma.$transaction(async (tx) => {
+    // 计费事务整体封装：瞬时失败时重试一次；两次都失败才记错误并返回（record 永不抛出）
+    const runBillingTx = () =>
+      this.prisma.$transaction(async (tx) => {
         const log = await tx.requestLog.create({
           data: {
             userId: entry.userId,
@@ -263,6 +264,14 @@ export class UsageService {
           });
         }
       });
+
+    try {
+      try {
+        await runBillingTx();
+      } catch {
+        // 事务整体重试一次（回滚后重放，无重复扣费风险）：交互式事务抛出前已完整回滚，重放是原子的
+        await runBillingTx();
+      }
     } catch (e) {
       // 明细/扣费失败必须可见，避免静默丢失计费
       this.logger.error(

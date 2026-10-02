@@ -258,6 +258,50 @@ describe('UsageService 共享分成落账', () => {
 });
 
 /**
+ * 计费事务瞬时失败：整体重试一次（交互式事务抛出前已完整回滚，重放原子、无重复扣费风险）。
+ * 两次都失败才记 logger.error 并返回——record() 永不抛出（HTTP 响应已发给调用方）。
+ */
+describe('UsageService 计费事务重试', () => {
+  it('$transaction 首次失败、重试成功：事务共尝试两次，日聚合等下游照常执行', async () => {
+    const { service, prisma, tx } = makeService();
+    prisma.$transaction = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('transient db hiccup'))
+      .mockImplementationOnce((cb: any) => cb(tx));
+    const errSpy = jest.spyOn(service['logger'], 'error');
+
+    await expect(
+      service.record({ ...baseEntry, chargeable: true }),
+    ).resolves.toBeUndefined();
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    // 重试成功后下游照常：日聚合 + 刷新最后活跃
+    expect(prisma.usageDaily.create).toHaveBeenCalledTimes(1);
+    expect(prisma.user.updateMany).toHaveBeenCalledTimes(1);
+    // 只有一次失败时不该出现「用量记录失败」告警
+    expect(errSpy).not.toHaveBeenCalled();
+    errSpy.mockRestore();
+  });
+
+  it('$transaction 两次都失败：只记一次 logger.error，record() 不抛出且不再重试', async () => {
+    const { service, prisma } = makeService();
+    prisma.$transaction = jest.fn().mockRejectedValue(new Error('db down'));
+    const errSpy = jest.spyOn(service['logger'], 'error');
+
+    await expect(
+      service.record({ ...baseEntry, chargeable: true }),
+    ).resolves.toBeUndefined();
+
+    // 有界重试：总共恰好两次尝试，绝不无限循环
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    // 事务全失败 → 不做日聚合（计费未落库，避免半截数据）
+    expect(prisma.usageDaily.create).not.toHaveBeenCalled();
+    errSpy.mockRestore();
+  });
+});
+
+/**
  * 越权回归：日志查询的 userId 过滤绝不能覆盖属主约束
  * （曾因 controller 把 targetUserId 放进 query、service 展开在 scope 之后而可读他人日志）。
  */
