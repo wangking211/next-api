@@ -36,6 +36,11 @@ import { BillingService } from '../billing/billing.service';
 import type { ChannelPricing } from '../billing/pricing.util';
 import { GroupsService } from '../groups/groups.service';
 import { VideoTaskService } from './video-task.service';
+import {
+  videoCompatCreateResponse,
+  videoCompatRequestBody,
+  videoCompatStatusResponse,
+} from './video-compat.util';
 import { SseUsageCollector } from '../usage/sse-usage.collector';
 import { estimatePromptTokens, estimateTokensFromText } from '../usage/token.util';
 import { flattenMessages, extractAssistantText } from '../usage/content.util';
@@ -283,6 +288,39 @@ export class GatewayController {
     @Param('id') id: string,
   ) {
     return this.executeVideoContent(req, res, id);
+  }
+
+  /** 兼容格式建任务：{model,prompt,duration,image} → {task_id,status}；与 /videos 同链路（计费/故障转移/任务登记），只做协议适配 */
+  @ApiOperation({ summary: '视频生成（兼容格式 /video/generations，按次计费，支持故障转移）' })
+  @Post('video/generations')
+  @HttpCode(200)
+  async videoGenerationsCreate(
+    @Req() req: GatewayRequest,
+    @Res() res: Response,
+    @Body() body: Record<string, any>,
+  ) {
+    return this.executeVideoCreate(req, res, videoCompatRequestBody(body), (json) =>
+      videoCompatCreateResponse(json),
+    );
+  }
+
+  @ApiOperation({ summary: '视频生成任务状态（兼容格式 /video/generations/{task_id}）' })
+  @Get('video/generations/:taskId')
+  async videoGenerationsStatus(
+    @Req() req: GatewayRequest,
+    @Res() res: Response,
+    @Param('taskId') taskId: string,
+  ) {
+    return this.executeVideoStatus(req, res, taskId, (json) =>
+      videoCompatStatusResponse(json, this.videoContentUrl(req, taskId)),
+    );
+  }
+
+  /** 兼容格式状态响应里的成片直链 → 我们的内容端点（客户端沿用同一把 API key 下载） */
+  private videoContentUrl(req: GatewayRequest, taskId: string): string {
+    const host = req.get('host');
+    if (!host) return '';
+    return `${req.protocol}://${host}/v1/videos/${encodeURIComponent(taskId)}/content`;
   }
 
   private async executeChat(
@@ -1121,6 +1159,8 @@ export class GatewayController {
     req: GatewayRequest,
     res: Response,
     body: Record<string, any>,
+    /** 可选响应体映射：兼容格式入口把 OpenAI 形状换成 {task_id,status} */
+    mapResponse?: (json: Record<string, any>) => Record<string, any>,
   ) {
     const err = (
       message: string,
@@ -1259,7 +1299,9 @@ export class GatewayController {
             totalTokens: usage.totalTokens,
           }),
         ]);
-        return res.status(result.status).json(result.json);
+        return res
+          .status(result.status)
+          .json(mapResponse ? mapResponse(result.json) : result.json);
       } catch (e) {
         if (closeTracker.isClosed()) return;
         if (e instanceof UpstreamError) {
@@ -1321,7 +1363,13 @@ export class GatewayController {
   }
 
   /** 视频任务状态查询：定位建任务的渠道并透传（不计费、不计路由指标，避免轮询污染统计） */
-  private async executeVideoStatus(req: GatewayRequest, res: Response, taskId: string) {
+  private async executeVideoStatus(
+    req: GatewayRequest,
+    res: Response,
+    taskId: string,
+    /** 可选响应体映射：兼容格式入口换字段形状（url/format/metadata） */
+    mapResponse?: (json: Record<string, any>) => Record<string, any>,
+  ) {
     const err = (
       message: string,
       type = 'invalid_request_error',
@@ -1346,7 +1394,9 @@ export class GatewayController {
           model,
           userId: req.gateway.user.id,
         });
-        return res.status(result.status).json(result.json);
+        return res
+          .status(result.status)
+          .json(mapResponse ? mapResponse(result.json) : result.json);
       } catch (e) {
         if (e instanceof UpstreamError) {
           lastError = e;

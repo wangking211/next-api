@@ -102,6 +102,8 @@ async function bootstrap() {
       { path: 'v1/videos', method: RequestMethod.POST },
       { path: 'v1/videos/:id', method: RequestMethod.GET },
       { path: 'v1/videos/:id/content', method: RequestMethod.GET },
+      { path: 'v1/video/generations', method: RequestMethod.POST },
+      { path: 'v1/video/generations/:taskId', method: RequestMethod.GET },
     ],
   });
 
