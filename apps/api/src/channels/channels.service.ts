@@ -148,13 +148,19 @@ export class ChannelsService {
     };
   }
 
-  /** 同步渠道×模型定价行；prune=true 时删除不在列表中的模型行 */
+  /**
+   * 同步渠道×模型定价行；prune=true 时删除不在列表中的模型行。
+   * 传入 tx（交互事务客户端）时复用调用方事务——渠道行与模型行整体原子；
+   * 未传时保持原有的独立批量事务（批量 + prune 放进同一事务）。
+   */
   private async upsertChannelModels(
     channelId: string,
     models: string[],
     modelPrices?: ChannelModelPriceDto[],
     prune = false,
+    tx?: Prisma.TransactionClient,
   ): Promise<void> {
+    const client = tx ?? this.prisma;
     const priceMap = new Map((modelPrices ?? []).map((p) => [p.model, p]));
     const names = new Set<string>([...models, ...priceMap.keys()]);
     // 只覆盖客户端显式给出的字段：未传的字段（qualityScore / 绝对成本 / weight / enabled 等）
@@ -186,7 +192,7 @@ export class ChannelsService {
         if (p.enabled !== undefined) pricing.enabled = p.enabled;
       }
       ops.push(
-        this.prisma.channelModel.upsert({
+        client.channelModel.upsert({
           where: { channelId_modelName: { channelId, modelName: model } },
           create: { channelId, modelName: model, enabled: true, ...pricing },
           update: pricing,
@@ -195,12 +201,19 @@ export class ChannelsService {
     }
     if (prune) {
       ops.push(
-        this.prisma.channelModel.deleteMany({
+        client.channelModel.deleteMany({
           where: { channelId, modelName: { notIn: [...names] } },
         }),
       );
     }
-    if (ops.length) await this.prisma.$transaction(ops);
+    if (!ops.length) return;
+    if (tx) {
+      // 已在调用方的交互事务内：逐条 await 复用同一事务连接，
+      // 任一条失败都由外层事务整体回滚（事务客户端不支持嵌套 $transaction）
+      for (const op of ops) await op;
+    } else {
+      await this.prisma.$transaction(ops);
+    }
   }
 
   async list(user: AuthUser, q: ChannelQuery = {}) {
@@ -295,39 +308,42 @@ export class ChannelsService {
 
     await this.assertSafeBaseUrl(dto.baseUrl);
 
-    const channel = await this.prisma.channel.create({
-      data: {
-        ownerType,
-        ownerUserId: ownerType === ChannelOwnerType.USER ? user.id : null,
-        name: dto.name,
-        provider: dto.provider,
-        baseUrl: dto.baseUrl,
-        apiKeyEnc: this.crypto.encrypt(dto.apiKey),
-        models: dto.models,
-        groups:
-          user.role === Role.ADMIN && dto.groups?.length
-            ? { connect: dto.groups.map((id) => ({ id })) }
-            : undefined,
-        upstreamGroup: dto.upstreamGroup ?? null,
-        // 共享设置：仅自有渠道有意义；抽成只有管理员能设
-        shareMode: dto.shareMode ?? ChannelShareMode.PRIVATE,
-        shareUrgency: dto.shareUrgency ?? ChannelShareUrgency.NORMAL,
-        shareQuotaCostUsd: dto.shareQuotaCostUsd ?? null,
-        shareQuotaRequests: dto.shareQuotaRequests ?? null,
-        shareUntil: dto.shareUntil ? new Date(dto.shareUntil) : null,
-        shareFeeBps: user.role === Role.ADMIN ? (dto.shareFeeBps ?? null) : null,
-        weight: dto.weight ?? 1,
-        priority: dto.priority ?? 0,
-        dailyRequestLimit: dto.dailyRequestLimit ?? null,
-        dailyTokenLimit: dto.dailyTokenLimit ?? null,
-      },
+    // 渠道行 + 模型行 + 终读同一交互事务，失败不残留半份配置
+    return this.prisma.$transaction(async (tx) => {
+      const channel = await tx.channel.create({
+        data: {
+          ownerType,
+          ownerUserId: ownerType === ChannelOwnerType.USER ? user.id : null,
+          name: dto.name,
+          provider: dto.provider,
+          baseUrl: dto.baseUrl,
+          apiKeyEnc: this.crypto.encrypt(dto.apiKey),
+          models: dto.models,
+          groups:
+            user.role === Role.ADMIN && dto.groups?.length
+              ? { connect: dto.groups.map((id) => ({ id })) }
+              : undefined,
+          upstreamGroup: dto.upstreamGroup ?? null,
+          // 共享设置：仅自有渠道有意义；抽成只有管理员能设
+          shareMode: dto.shareMode ?? ChannelShareMode.PRIVATE,
+          shareUrgency: dto.shareUrgency ?? ChannelShareUrgency.NORMAL,
+          shareQuotaCostUsd: dto.shareQuotaCostUsd ?? null,
+          shareQuotaRequests: dto.shareQuotaRequests ?? null,
+          shareUntil: dto.shareUntil ? new Date(dto.shareUntil) : null,
+          shareFeeBps: user.role === Role.ADMIN ? (dto.shareFeeBps ?? null) : null,
+          weight: dto.weight ?? 1,
+          priority: dto.priority ?? 0,
+          dailyRequestLimit: dto.dailyRequestLimit ?? null,
+          dailyTokenLimit: dto.dailyTokenLimit ?? null,
+        },
+      });
+      await this.upsertChannelModels(channel.id, dto.models, dto.modelPrices, true, tx);
+      const fresh = await tx.channel.findUnique({
+        where: { id: channel.id },
+        include: { modelPrices: true },
+      });
+      return this.view(fresh!);
     });
-    await this.upsertChannelModels(channel.id, dto.models, dto.modelPrices, true);
-    const fresh = await this.prisma.channel.findUnique({
-      where: { id: channel.id },
-      include: { modelPrices: true },
-    });
-    return this.view(fresh!);
   }
 
   private async findAccessible(user: AuthUser, id: string): Promise<Channel> {
@@ -346,54 +362,58 @@ export class ChannelsService {
   async update(user: AuthUser, id: string, dto: UpdateChannelDto) {
     await this.findAccessible(user, id);
     if (dto.baseUrl) await this.assertSafeBaseUrl(dto.baseUrl);
-    const channel = await this.prisma.channel.update({
-      where: { id },
-      data: {
-        name: dto.name,
-        provider: dto.provider,
-        baseUrl: dto.baseUrl,
-        models: dto.models,
-        groups:
-          dto.groups !== undefined ? { set: dto.groups.map((id) => ({ id })) } : undefined,
-        upstreamGroup: dto.upstreamGroup,
-        // 共享设置（自有渠道有意义）
-        shareMode: dto.shareMode,
-        shareUrgency: dto.shareUrgency,
-        shareQuotaCostUsd: dto.shareQuotaCostUsd,
-        shareQuotaRequests: dto.shareQuotaRequests,
-        shareUntil:
-          dto.shareUntil === undefined
-            ? undefined
-            : dto.shareUntil
-              ? new Date(dto.shareUntil)
-              : null,
-        // 抽成仅管理员可改
-        shareFeeBps: user.role === Role.ADMIN ? dto.shareFeeBps : undefined,
-        weight: dto.weight,
-        priority: dto.priority,
-        status: dto.status,
-        // undefined = 不修改；null = 清除限额
-        dailyRequestLimit: dto.dailyRequestLimit,
-        dailyTokenLimit: dto.dailyTokenLimit,
-        ...(dto.apiKey ? { apiKeyEnc: this.crypto.encrypt(dto.apiKey) } : {}),
-        ...(dto.status === ChannelStatus.ENABLED
-          ? { failureCount: 0, autoDisabled: false, lastErrorMsg: null }
-          : {}),
-      },
+    // 渠道行更新 + 模型行 upsert/prune + 终读同一交互事务，任一步失败整体回滚
+    return this.prisma.$transaction(async (tx) => {
+      const channel = await tx.channel.update({
+        where: { id },
+        data: {
+          name: dto.name,
+          provider: dto.provider,
+          baseUrl: dto.baseUrl,
+          models: dto.models,
+          groups:
+            dto.groups !== undefined ? { set: dto.groups.map((id) => ({ id })) } : undefined,
+          upstreamGroup: dto.upstreamGroup,
+          // 共享设置（自有渠道有意义）
+          shareMode: dto.shareMode,
+          shareUrgency: dto.shareUrgency,
+          shareQuotaCostUsd: dto.shareQuotaCostUsd,
+          shareQuotaRequests: dto.shareQuotaRequests,
+          shareUntil:
+            dto.shareUntil === undefined
+              ? undefined
+              : dto.shareUntil
+                ? new Date(dto.shareUntil)
+                : null,
+          // 抽成仅管理员可改
+          shareFeeBps: user.role === Role.ADMIN ? dto.shareFeeBps : undefined,
+          weight: dto.weight,
+          priority: dto.priority,
+          status: dto.status,
+          // undefined = 不修改；null = 清除限额
+          dailyRequestLimit: dto.dailyRequestLimit,
+          dailyTokenLimit: dto.dailyTokenLimit,
+          ...(dto.apiKey ? { apiKeyEnc: this.crypto.encrypt(dto.apiKey) } : {}),
+          ...(dto.status === ChannelStatus.ENABLED
+            ? { failureCount: 0, autoDisabled: false, lastErrorMsg: null }
+            : {}),
+        },
+      });
+      if (dto.models !== undefined || dto.modelPrices !== undefined) {
+        await this.upsertChannelModels(
+          id,
+          dto.models ?? channel.models,
+          dto.modelPrices,
+          dto.models !== undefined,
+          tx,
+        );
+      }
+      const fresh = await tx.channel.findUnique({
+        where: { id },
+        include: { modelPrices: true },
+      });
+      return this.view(fresh!);
     });
-    if (dto.models !== undefined || dto.modelPrices !== undefined) {
-      await this.upsertChannelModels(
-        id,
-        dto.models ?? channel.models,
-        dto.modelPrices,
-        dto.models !== undefined,
-      );
-    }
-    const fresh = await this.prisma.channel.findUnique({
-      where: { id },
-      include: { modelPrices: true },
-    });
-    return this.view(fresh!);
   }
 
   async remove(user: AuthUser, id: string) {

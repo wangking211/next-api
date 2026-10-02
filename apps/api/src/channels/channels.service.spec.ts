@@ -305,6 +305,138 @@ describe('ChannelsService.list（累计共享收益）', () => {
   });
 });
 
+describe('ChannelsService.create/update（渠道行+模型行同一事务，失败不残留半份配置）', () => {
+  /**
+   * 构造带交互式事务客户端的 Prisma mock：
+   * $transaction(fn) → fn(tx)（模拟 Prisma 交互事务，fn 内抛错 = 整体回滚）；
+   * $transaction(ops) → 批量执行（旧的独立批量事务路径）。
+   * modelPhaseFails=true 时模型行 upsert 抛错，模拟模型行阶段失败。
+   */
+  function txService(opts: { modelPhaseFails?: boolean } = {}) {
+    const channelRow = {
+      id: 'c1',
+      ownerType: ChannelOwnerType.USER,
+      ownerUserId: 'u1',
+      name: 'mine',
+      provider: 'openai',
+      baseUrl: 'https://x/v1',
+      apiKeyEnc: 'enc',
+      models: ['m1', 'm2'],
+      shareRevenue: 0,
+    };
+    const failingUpsert = () => {
+      throw new Error('model upsert failed');
+    };
+    const tx = {
+      channel: {
+        create: jest.fn().mockResolvedValue(channelRow),
+        update: jest.fn().mockResolvedValue(channelRow),
+        findUnique: jest.fn().mockResolvedValue({ ...channelRow, modelPrices: [] }),
+      },
+      channelModel: {
+        upsert: opts.modelPhaseFails
+          ? jest.fn(failingUpsert)
+          : jest.fn().mockResolvedValue({}),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    const prisma = {
+      channel: {
+        // 事务外的直接写：原子化后绝不允许被调用（这里先给出正常返回值，
+        // 以便 RED 断言精确落在「写发生在事务外」而不是 undefined 报错上）
+        create: jest.fn().mockResolvedValue(channelRow),
+        update: jest.fn().mockResolvedValue(channelRow),
+        // findAccessible 权限读（update 走这里，事务外只读不写）
+        findUnique: jest.fn().mockResolvedValue(channelRow),
+      },
+      channelModel: {
+        upsert: opts.modelPhaseFails
+          ? jest.fn(failingUpsert)
+          : jest.fn().mockResolvedValue({}),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      $transaction: jest.fn(async (arg: unknown) => {
+        if (typeof arg === 'function') {
+          return (arg as (c: typeof tx) => unknown)(tx);
+        }
+        return Promise.all(arg as Promise<unknown>[]);
+      }),
+    };
+    const service = new ChannelsService(
+      prisma as unknown as PrismaService,
+      {
+        encrypt: jest.fn().mockReturnValue('enc'),
+        decrypt: jest.fn().mockReturnValue('upstream-key'),
+      } as unknown as CryptoService,
+      {} as unknown as ProviderRegistry,
+      {} as unknown as GroupsService,
+    );
+    return { service, prisma, tx };
+  }
+
+  const createDto = {
+    name: 'mine',
+    provider: 'openai',
+    baseUrl: 'https://x/v1',
+    apiKey: 'sk-upstream',
+    models: ['m1', 'm2'],
+  };
+
+  it('create：模型行阶段失败时失败向外传播，渠道行绝不在事务外落库', async () => {
+    const { service, prisma } = txService({ modelPhaseFails: true });
+
+    // 失败必须传播（不吞错）
+    await expect(service.create(user, createDto)).rejects.toThrow('model upsert failed');
+
+    // 渠道行 + 模型行 + 终读必须全部发生在同一个交互式事务里：
+    // 若 channel.create 在事务外被直接调用，失败后会残留半份配置（无渠道行/有渠道行无模型行）
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function));
+    expect(prisma.channel.create).not.toHaveBeenCalled();
+    expect(prisma.channel.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('create：成功时渠道行/模型行/终读都走同一交互事务并返回视图', async () => {
+    const { service, prisma, tx } = txService();
+
+    const res = (await service.create(user, createDto)) as Record<string, unknown>;
+
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function));
+    expect(tx.channel.create).toHaveBeenCalledTimes(1);
+    expect(tx.channelModel.upsert).toHaveBeenCalled();
+    expect(tx.channel.findUnique).toHaveBeenCalledTimes(1);
+    // 事务外没有任何直接写/终读
+    expect(prisma.channel.create).not.toHaveBeenCalled();
+    expect(prisma.channel.findUnique).not.toHaveBeenCalled();
+    expect(res.id).toBe('c1');
+    expect(res.apiKeyPreview).toBe('****-key');
+  });
+
+  it('update：模型行阶段失败时失败向外传播，渠道行更新绝不在事务外执行', async () => {
+    const { service, prisma } = txService({ modelPhaseFails: true });
+
+    await expect(service.update(user, 'c1', { models: ['m1'] })).rejects.toThrow(
+      'model upsert failed',
+    );
+
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function));
+    expect(prisma.channel.update).not.toHaveBeenCalled();
+  });
+
+  it('update：成功时更新/模型行 prune/终读都走同一交互事务', async () => {
+    const { service, prisma, tx } = txService();
+
+    const res = (await service.update(user, 'c1', { models: ['m1'] })) as Record<string, unknown>;
+
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function));
+    expect(tx.channel.update).toHaveBeenCalledTimes(1);
+    expect(tx.channelModel.upsert).toHaveBeenCalled();
+    expect(tx.channelModel.deleteMany).toHaveBeenCalled(); // models 传了 → prune
+    expect(tx.channel.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.channel.update).not.toHaveBeenCalled();
+    expect(res.id).toBe('c1');
+  });
+});
+
 describe('ChannelsService.availableModels（归属/共享范围透出）', () => {
   function modelsService(rows: any[]) {
     const prisma = { channelModel: { findMany: jest.fn().mockResolvedValue(rows) } };
