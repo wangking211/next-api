@@ -81,6 +81,7 @@
   "channels.message.updated": "已更新",
   "channels.message.removed": "已删除",
   "channels.message.pricingSaved": "定价已保存",
+  "channels.message.shareUsageReset": "共享用量已重置",
   "channels.message.fillModels": "请先填写支持模型",
   "channels.message.upstreamModels": "上游返回 {{count}} 个模型，已填入",
   "channels.provider.zhipu": "智谱 GLM",
@@ -123,5 +124,9 @@
   "channels.share.exhausted": "已用尽",
   "channels.share.quotaCost": "已用 ${{used}} / ${{quota}}",
   "channels.share.quotaRequests": "已用 {{used}} / {{quota}} 次",
-  "channels.share.until": "到期 {{until}}"
+  "channels.share.until": "到期 {{until}}",
+  "channels.share.resetUsage": "重置共享用量",
+  "channels.share.resetUsageConfirm": "确定重置该渠道的共享用量统计？",
+  "channels.share.resetUsageConfirmOk": "重置",
+  "channels.share.resetUsageConfirmCancel": "取消"
 }

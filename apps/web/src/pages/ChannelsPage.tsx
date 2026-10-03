@@ -9,6 +9,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Popconfirm,
   Radio,
   Select,
   Space,
@@ -66,7 +67,8 @@ export default function ChannelsPage() {
   // 渠道主实际到手比例（提示文案用）
   const ownerSharePct = 100 - (effectiveFeePercent ?? 20);
 
-  // 归属=我的（BYOK）：上游费用用户自付、平台不扣费，隐藏「逐模型定价」（仅影响折算展示，无计费作用）
+  // 归属=我的（BYOK）：上游费用用户自付、平台不扣费；共享设置与同分组绑定仅对自有渠道有意义。
+  // 定价表对所有渠道开放 —— 共享渠道的定价影响智能路由成本、共享额度（shareQuotaCostUsd）消耗与调用方计价
   const isByok = editing
     ? editing.ownerType === 'USER'
     : isAdmin
@@ -268,6 +270,15 @@ export default function ChannelsPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['channels'] });
       message.success(t('channels.message.updated'));
+    },
+  });
+
+  // 重置共享用量（shareUsedRequests / shareUsedCostUsd 清零），与 updateMut 同套路：立即 PATCH
+  const resetShareMut = useMutation({
+    mutationFn: (id: string) => channelsApi.update(id, { resetShareUsed: true }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['channels'] });
+      message.success(t('channels.message.shareUsageReset'));
     },
   });
 
@@ -527,7 +538,7 @@ export default function ChannelsPage() {
             </Space>
           </div>
 
-          {selectedModels.length > 0 && !isByok && (
+          {selectedModels.length > 0 && (
             <div style={{ marginBottom: 12 }}>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 {t('channels.form.pricingHint')}
@@ -637,6 +648,18 @@ export default function ChannelsPage() {
                       style={{ width: 150 }}
                     />
                   </Form.Item>
+                )}
+                {editing && (
+                  <Popconfirm
+                    title={t('channels.share.resetUsageConfirm')}
+                    okText={t('channels.share.resetUsageConfirmOk')}
+                    cancelText={t('channels.share.resetUsageConfirmCancel')}
+                    onConfirm={() => resetShareMut.mutate(editing.id)}
+                  >
+                    <Button loading={resetShareMut.isPending}>
+                      {t('channels.share.resetUsage')}
+                    </Button>
+                  </Popconfirm>
                 )}
               </Space>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>

@@ -186,12 +186,9 @@ export function buildChannelColumns({
           >
             {t('channels.action.test')}
           </Button>
-          {/* BYOK 不由平台扣费，无定价意义 → 隐藏入口 */}
-          {r.ownerType !== 'USER' && (
-            <Button size="small" onClick={() => onPricing(r)}>
-              {t('channels.action.pricing')}
-            </Button>
-          )}
+          <Button size="small" onClick={() => onPricing(r)}>
+            {t('channels.action.pricing')}
+          </Button>
           <Button size="small" onClick={() => onEdit(r)}>
             {t('common.edit')}
           </Button>

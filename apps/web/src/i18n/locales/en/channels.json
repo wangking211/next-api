@@ -81,6 +81,7 @@
   "channels.message.updated": "Updated",
   "channels.message.removed": "Deleted",
   "channels.message.pricingSaved": "Pricing saved",
+  "channels.message.shareUsageReset": "Share usage reset",
   "channels.message.fillModels": "Please fill in supported models first",
   "channels.message.upstreamModels": "Fetched {{count}} models from upstream",
   "channels.provider.zhipu": "Zhipu GLM",
@@ -123,5 +124,9 @@
   "channels.share.exhausted": "exhausted",
   "channels.share.quotaCost": "${{used}} / ${{quota}} spent",
   "channels.share.quotaRequests": "{{used}} / {{quota}} calls",
-  "channels.share.until": "until {{until}}"
+  "channels.share.until": "until {{until}}",
+  "channels.share.resetUsage": "Reset share usage",
+  "channels.share.resetUsageConfirm": "Reset this channel's share usage counters?",
+  "channels.share.resetUsageConfirmOk": "Reset",
+  "channels.share.resetUsageConfirmCancel": "Cancel"
 }
