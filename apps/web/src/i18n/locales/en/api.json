@@ -52,6 +52,7 @@
   "err.channel.modelListEmpty": "The upstream returned no models. Check the key and base URL.",
   "err.channel.upstreamError": "Upstream returned {{status}}: {{detail}}",
   "err.channel.testModelRequired": "Provide a model name for the test",
+  "err.channel.groupInvalid": "Group not found or disabled: {{ids}}",
   "err.group.identifierExists": "The group identifier \"{{name}}\" already exists",
   "err.group.notFound": "Group not found",
   "err.group.defaultUnremovable": "The default group cannot be deleted. Make another group the default first.",

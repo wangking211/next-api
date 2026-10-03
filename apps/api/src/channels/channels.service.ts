@@ -407,7 +407,11 @@ export class ChannelsService {
     );
     const invalid = unique.filter((id) => !usable.has(id));
     if (invalid.length) {
-      throw new BadRequestException(`分组不存在或已停用: ${invalid.join(', ')}`);
+      throw new BadRequestException({
+        code: 'CHANNEL_GROUP_INVALID',
+        message: `分组不存在或已停用: ${invalid.join(', ')}`,
+        details: { ids: invalid.join(', ') },
+      });
     }
   }
 

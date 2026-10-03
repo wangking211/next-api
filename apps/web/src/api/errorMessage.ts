@@ -65,6 +65,7 @@ const ERROR_CODE_KEYS = {
   CHANNEL_MODEL_LIST_EMPTY: 'err.channel.modelListEmpty',
   CHANNEL_UPSTREAM_ERROR: 'err.channel.upstreamError',
   CHANNEL_TEST_MODEL_REQUIRED: 'err.channel.testModelRequired',
+  CHANNEL_GROUP_INVALID: 'err.channel.groupInvalid',
   // —— 分组 / 模型 / 密钥 ——
   GROUP_IDENTIFIER_EXISTS: 'err.group.identifierExists',
   GROUP_NOT_FOUND: 'err.group.notFound',

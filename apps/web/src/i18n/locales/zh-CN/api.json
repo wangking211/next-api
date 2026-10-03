@@ -52,6 +52,7 @@
   "err.channel.modelListEmpty": "上游未返回任何模型，请检查 Key 与 Base URL",
   "err.channel.upstreamError": "上游返回 {{status}}：{{detail}}",
   "err.channel.testModelRequired": "请提供用于测试的模型名",
+  "err.channel.groupInvalid": "分组不存在或已停用：{{ids}}",
   "err.group.identifierExists": "分组标识 \"{{name}}\" 已存在",
   "err.group.notFound": "分组不存在",
   "err.group.defaultUnremovable": "默认分组不可删除，请先把其它分组设为默认",
