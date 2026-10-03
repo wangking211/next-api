@@ -50,6 +50,22 @@ function makeService(
   };
 }
 
+/** 渠道桩：仅含 channelScopeWhere 会读到的字段 + 分组绑定。 */
+type ChannelStub = { groups: Array<{ id: string }> } & Record<string, unknown>;
+
+/**
+ * 评估 channelScopeWhere 产出的 Prisma WHERE 子集对给定渠道是否匹配。
+ * 覆盖子集：AND / OR / groups.some / groups.none / 标量等值 —— 与被测 WHERE 同构，非数据库。
+ */
+function matchesChannel(channel: ChannelStub, where: any): boolean {
+  if (Array.isArray(where.AND)) return where.AND.every((w: any) => matchesChannel(channel, w));
+  if (Array.isArray(where.OR)) return where.OR.some((w: any) => matchesChannel(channel, w));
+  const { groups, ...scalars } = where;
+  if (groups?.some && !channel.groups.some((g) => g.id === groups.some.id)) return false;
+  if (groups?.none && channel.groups.length !== 0) return false;
+  return Object.entries(scalars).every(([k, v]) => channel[k] === v);
+}
+
 describe('GroupsService.effectiveGroup', () => {
   it('令牌分组优先于用户分组', async () => {
     const keyGroup = group({ id: 'gk', name: 'vip', ratio: 0.8, models: [{ name: 'gpt-5.5' }] });
@@ -162,13 +178,64 @@ describe('GroupsService 渠道可见性（含共享渠道）', () => {
     expect(where.OR).toEqual([
       { ownerType: 'USER', ownerUserId: 'u1' },
       { ownerType: 'USER', shareMode: 'PUBLIC' },
-      { AND: [{ ownerType: 'USER', shareMode: 'GROUP' }, groupCond] },
+      // GROUP 共享分支要求已绑定本分组——不得含 none 臂（否则零绑定渠道对所有分组可见）
+      { AND: [{ ownerType: 'USER', shareMode: 'GROUP' }, { groups: { some: { id: 'g1' } } }] },
       { AND: [{ ownerType: 'PLATFORM' }, groupCond] },
     ]);
     // 关键回归点：任何分组条件都必须包在 ownerType 之下
     for (const branch of where.OR.slice(2)) {
       expect(branch.AND[0]).toHaveProperty('ownerType');
     }
+  });
+
+  it('回归：他人 GROUP 渠道零分组绑定时不得被命中（曾对所有生效分组可见）', () => {
+    const where: any = service.channelScopeWhere('u1', 'g1');
+    const unboundGroupChannel: ChannelStub = {
+      ownerType: 'USER',
+      ownerUserId: 'owner',
+      shareMode: 'GROUP',
+      groups: [],
+    };
+    expect(matchesChannel(unboundGroupChannel, where)).toBe(false);
+  });
+
+  it('GROUP 渠道绑定调用方分组时命中', () => {
+    const where: any = service.channelScopeWhere('u1', 'g1');
+    const boundGroupChannel: ChannelStub = {
+      ownerType: 'USER',
+      ownerUserId: 'owner',
+      shareMode: 'GROUP',
+      groups: [{ id: 'g1' }],
+    };
+    expect(matchesChannel(boundGroupChannel, where)).toBe(true);
+  });
+
+  it('PLATFORM 渠道零分组绑定仍视为公共渠道（行为不变）', () => {
+    const where: any = service.channelScopeWhere('u1', 'g1');
+    const unboundPlatformChannel: ChannelStub = { ownerType: 'PLATFORM', groups: [] };
+    expect(matchesChannel(unboundPlatformChannel, where)).toBe(true);
+  });
+
+  it('自有渠道分支仍命中（即使零分组绑定）', () => {
+    const where: any = service.channelScopeWhere('u1', 'g1');
+    const ownChannel: ChannelStub = {
+      ownerType: 'USER',
+      ownerUserId: 'u1',
+      shareMode: 'GROUP',
+      groups: [],
+    };
+    expect(matchesChannel(ownChannel, where)).toBe(true);
+  });
+
+  it('他人 PUBLIC 共享分支仍命中', () => {
+    const where: any = service.channelScopeWhere('u1', 'g1');
+    const publicSharedChannel: ChannelStub = {
+      ownerType: 'USER',
+      ownerUserId: 'owner',
+      shareMode: 'PUBLIC',
+      groups: [{ id: 'other' }],
+    };
+    expect(matchesChannel(publicSharedChannel, where)).toBe(true);
   });
 });
 

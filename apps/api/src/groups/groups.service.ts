@@ -310,8 +310,13 @@ export class GroupsService {
       OR: [
         own,
         publicShared,
+        // GROUP 共享渠道必须已绑定调用方分组；零绑定不匹配（未绑定 = 仅属主可见，
+        // 分组删除级联解绑后渠道不会外泄为公共）——故此分支不能复用含 none 臂的 groupCond。
         {
-          AND: [{ ownerType: ChannelOwnerType.USER, shareMode: ChannelShareMode.GROUP }, groupCond],
+          AND: [
+            { ownerType: ChannelOwnerType.USER, shareMode: ChannelShareMode.GROUP },
+            { groups: { some: { id: groupId } } },
+          ],
         },
         { AND: [{ ownerType: ChannelOwnerType.PLATFORM }, groupCond] },
       ],
