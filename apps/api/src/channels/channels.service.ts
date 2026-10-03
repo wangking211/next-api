@@ -27,6 +27,7 @@ import {
   upstreamAllowsPrivate,
 } from '../common/url-safety';
 import { joinUrl } from '../gateway/providers/stream.util';
+import { redactSecrets } from '../common/redact.util';
 import { GroupsService } from '../groups/groups.service';
 import { shareExhausted } from '../gateway/channel-share.util';
 import { CreateChannelDto } from './dto/create-channel.dto';
@@ -44,7 +45,7 @@ export interface ChannelQuery {
   userId?: string;
 }
 
-function extractUpstreamError(body: any, fallback: string): string {
+function rawUpstreamError(body: any, fallback: string): string {
   if (body == null) return fallback;
   if (typeof body === 'string') return body.slice(0, 1000) || fallback;
   const err = body.error;
@@ -70,6 +71,15 @@ function safeStringify(value: any): string | null {
   } catch {
     return null;
   }
+}
+
+/** 控制台出口统一脱敏：上游报错可能回显完整密钥（实测 TokenFleet MiniMax-M2.5 回 sk-e280…） */
+function extractUpstreamError(body: any, fallback: string): string {
+  return redactSecrets(rawUpstreamError(body, fallback));
+}
+
+function redactDetail(value: string | null): string | null {
+  return value == null ? null : redactSecrets(value);
 }
 
 /** 解析上游模型列表响应：兼容 OpenAI 风格 data[].id 与 Gemini 风格 models[].name */
@@ -541,13 +551,13 @@ export class ChannelsService {
           ...base,
           status: e.status,
           error: extractUpstreamError(e.body, e.message),
-          detail: safeStringify(e.body),
+          detail: redactDetail(safeStringify(e.body)),
         };
       }
       return {
         ...base,
         status: 0,
-        error: (e as Error)?.message ?? 'unknown error',
+        error: redactSecrets((e as Error)?.message ?? 'unknown error'),
         detail: null,
       };
     }
@@ -613,7 +623,7 @@ export class ChannelsService {
           status: e.status,
           latencyMs,
           error: extractUpstreamError(e.body, e.message),
-          detail: safeStringify(e.body),
+          detail: redactDetail(safeStringify(e.body)),
         };
       }
       return {
@@ -621,7 +631,7 @@ export class ChannelsService {
         ok: false,
         status: 0,
         latencyMs,
-        error: (e as Error)?.message ?? 'unknown error',
+        error: redactSecrets((e as Error)?.message ?? 'unknown error'),
         detail: null,
       };
     }

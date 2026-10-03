@@ -234,6 +234,25 @@ describe('ChannelsService.testChannel', () => {
     expect(res.summary).toEqual({ total: 1, ok: 1, failed: 0 });
     expect(provider.chatNonStream).toHaveBeenCalled();
   });
+
+  it('redacts upstream-echoed secrets in error and detail', async () => {
+    const provider = {
+      chatNonStream: jest.fn().mockRejectedValue(
+        new UpstreamError('Upstream error 401', 401, false, {
+          error: {
+            message:
+              'token 无效：sk-e280214426a3926f9da9b1101da475c7419cabd0659c1b0a61f251362f10a0fe',
+          },
+        }),
+      ),
+    };
+    const { service } = makeService(provider);
+    const res: any = await service.testChannel(user, 'c1', { model: 'm1' });
+    expect(res.results[0].error).toContain('sk-***');
+    expect(res.results[0].error).not.toContain('sk-e280214426');
+    expect(String(res.results[0].detail)).toContain('sk-***');
+    expect(String(res.results[0].detail)).not.toContain('sk-e280214426');
+  });
 });
 
 describe('ChannelsService.testConnection', () => {
