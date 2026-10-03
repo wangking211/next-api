@@ -22,7 +22,10 @@ function makeService(providerImpl: any, channelOverrides: Record<string, unknown
     models: ['m1', 'm2'],
     ...channelOverrides,
   };
-  const prisma = { channel: { findUnique: jest.fn().mockResolvedValue(channel) } };
+  const prisma = {
+    channel: { findUnique: jest.fn().mockResolvedValue(channel) },
+    modelCatalog: { findFirst: jest.fn().mockResolvedValue(null) },
+  };
   const crypto = { decrypt: jest.fn().mockReturnValue('upstream-key') };
   const providers = { resolve: jest.fn().mockReturnValue(providerImpl) };
   const groups = { effectiveGroup: jest.fn(), channelVisibilityWhere: jest.fn(() => ({})) };
@@ -32,7 +35,7 @@ function makeService(providerImpl: any, channelOverrides: Record<string, unknown
     providers as unknown as ProviderRegistry,
     groups as unknown as GroupsService,
   );
-  return { service, providers };
+  return { service, providers, prisma };
 }
 
 /**
@@ -177,6 +180,59 @@ describe('ChannelsService.testChannel', () => {
     const provider = { chatNonStream: jest.fn() };
     const { service } = makeService(provider, { ownerUserId: 'someone-else' });
     await expect(service.testChannel(user, 'c1')).rejects.toThrow(/not found/);
+  });
+
+  it('probes video models via read-only video status (unknown task = reachable)', async () => {
+    const provider = {
+      chatNonStream: jest.fn(),
+      videoStatus: jest.fn().mockRejectedValue(
+        new UpstreamError('Upstream error 404', 404, false, {
+          error: { message: 'task_***', code: 'video_task_not_found' },
+        }),
+      ),
+    };
+    const { service, prisma } = makeService(provider);
+    prisma.modelCatalog.findFirst.mockResolvedValue({ capabilities: ['video'] });
+    const res: any = await service.testChannel(user, 'c1', { model: 'm1' });
+    expect(res.summary).toEqual({ total: 1, ok: 1, failed: 0 });
+    expect(res.results[0].ok).toBe(true);
+    expect(String(res.results[0].sample)).toContain('reachable');
+    expect(provider.videoStatus).toHaveBeenCalledTimes(1);
+    expect(provider.chatNonStream).not.toHaveBeenCalled();
+  });
+
+  it('video probe fails on missing endpoint and on connection failure', async () => {
+    const provider = {
+      chatNonStream: jest.fn(),
+      videoStatus: jest
+        .fn()
+        .mockRejectedValueOnce(
+          new UpstreamError('Upstream error 404', 404, false, {
+            error: { message: 'This endpoint is not available on the current service node.' },
+          }),
+        )
+        .mockRejectedValueOnce(
+          new UpstreamError('Upstream connection failed: timeout', 502, true),
+        ),
+    };
+    const { service, prisma } = makeService(provider);
+    prisma.modelCatalog.findFirst.mockResolvedValue({ capabilities: ['video'] });
+    const first: any = await service.testChannel(user, 'c1', { model: 'm1' });
+    expect(first.summary).toEqual({ total: 1, ok: 0, failed: 1 });
+    expect(first.results[0].status).toBe(404);
+    expect(first.results[0].error).toContain('endpoint');
+    const second: any = await service.testChannel(user, 'c1', { model: 'm1' });
+    expect(second.results[0].ok).toBe(false);
+    expect(second.results[0].status).toBe(502);
+  });
+
+  it('falls back to chat probe when provider has no videoStatus', async () => {
+    const provider = { chatNonStream: jest.fn().mockResolvedValue({ status: 200, json: {} }) };
+    const { service, prisma } = makeService(provider);
+    prisma.modelCatalog.findFirst.mockResolvedValue({ capabilities: ['video'] });
+    const res: any = await service.testChannel(user, 'c1', { model: 'm1' });
+    expect(res.summary).toEqual({ total: 1, ok: 1, failed: 0 });
+    expect(provider.chatNonStream).toHaveBeenCalled();
   });
 });
 

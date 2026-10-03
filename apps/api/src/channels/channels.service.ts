@@ -19,7 +19,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
 import { AuthUser } from '../common/interfaces/auth.interface';
 import { ProviderRegistry } from '../gateway/providers/provider.registry';
-import { UpstreamError } from '../gateway/types';
+import { Provider, UpstreamError } from '../gateway/types';
 import {
   assertPublicHttpUrl,
   safeFetch,
@@ -491,6 +491,14 @@ export class ChannelsService {
     model: string;
   }) {
     const provider = this.providers.resolve(input.provider);
+    // 视频能力模型不支持 /chat/completions（上游回 endpoint not available），聊天探针必然
+    // 误判为失败 —— 改走只读的任务状态探测（随机假任务 ID，不产生任何生成）
+    if (
+      (await this.modelCapabilities(input.model)).includes('video') &&
+      typeof provider.videoStatus === 'function'
+    ) {
+      return this.runVideoProbe(provider, input);
+    }
     const started = Date.now();
     try {
       const result = await provider.chatNonStream(
@@ -535,6 +543,80 @@ export class ChannelsService {
       return {
         ...base,
         status: 0,
+        error: (e as Error)?.message ?? 'unknown error',
+        detail: null,
+      };
+    }
+  }
+
+  /** 模型能力（目录行）；目录缺失/查询失败一律降级 [] → 保持原聊天探针行为 */
+  private async modelCapabilities(model: string): Promise<string[]> {
+    try {
+      const row = await this.prisma.modelCatalog.findFirst({
+        where: { OR: [{ name: model }, { aliases: { has: model } }] },
+        select: { capabilities: true },
+      });
+      return row?.capabilities ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * 视频模型连通性探测：GET /videos/{随机假任务ID}（只读，不触发生成）。
+   * - 4xx 且错误体带 task 语义（任务不存在）→ 端点与鉴权可达 = 通过
+   * - 连接失败 / 5xx / 鉴权失败 / 端点缺失（无 task 语义）→ 失败并透出上游错误
+   */
+  private async runVideoProbe(
+    provider: Provider,
+    input: { provider: string; baseUrl: string; apiKey: string; model: string },
+  ) {
+    const started = Date.now();
+    try {
+      const result = await provider.videoStatus!(
+        { baseUrl: input.baseUrl } as Channel,
+        input.apiKey,
+        { taskId: `conn_probe_${Date.now()}`, timeoutMs: 20000 },
+      );
+      return {
+        ok: true,
+        status: result.status,
+        latencyMs: Date.now() - started,
+        model: input.model,
+        provider: input.provider,
+        sample: 'video route reachable',
+      };
+    } catch (e) {
+      const latencyMs = Date.now() - started;
+      const base = { model: input.model, provider: input.provider };
+      if (e instanceof UpstreamError) {
+        const text = `${e.message} ${safeStringify(e.body) ?? ''}`;
+        const taskScope =
+          (e.status === 400 || e.status === 404 || e.status === 410 || e.status === 422) &&
+          /task/i.test(text);
+        if (taskScope) {
+          return {
+            ok: true,
+            status: e.status,
+            latencyMs,
+            ...base,
+            sample: 'video route reachable (unknown task)',
+          };
+        }
+        return {
+          ...base,
+          ok: false,
+          status: e.status,
+          latencyMs,
+          error: extractUpstreamError(e.body, e.message),
+          detail: safeStringify(e.body),
+        };
+      }
+      return {
+        ...base,
+        ok: false,
+        status: 0,
+        latencyMs,
         error: (e as Error)?.message ?? 'unknown error',
         detail: null,
       };
