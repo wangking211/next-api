@@ -11,6 +11,7 @@ import {
   ChannelShareMode,
   ChannelShareUrgency,
   ChannelStatus,
+  ModelGroupStatus,
   Prisma,
   Role,
 } from '@prisma/client';
@@ -92,6 +93,12 @@ function extractModelIds(json: any): string[] {
     .filter((s) => s && !s.startsWith('tunedModels/'))
     .map((s) => s.replace(/^models\//, ''));
   return [...new Set(ids)].sort((a, b) => a.localeCompare(b)).slice(0, 1000);
+}
+
+/** 归一化时间戳：DTO 传 ISO 字符串、库行是 Date；不可解析 → null。 */
+function shareTime(v: string | Date): number | null {
+  const t = v instanceof Date ? v.getTime() : new Date(v).getTime();
+  return Number.isNaN(t) ? null : t;
 }
 
 @Injectable()
@@ -303,8 +310,8 @@ export class ChannelsService {
     const flat = new Set<string>();
     const byChannel = new Map<string, (typeof rows)[number]['channel'] & { models: string[] }>();
     for (const r of rows) {
-      // 共享渠道已达额度/到期 → 不再对外展示（与网关路由同口径）
-      if (shareExhausted(r.channel)) continue;
+      // 共享渠道已达额度/到期 → 不再对外展示（与网关路由同口径）；属主豁免（自己的渠道不吃共享额度）
+      if (shareExhausted(r.channel, undefined, user.id)) continue;
       // 模型分组可见性：分组未配置可见模型 = 不限制
       if (!this.groups.isModelVisible(group, r.modelName)) continue;
       flat.add(r.modelName);
@@ -326,6 +333,8 @@ export class ChannelsService {
     const ownerType = wantPlatform ? ChannelOwnerType.PLATFORM : ChannelOwnerType.USER;
 
     await this.assertSafeBaseUrl(dto.baseUrl);
+    // 分组存在性/启用校验必须在事务启动之前（失败则不写任何行）
+    await this.assertGroupsUsable(dto.groups);
 
     // 渠道行 + 模型行 + 终读同一交互事务，失败不残留半份配置
     return this.prisma.$transaction(async (tx) => {
@@ -338,10 +347,9 @@ export class ChannelsService {
           baseUrl: dto.baseUrl,
           apiKeyEnc: this.crypto.encrypt(dto.apiKey),
           models: dto.models,
-          groups:
-            user.role === Role.ADMIN && dto.groups?.length
-              ? { connect: dto.groups.map((id) => ({ id })) }
-              : undefined,
+          groups: dto.groups?.length
+            ? { connect: dto.groups.map((id) => ({ id })) }
+            : undefined,
           upstreamGroup: dto.upstreamGroup ?? null,
           // 共享设置：仅自有渠道有意义；抽成只有管理员能设
           shareMode: dto.shareMode ?? ChannelShareMode.PRIVATE,
@@ -383,9 +391,36 @@ export class ChannelsService {
     return channel;
   }
 
+  /**
+   * 批量校验分组 id 全部存在且为 ENABLED；任一不存在或已停用则整体拒绝。
+   * 必须在 $transaction 之前调用（校验失败绝不启动事务/不落任何行）。
+   */
+  private async assertGroupsUsable(groups: string[] | undefined): Promise<void> {
+    if (!groups?.length) return;
+    const unique = [...new Set(groups)];
+    const rows = await this.prisma.modelGroup.findMany({
+      where: { id: { in: unique } },
+      select: { id: true, status: true },
+    });
+    const usable = new Set(
+      rows.filter((r) => r.status === ModelGroupStatus.ENABLED).map((r) => r.id),
+    );
+    const invalid = unique.filter((id) => !usable.has(id));
+    if (invalid.length) {
+      throw new BadRequestException(`分组不存在或已停用: ${invalid.join(', ')}`);
+    }
+  }
+
   async update(user: AuthUser, id: string, dto: UpdateChannelDto) {
-    await this.findAccessible(user, id);
+    const existing = await this.findAccessible(user, id);
     if (dto.baseUrl) await this.assertSafeBaseUrl(dto.baseUrl);
+    await this.assertGroupsUsable(dto.groups);
+    // 共享已用量清零：显式要求，或 shareUntil 被延长（新时间严格晚于旧值）
+    const nextShare = shareTime(dto.shareUntil ?? '');
+    const prevShare = shareTime(existing.shareUntil ?? '');
+    const resetShareUsed =
+      dto.resetShareUsed === true ||
+      (nextShare != null && prevShare != null && nextShare > prevShare);
     // 渠道行更新 + 模型行 upsert/prune + 终读同一交互事务，任一步失败整体回滚
     return this.prisma.$transaction(async (tx) => {
       const channel = await tx.channel.update({
@@ -409,6 +444,8 @@ export class ChannelsService {
               : dto.shareUntil
                 ? new Date(dto.shareUntil)
                 : null,
+          // 清零只作用于已用用量，累计分成 shareRevenue 永不动；两条件同时命中也只清一次
+          ...(resetShareUsed ? { shareUsedRequests: 0, shareUsedCostUsd: 0 } : {}),
           // 抽成仅管理员可改
           shareFeeBps: user.role === Role.ADMIN ? dto.shareFeeBps : undefined,
           weight: dto.weight,

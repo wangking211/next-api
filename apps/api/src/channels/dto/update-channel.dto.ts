@@ -1,6 +1,7 @@
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsISO8601,
@@ -79,7 +80,7 @@ export class UpdateChannelDto {
   @Type(() => ChannelModelPriceDto)
   modelPrices?: ChannelModelPriceDto[];
 
-  /** 渠道分组 id 列表（仅管理员可设置）；空数组 = 转为公共渠道 */
+  /** 渠道分组 id 列表（属主或管理员可设置）；空数组 = 转为公共渠道 */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
@@ -118,6 +119,15 @@ export class UpdateChannelDto {
   @IsOptional()
   @IsISO8601()
   shareUntil?: string | null;
+
+  /**
+   * 重置共享已用用量（shareUsedRequests / shareUsedCostUsd 归零）。
+   * 与「shareUntil 延长」任一命中即清零，二者同时命中也只清零一次；
+   * 不影响累计分成 shareRevenue。
+   */
+  @IsOptional()
+  @IsBoolean()
+  resetShareUsed?: boolean;
 
   /** 平台抽成基点（0-10000，仅管理员可设）；留空用全局默认 */
   @IsOptional()

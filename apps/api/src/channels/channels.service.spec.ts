@@ -5,7 +5,8 @@ import { ProviderRegistry } from '../gateway/providers/provider.registry';
 import { AuthUser } from '../common/interfaces/auth.interface';
 import { UpstreamError } from '../gateway/types';
 import { GroupsService } from '../groups/groups.service';
-import { ChannelOwnerType, Role } from '@prisma/client';
+import { BadRequestException } from '@nestjs/common';
+import { ChannelOwnerType, ModelGroupStatus, Role } from '@prisma/client';
 
 const user: AuthUser = { id: 'u1', email: 'u@t.com', username: 'u', role: Role.USER };
 
@@ -32,6 +33,89 @@ function makeService(providerImpl: any, channelOverrides: Record<string, unknown
     groups as unknown as GroupsService,
   );
   return { service, providers };
+}
+
+/**
+ * 构造带交互式事务客户端的 Prisma mock：
+ * $transaction(fn) → fn(tx)（模拟 Prisma 交互事务，fn 内抛错 = 整体回滚）；
+ * $transaction(ops) → 批量执行（旧的独立批量事务路径）。
+ * modelPhaseFails=true 时模型行 upsert 抛错，模拟模型行阶段失败；
+ * channel 覆盖渠道行字段（shareUntil / 共享用量等场景）；
+ * modelGroups 为 modelGroup.findMany 的返回（分组写前校验用，缺省 = 查不到任何分组）。
+ */
+function txService(
+  opts: {
+    modelPhaseFails?: boolean;
+    channel?: Record<string, unknown>;
+    modelGroups?: { id: string; status: ModelGroupStatus }[];
+  } = {},
+) {
+  const channelRow = {
+    id: 'c1',
+    ownerType: ChannelOwnerType.USER,
+    ownerUserId: 'u1',
+    name: 'mine',
+    provider: 'openai',
+    baseUrl: 'https://x/v1',
+    apiKeyEnc: 'enc',
+    models: ['m1', 'm2'],
+    shareRevenue: 0,
+    shareUntil: null as Date | null,
+    shareUsedRequests: 0,
+    shareUsedCostUsd: 0,
+    ...opts.channel,
+  };
+  const failingUpsert = () => {
+    throw new Error('model upsert failed');
+  };
+  const tx = {
+    channel: {
+      create: jest.fn().mockResolvedValue(channelRow),
+      update: jest.fn().mockResolvedValue(channelRow),
+      findUnique: jest.fn().mockResolvedValue({ ...channelRow, modelPrices: [] }),
+    },
+    channelModel: {
+      upsert: opts.modelPhaseFails
+        ? jest.fn(failingUpsert)
+        : jest.fn().mockResolvedValue({}),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+  };
+  const prisma = {
+    channel: {
+      // 事务外的直接写：原子化后绝不允许被调用（这里先给出正常返回值，
+      // 以便 RED 断言精确落在「写发生在事务外」而不是 undefined 报错上）
+      create: jest.fn().mockResolvedValue(channelRow),
+      update: jest.fn().mockResolvedValue(channelRow),
+      // findAccessible 权限读（update 走这里，事务外只读不写）
+      findUnique: jest.fn().mockResolvedValue(channelRow),
+    },
+    channelModel: {
+      upsert: opts.modelPhaseFails
+        ? jest.fn(failingUpsert)
+        : jest.fn().mockResolvedValue({}),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    modelGroup: {
+      findMany: jest.fn().mockResolvedValue(opts.modelGroups ?? []),
+    },
+    $transaction: jest.fn(async (arg: unknown) => {
+      if (typeof arg === 'function') {
+        return (arg as (c: typeof tx) => unknown)(tx);
+      }
+      return Promise.all(arg as Promise<unknown>[]);
+    }),
+  };
+  const service = new ChannelsService(
+    prisma as unknown as PrismaService,
+    {
+      encrypt: jest.fn().mockReturnValue('enc'),
+      decrypt: jest.fn().mockReturnValue('upstream-key'),
+    } as unknown as CryptoService,
+    {} as unknown as ProviderRegistry,
+    {} as unknown as GroupsService,
+  );
+  return { service, prisma, tx };
 }
 
 describe('ChannelsService.testChannel', () => {
@@ -306,74 +390,6 @@ describe('ChannelsService.list（累计共享收益）', () => {
 });
 
 describe('ChannelsService.create/update（渠道行+模型行同一事务，失败不残留半份配置）', () => {
-  /**
-   * 构造带交互式事务客户端的 Prisma mock：
-   * $transaction(fn) → fn(tx)（模拟 Prisma 交互事务，fn 内抛错 = 整体回滚）；
-   * $transaction(ops) → 批量执行（旧的独立批量事务路径）。
-   * modelPhaseFails=true 时模型行 upsert 抛错，模拟模型行阶段失败。
-   */
-  function txService(opts: { modelPhaseFails?: boolean } = {}) {
-    const channelRow = {
-      id: 'c1',
-      ownerType: ChannelOwnerType.USER,
-      ownerUserId: 'u1',
-      name: 'mine',
-      provider: 'openai',
-      baseUrl: 'https://x/v1',
-      apiKeyEnc: 'enc',
-      models: ['m1', 'm2'],
-      shareRevenue: 0,
-    };
-    const failingUpsert = () => {
-      throw new Error('model upsert failed');
-    };
-    const tx = {
-      channel: {
-        create: jest.fn().mockResolvedValue(channelRow),
-        update: jest.fn().mockResolvedValue(channelRow),
-        findUnique: jest.fn().mockResolvedValue({ ...channelRow, modelPrices: [] }),
-      },
-      channelModel: {
-        upsert: opts.modelPhaseFails
-          ? jest.fn(failingUpsert)
-          : jest.fn().mockResolvedValue({}),
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-      },
-    };
-    const prisma = {
-      channel: {
-        // 事务外的直接写：原子化后绝不允许被调用（这里先给出正常返回值，
-        // 以便 RED 断言精确落在「写发生在事务外」而不是 undefined 报错上）
-        create: jest.fn().mockResolvedValue(channelRow),
-        update: jest.fn().mockResolvedValue(channelRow),
-        // findAccessible 权限读（update 走这里，事务外只读不写）
-        findUnique: jest.fn().mockResolvedValue(channelRow),
-      },
-      channelModel: {
-        upsert: opts.modelPhaseFails
-          ? jest.fn(failingUpsert)
-          : jest.fn().mockResolvedValue({}),
-        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-      },
-      $transaction: jest.fn(async (arg: unknown) => {
-        if (typeof arg === 'function') {
-          return (arg as (c: typeof tx) => unknown)(tx);
-        }
-        return Promise.all(arg as Promise<unknown>[]);
-      }),
-    };
-    const service = new ChannelsService(
-      prisma as unknown as PrismaService,
-      {
-        encrypt: jest.fn().mockReturnValue('enc'),
-        decrypt: jest.fn().mockReturnValue('upstream-key'),
-      } as unknown as CryptoService,
-      {} as unknown as ProviderRegistry,
-      {} as unknown as GroupsService,
-    );
-    return { service, prisma, tx };
-  }
-
   const createDto = {
     name: 'mine',
     provider: 'openai',
@@ -505,5 +521,200 @@ describe('ChannelsService.availableModels（归属/共享范围透出）', () =>
     const res = await service.availableModels(user);
     expect(res.channels).toEqual([]);
     expect(res.models).toEqual([]);
+  });
+});
+
+describe('ChannelsService.update 共享用量重置（resetShareUsed / shareUntil 延长）', () => {
+  const shareChannel = {
+    shareUntil: new Date('2026-06-01T00:00:00.000Z'),
+    shareUsedRequests: 10,
+    shareUsedCostUsd: 1.25,
+    shareRevenue: 3.5,
+  };
+  const later = '2026-07-01T00:00:00.000Z';
+  const earlier = '2026-05-01T00:00:00.000Z';
+
+  it('resetShareUsed=true → 清零已用次数与已用成本，绝不动 shareRevenue', async () => {
+    const { service, tx } = txService({ channel: shareChannel });
+
+    await service.update(user, 'c1', { resetShareUsed: true });
+
+    const data = tx.channel.update.mock.calls[0][0].data;
+    expect(data.shareUsedRequests).toBe(0);
+    expect(data.shareUsedCostUsd).toBe(0);
+    expect(data.shareRevenue).toBeUndefined();
+  });
+
+  it('shareUntil 延长（严格晚于旧值）→ 同时清零已用次数与已用成本', async () => {
+    const { service, tx } = txService({ channel: shareChannel });
+
+    await service.update(user, 'c1', { shareUntil: later });
+
+    const data = tx.channel.update.mock.calls[0][0].data;
+    expect(data.shareUsedRequests).toBe(0);
+    expect(data.shareUsedCostUsd).toBe(0);
+    expect(data.shareRevenue).toBeUndefined();
+  });
+
+  it('shareUntil 缩短 → 不清零', async () => {
+    const { service, tx } = txService({ channel: shareChannel });
+
+    await service.update(user, 'c1', { shareUntil: earlier });
+
+    const data = tx.channel.update.mock.calls[0][0].data;
+    expect(data.shareUsedRequests).toBeUndefined();
+    expect(data.shareUsedCostUsd).toBeUndefined();
+  });
+
+  it('shareUntil 与旧值相同 → 不清零', async () => {
+    const { service, tx } = txService({ channel: shareChannel });
+
+    await service.update(user, 'c1', { shareUntil: shareChannel.shareUntil.toISOString() });
+
+    const data = tx.channel.update.mock.calls[0][0].data;
+    expect(data.shareUsedRequests).toBeUndefined();
+    expect(data.shareUsedCostUsd).toBeUndefined();
+  });
+
+  it('shareUntil 置 null（清除到期时间）→ 不清零', async () => {
+    const { service, tx } = txService({ channel: shareChannel });
+
+    await service.update(user, 'c1', { shareUntil: null });
+
+    const data = tx.channel.update.mock.calls[0][0].data;
+    expect(data.shareUsedRequests).toBeUndefined();
+    expect(data.shareUsedCostUsd).toBeUndefined();
+  });
+
+  it('未传 shareUntil（其它字段更新）→ 不清零', async () => {
+    const { service, tx } = txService({ channel: shareChannel });
+
+    await service.update(user, 'c1', { name: 'renamed' });
+
+    const data = tx.channel.update.mock.calls[0][0].data;
+    expect(data.shareUsedRequests).toBeUndefined();
+    expect(data.shareUsedCostUsd).toBeUndefined();
+  });
+
+  it('旧渠道无到期时间（null）→ 即使新传了时间也不清零', async () => {
+    const { service, tx } = txService({
+      channel: {
+        shareUntil: null,
+        shareUsedRequests: 10,
+        shareUsedCostUsd: 1.25,
+        shareRevenue: 3.5,
+      },
+    });
+
+    await service.update(user, 'c1', { shareUntil: later });
+
+    const data = tx.channel.update.mock.calls[0][0].data;
+    expect(data.shareUsedRequests).toBeUndefined();
+    expect(data.shareUsedCostUsd).toBeUndefined();
+  });
+
+  it('resetShareUsed 与 shareUntil 延长同时命中 → 单次 update 内一次清零（不双写）', async () => {
+    const { service, tx } = txService({ channel: shareChannel });
+
+    await service.update(user, 'c1', { resetShareUsed: true, shareUntil: later });
+
+    expect(tx.channel.update).toHaveBeenCalledTimes(1);
+    const data = tx.channel.update.mock.calls[0][0].data;
+    expect(data.shareUsedRequests).toBe(0);
+    expect(data.shareUsedCostUsd).toBe(0);
+    expect(data.shareRevenue).toBeUndefined();
+  });
+});
+
+describe('ChannelsService 分组绑定（非管理员可绑定 + 写前校验存在且启用）', () => {
+  const baseDto = {
+    name: 'mine',
+    provider: 'openai',
+    baseUrl: 'https://x/v1',
+    apiKey: 'sk-upstream',
+    models: ['m1', 'm2'],
+  };
+  const gEnabled = { id: 'g1', status: ModelGroupStatus.ENABLED };
+  const gDisabled = { id: 'g1', status: ModelGroupStatus.DISABLED };
+
+  it('create：非管理员传 groups 也落库 connect，写前批量校验只查一次', async () => {
+    const { service, prisma, tx } = txService({
+      modelGroups: [gEnabled, { id: 'g2', status: ModelGroupStatus.ENABLED }],
+    });
+
+    await service.create(user, { ...baseDto, groups: ['g1', 'g2'] });
+
+    expect(prisma.modelGroup.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.modelGroup.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: ['g1', 'g2'] } } }),
+    );
+    const data = tx.channel.create.mock.calls[0][0].data;
+    expect(data.groups).toEqual({ connect: [{ id: 'g1' }, { id: 'g2' }] });
+  });
+
+  it('create：分组不存在 → BadRequest，事务与渠道写全部不发生', async () => {
+    const { service, prisma, tx } = txService({ modelGroups: [gEnabled] });
+
+    const act = () => service.create(user, { ...baseDto, groups: ['g1', 'g2'] });
+    await expect(act()).rejects.toBeInstanceOf(BadRequestException);
+    await expect(act()).rejects.toThrow('分组不存在或已停用: g2');
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.channel.create).not.toHaveBeenCalled();
+    expect(prisma.channel.create).not.toHaveBeenCalled();
+  });
+
+  it('create：分组已停用 → BadRequest，事务不启动', async () => {
+    const { service, prisma, tx } = txService({ modelGroups: [gDisabled] });
+
+    await expect(service.create(user, { ...baseDto, groups: ['g1'] })).rejects.toThrow(
+      '分组不存在或已停用: g1',
+    );
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.channel.create).not.toHaveBeenCalled();
+    expect(prisma.channel.create).not.toHaveBeenCalled();
+  });
+
+  it('update：分组已停用 → BadRequest，事务与更新全部不发生', async () => {
+    const { service, prisma, tx } = txService({ modelGroups: [gDisabled] });
+
+    await expect(service.update(user, 'c1', { groups: ['g1'] })).rejects.toThrow(
+      '分组不存在或已停用: g1',
+    );
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.channel.update).not.toHaveBeenCalled();
+    expect(prisma.channel.update).not.toHaveBeenCalled();
+  });
+
+  it('update：有效分组 → 写前校验一次并写入 set 绑定', async () => {
+    const { service, prisma, tx } = txService({ modelGroups: [gEnabled] });
+
+    await service.update(user, 'c1', { groups: ['g1'] });
+
+    expect(prisma.modelGroup.findMany).toHaveBeenCalledTimes(1);
+    const data = tx.channel.update.mock.calls[0][0].data;
+    expect(data.groups).toEqual({ set: [{ id: 'g1' }] });
+  });
+
+  it('update：groups 未传 → 不改绑定也不触发校验', async () => {
+    const { service, prisma, tx } = txService();
+
+    await service.update(user, 'c1', { name: 'renamed' });
+
+    expect(prisma.modelGroup.findMany).not.toHaveBeenCalled();
+    const data = tx.channel.update.mock.calls[0][0].data;
+    expect(data.groups).toBeUndefined();
+  });
+
+  it('update：groups=[] → 清空绑定（set: []），空数组不触发校验', async () => {
+    const { service, prisma, tx } = txService();
+
+    await service.update(user, 'c1', { groups: [] });
+
+    expect(prisma.modelGroup.findMany).not.toHaveBeenCalled();
+    const data = tx.channel.update.mock.calls[0][0].data;
+    expect(data.groups).toEqual({ set: [] });
   });
 });
