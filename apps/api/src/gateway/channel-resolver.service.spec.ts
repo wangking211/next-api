@@ -584,6 +584,39 @@ describe('ChannelResolverService catalog 快照缓存', () => {
     expect(res[0].channel.id).toBe('ok');
   });
 
+  it('渠道主自己的调用豁免共享闸门：已到期渠道仍派发给 owner', async () => {
+    const expired = makeCM({
+      channel: makeChannel({
+        id: 'expired',
+        ownerType: ChannelOwnerType.USER,
+        ownerUserId: 'owner',
+        shareMode: 'PUBLIC',
+        shareUntil: new Date(Date.now() - 60_000),
+      }),
+    });
+    const { service } = makeService([expired]);
+    const res = await service.resolve('owner', 'm');
+    expect(res).toHaveLength(1);
+    expect(res[0].channel.id).toBe('expired');
+    // 他人调用仍被拦截（回归原闸门行为）
+    await expect(service.resolve('u1', 'm')).resolves.toHaveLength(0);
+  });
+
+  it('availableModels 豁免渠道主：已到期渠道的模型仍对 owner 可见', async () => {
+    const expired = makeCM({
+      channel: makeChannel({
+        id: 'expired',
+        ownerType: ChannelOwnerType.USER,
+        ownerUserId: 'owner',
+        shareMode: 'PUBLIC',
+        shareUntil: new Date(Date.now() - 60_000),
+      }),
+    });
+    const { service } = makeService([expired]);
+    await expect(service.availableModels('owner')).resolves.toEqual(['m']);
+    await expect(service.availableModels('u1')).resolves.toEqual([]);
+  });
+
   it('共享紧急度按质量分门槛加优先级（FLUSH > HIGH > NORMAL）', async () => {
     const flush = makeCM({
       channel: makeChannel({

@@ -142,6 +142,57 @@ describe('shareExhausted（共享渠道额度/有效期闸门）', () => {
       ).toBe(false);
     });
   });
+
+  describe('渠道主豁免（callerId === ownerUserId 时永不算用尽）', () => {
+    const OWNER = 'owner-1';
+    const OTHER = 'caller-2';
+    const owned = (partial: Partial<ShareGateChannel> = {}): ShareGateChannel =>
+      shared({ ownerType: 'USER', ownerUserId: OWNER, ...partial });
+
+    it('shareUntil 已过期：渠道主 callerId → false（豁免）；他人 callerId → true（照常拦截）', () => {
+      expect(shareExhausted(owned({ shareUntil: PAST }), NOW, OWNER)).toBe(false);
+      expect(shareExhausted(owned({ shareUntil: PAST }), NOW, OTHER)).toBe(true);
+    });
+
+    it('成本额度用尽：渠道主 callerId → false；不传 callerId → true（省略时行为不变）', () => {
+      const ch = owned({ shareQuotaCostUsd: 10, shareUsedCostUsd: 10 });
+      expect(shareExhausted(ch, NOW, OWNER)).toBe(false);
+      expect(shareExhausted(ch, NOW)).toBe(true);
+    });
+
+    it('请求次数额度用尽：渠道主 callerId → false；不传 callerId → true', () => {
+      const ch = owned({ shareQuotaRequests: 100, shareUsedRequests: 100 });
+      expect(shareExhausted(ch, NOW, OWNER)).toBe(false);
+      expect(shareExhausted(ch, NOW)).toBe(true);
+    });
+
+    it('ownerType 非 USER（PLATFORM）即使 ownerUserId 命中也不豁免 → true', () => {
+      expect(
+        shareExhausted(
+          shared({ ownerType: 'PLATFORM', ownerUserId: OWNER, shareUntil: PAST }),
+          NOW,
+          OWNER,
+        ),
+      ).toBe(true);
+    });
+
+    it('ownerUserId 不匹配 / 为 null → 不豁免 → true', () => {
+      expect(shareExhausted(owned({ shareUntil: PAST }), NOW, OTHER)).toBe(true);
+      expect(
+        shareExhausted(
+          shared({ ownerType: 'USER', ownerUserId: null, shareUntil: PAST }),
+          NOW,
+          OWNER,
+        ),
+      ).toBe(true);
+    });
+
+    it('callerId 为 null / undefined → 不豁免（与省略一致）', () => {
+      const ch = owned({ shareUntil: PAST });
+      expect(shareExhausted(ch, NOW, null)).toBe(true);
+      expect(shareExhausted(ch, NOW, undefined)).toBe(true);
+    });
+  });
 });
 
 describe('shareUrgencyBonus（共享紧急度 → 路由优先级加成）', () => {

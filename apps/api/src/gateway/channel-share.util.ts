@@ -8,6 +8,8 @@ export interface ShareGateChannel {
   shareQuotaRequests?: number | null;
   shareUsedCostUsd?: unknown;
   shareUsedRequests?: number | null;
+  ownerType?: string | null;
+  ownerUserId?: string | null;
 }
 
 /**
@@ -17,11 +19,26 @@ export interface ShareGateChannel {
  * 命中即不再派发，等价于「自动停止接单」，服务于渠道主
  * 「把本月快到期、用不完的额度烧掉一部分就收手」的诉求。
  *
+ * 渠道主豁免：传入 `callerId` 且命中 `ownerType=USER` 的属主时恒为 false——
+ * 自己的调用既不吃共享额度也不受有效期约束（否则额度烧尽后 tier-0 自路由被自己掐断）。
+ * 省略 `callerId`（或 null）时行为不变，仍按额度/有效期判定。
+ *
  * 累计值由网关闭环累加在 Channel 列上（见 UsageService.record），
  * 因此路由侧只需读已取出的行，零额外查询。
  */
-export function shareExhausted(channel?: ShareGateChannel | null, now = Date.now()): boolean {
+export function shareExhausted(
+  channel?: ShareGateChannel | null,
+  now = Date.now(),
+  callerId?: string | null,
+): boolean {
   if (!channel) return false;
+  if (
+    callerId != null &&
+    channel.ownerType === 'USER' &&
+    channel.ownerUserId === callerId
+  ) {
+    return false;
+  }
   if (!channel.shareMode || channel.shareMode === ChannelShareMode.PRIVATE) return false;
   if (channel.shareUntil && channel.shareUntil.getTime() <= now) return true;
 

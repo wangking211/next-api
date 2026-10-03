@@ -178,7 +178,8 @@ export class ChannelResolverService {
       }
       if (!apiKey) continue;
       // 共享渠道的额度/到期闸门：达到上限或已到期就不再派发（渠道主「烧额度」诉求）
-      if (this.shareExhausted(cm.channel)) continue;
+      // 渠道主本人豁免：自己的调用不吃共享额度，否则额度烧尽会掐断 tier-0 自路由
+      if (this.shareExhausted(cm.channel, userId)) continue;
       if (cm.channel.status !== ChannelStatus.ENABLED) {
         recoveries.push(this.recoverChannel(cm.channel));
       }
@@ -430,16 +431,23 @@ export class ChannelResolverService {
     const names = [
       ...new Set(
         rows
-          .filter((r) => !this.shareExhausted(r.channel))
+          .filter((r) => !this.shareExhausted(r.channel, userId))
           .map((r) => r.modelName),
       ),
     ].sort();
     return this.filterCatalogEnabled(names);
   }
 
-  /** 共享渠道是否已「用尽」（额度/到期）——实现见 channel-share.util */
-  private shareExhausted(channel?: Channel | null, now = Date.now()): boolean {
-    return shareExhausted(channel, now);
+  /**
+   * 共享渠道是否已「用尽」（额度/到期）——实现见 channel-share.util。
+   * `callerId` 为渠道主时豁免（自己的调用不吃共享额度）。
+   */
+  private shareExhausted(
+    channel?: Channel | null,
+    callerId?: string | null,
+    now = Date.now(),
+  ): boolean {
+    return shareExhausted(channel, now, callerId);
   }
 
   /** 共享紧急度 → 优先级加成——实现见 channel-share.util */
