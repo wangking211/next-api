@@ -126,11 +126,11 @@ fi
 
 # 磁盘回收：构建缓存与旧镜像只增不减（实测可积到 14GB，磁盘打满即生产事故）。
 # 只在部署成功后执行——失败路径不清缓存（重试还要用）；回收失败也不阻断部署。
-# builder prune 保留最近 6GB（下一次部署仍可命中大部分缓存）；image prune 只清
-# dangling 镜像，不会碰 :latest / :rollback 快照，回滚机制不受影响。
+# 构建缓存全量清零（代价：下次部署为冷构建、多花数分钟，换取磁盘始终最小）；
+# image prune 只清 dangling 镜像，不会碰 :latest / :rollback 快照，回滚机制不受影响。
 echo
-echo "==> 磁盘回收（保留最近 6GB 构建缓存 + 清理 dangling 镜像）"
-docker builder prune -f --keep-storage 6GB || true
+echo "==> 磁盘回收（构建缓存全量清零 + 清理 dangling 镜像）"
+docker builder prune -a -f || true
 docker image prune -f || true
 docker system df
 
