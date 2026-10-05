@@ -16,7 +16,13 @@ interface AuthContextValue {
   user: UserInfo | null;
   loading: boolean;
   login: (identifier: string, password: string) => Promise<void>;
-  register: (email: string, username: string, password: string) => Promise<void>;
+  /** emailCode 仅在服务端配置了 SMTP 时会被校验；未配置时可省略 */
+  register: (
+    email: string,
+    username: string,
+    password: string,
+    emailCode?: string,
+  ) => Promise<void>;
   logout: () => void;
   /** 退出全部设备：先吊销服务端全部令牌，再清理本地状态 */
   logoutAll: () => Promise<void>;
@@ -53,8 +59,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const register = useCallback(
-    async (email: string, username: string, password: string) => {
-      const data = await authApi.register(email, username, password);
+    async (email: string, username: string, password: string, emailCode?: string) => {
+      const data = await authApi.register(email, username, password, emailCode);
       queryClient.clear();
       localStorage.setItem(TOKEN_KEY, data.accessToken);
       setUser(data.user);

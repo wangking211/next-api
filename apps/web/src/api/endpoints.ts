@@ -42,11 +42,45 @@ export const authApi = {
     );
     return data;
   },
-  async register(email: string, username: string, password: string) {
+  async register(email: string, username: string, password: string, emailCode?: string) {
     const { data } = await api.post<{ accessToken: string; user: UserInfo }>(
       '/auth/register',
-      { email, username, password },
+      // 邮箱验证码只在服务端配置了 SMTP 时才必填；未配置时后端会忽略该字段
+      { email, username, password, ...(emailCode ? { emailCode } : {}) },
     );
+    return data;
+  },
+  /** 邮件通道状态：注册是否强制验证码、找回密码入口是否可用 */
+  async mailStatus() {
+    const { data } = await api.get<{ enabled: boolean; cooldownSeconds: number; ttlMinutes: number }>(
+      '/auth/mail-status',
+    );
+    return data;
+  },
+  /** 请求邮箱验证码（注册 / 找回密码共用；带 IP 与重发冷却限流） */
+  async sendEmailCode(email: string, purpose: 'register' | 'reset', locale: string) {
+    const { data } = await api.post<{ cooldownSeconds: number }>('/auth/email-code', {
+      email,
+      purpose,
+      locale,
+    });
+    return data;
+  },
+  /** 忘记密码第一步：发重置验证码（无论邮箱是否注册过都返回 200） */
+  async forgotPassword(email: string, locale: string) {
+    const { data } = await api.post<{ cooldownSeconds: number }>('/auth/forgot-password', {
+      email,
+      locale,
+    });
+    return data;
+  },
+  /** 忘记密码第二步：验证码 + 新密码 */
+  async resetPassword(email: string, code: string, password: string) {
+    const { data } = await api.post<{ ok: boolean }>('/auth/reset-password', {
+      email,
+      code,
+      password,
+    });
     return data;
   },
   async me() {
