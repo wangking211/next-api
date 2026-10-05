@@ -13,6 +13,7 @@ import { RoutingMetricsService } from './routing-metrics.service';
 import { GroupsService } from '../groups/groups.service';
 import { VideoExecutorService } from './video-executor.service';
 import { EmbeddingsExecutorService } from './embeddings-executor.service';
+import { ImagesExecutorService } from './images-executor.service';
 import { ExecSupportService } from './exec-support.service';
 
 // @nestjs/swagger@12 仅发布 ESM 产物，jest 默认不转换 node_modules →
@@ -55,6 +56,7 @@ describe('pipeStream client-closed handling', () => {
       {} as unknown as ExecSupportService,
       {} as unknown as VideoExecutorService,
       {} as unknown as EmbeddingsExecutorService,
+      {} as unknown as ImagesExecutorService,
       config as unknown as ConfigService,
     );
 
