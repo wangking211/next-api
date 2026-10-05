@@ -43,6 +43,8 @@ model User {
   lastActiveAt DateTime?
   /// 令牌版本：「退出全部设备」/强制下线时 +1，使已签发的 JWT 立即失效（对应 `tv` claim）
   tokenVersion Int      @default(0)
+  /// 邮箱是否已通过验证码验证（注册/找回密码验证码流程；SMTP 未配置时不会被置为 true）
+  emailVerified Boolean  @default(false)
 
   apiKeys     ApiKey[]
   channels    Channel[]
