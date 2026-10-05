@@ -11,7 +11,7 @@ import { BillingService } from '../billing/billing.service';
 import { ChannelHealthService } from './channel-health.service';
 import { RoutingMetricsService } from './routing-metrics.service';
 import { GroupsService } from '../groups/groups.service';
-import { VideoTaskService } from './video-task.service';
+import { VideoExecutorService } from './video-executor.service';
 import { ExecSupportService } from './exec-support.service';
 
 // @nestjs/swagger@12 仅发布 ESM 产物，jest 默认不转换 node_modules →
@@ -51,8 +51,8 @@ describe('pipeStream client-closed handling', () => {
       health as unknown as ChannelHealthService,
       metrics as unknown as RoutingMetricsService,
       {} as unknown as GroupsService,
-      {} as unknown as VideoTaskService,
       {} as unknown as ExecSupportService,
+      {} as unknown as VideoExecutorService,
       config as unknown as ConfigService,
     );
 

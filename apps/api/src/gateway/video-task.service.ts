@@ -17,7 +17,7 @@ interface VideoTaskRef {
  *
  * 纯内存、不落库：进程重启（发布/扩缩容）后映射丢失，此时由
  * ChannelResolverService 按「模型目录里标了 video 能力的模型」重新探测候选渠道兜底
- * （见 GatewayController.videoCandidates），代价是多一次 404 探测。
+ * （见 VideoExecutorService.videoCandidates），代价是多一次 404 探测。
  */
 @Injectable()
 export class VideoTaskService {
