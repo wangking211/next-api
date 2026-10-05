@@ -24,7 +24,11 @@
     "prisma:studio": "pnpm --filter @ai-gateway/api prisma:studio",
     "seed": "pnpm --filter @ai-gateway/api prisma:seed",
     "cleanup": "pnpm --filter @ai-gateway/api prisma:cleanup",
-    "audit:models": "node scripts/model-audit.mjs"
+    "audit:models": "node scripts/model-audit.mjs",
+    "verify:status": "node tools/verify/channel-status.mjs",
+    "verify:probe": "node tools/verify/channel-probe.mjs",
+    "verify:residue": "node tools/verify/residue-check.mjs",
+    "verify:deploy": "node tools/verify/deploy-acceptance.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
