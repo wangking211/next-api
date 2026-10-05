@@ -77,6 +77,8 @@ export class UsersService {
     username: string;
     passwordHash: string;
     role?: Role;
+    /** 已通过邮箱验证码时置 true；SMTP 未启用的注册保持 false */
+    emailVerified?: boolean;
   }): Promise<User> {
     return this.prisma.user.create({
       data: {
@@ -84,6 +86,26 @@ export class UsersService {
         username: data.username,
         passwordHash: data.passwordHash,
         role: data.role ?? Role.USER,
+        ...(data.emailVerified !== undefined ? { emailVerified: data.emailVerified } : {}),
+      },
+    });
+  }
+
+  /**
+   * 重置密码：同时自增 tokenVersion，让该用户名下已签发的 JWT 立即失效
+   * （找回密码与管理员重置都要强制下线旧会话，否则改了密码也拦不住已登录的设备）。
+   */
+  async setPassword(
+    id: string,
+    passwordHash: string,
+    opts: { emailVerified?: boolean } = {},
+  ): Promise<User> {
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        passwordHash,
+        tokenVersion: { increment: 1 },
+        ...(opts.emailVerified !== undefined ? { emailVerified: opts.emailVerified } : {}),
       },
     });
   }

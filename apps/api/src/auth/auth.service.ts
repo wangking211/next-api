@@ -2,6 +2,7 @@ import {
   ConflictException,
   HttpException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -10,6 +11,7 @@ import { Prisma, User } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { UsersService } from '../users/users.service';
 import { RedisService } from '../redis/redis.service';
+import { EmailCodeService, type IssueResult } from './email-code.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
@@ -34,6 +36,7 @@ export class AuthService {
     private readonly users: UsersService,
     private readonly jwt: JwtService,
     private readonly redis: RedisService,
+    private readonly codes: EmailCodeService,
     config: ConfigService,
   ) {
     this.loginFailLimit = Number(config.get<string>('LOGIN_FAIL_LIMIT', '10'));
@@ -91,6 +94,20 @@ export class AuthService {
       throw new ConflictException({ code: 'AUTH_USERNAME_TAKEN', message: 'Username already taken' });
     }
 
+    // 邮箱验证码：SMTP 配置齐了才强制；凭据未到位时保持免验证码注册（不卡线上流程）
+    const verifyMail = this.codes.enabled;
+    if (verifyMail) {
+      const code = dto.emailCode?.trim();
+      if (!code) {
+        throw new HttpException(
+          { code: 'AUTH_CODE_REQUIRED', message: 'Verification code is required' },
+          400,
+        );
+      }
+      // 查重放行之后再校验，避免拿不存在的邮箱白消耗一次失败计数
+      await this.codes.verify(email, 'register', code);
+    }
+
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
     let user: User;
     try {
@@ -98,6 +115,7 @@ export class AuthService {
         email,
         username: dto.username,
         passwordHash,
+        ...(verifyMail ? { emailVerified: true } : {}),
       });
     } catch (e) {
       // 并发/重复注册命中唯一约束时返回 409，而非 500
@@ -109,7 +127,58 @@ export class AuthService {
       }
       throw e;
     }
+    // 建号成功即消费验证码（一次性）；清不掉只是残留到自然过期，不影响注册结果
+    if (verifyMail) await this.codes.clear(email, 'register');
     return this.sign(user);
+  }
+
+  /** 找回密码第一步的状态：前端据此决定是否展示「忘记密码」入口与验证码框 */
+  mailStatus(): { enabled: boolean; cooldownSeconds: number; ttlMinutes: number } {
+    return {
+      enabled: this.codes.enabled,
+      cooldownSeconds: this.codes.cooldownSeconds,
+      ttlMinutes: this.codes.codeTtlMinutes,
+    };
+  }
+
+  /**
+   * 请求邮箱验证码（注册 / 找回密码共用入口）。
+   *
+   * - `register`：邮箱必须尚未被占用，否则直接 409（与注册接口同口径，
+   *   也免得用户先收了码、提交时才被告知邮箱已注册）；
+   * - `reset`：查无此邮箱同样返回 200，不投递也不占冷却位。
+   */
+  async requestEmailCode(
+    email: string,
+    purpose: 'register' | 'reset',
+    locale?: string,
+    ip?: string,
+  ): Promise<IssueResult> {
+    const target = email.toLowerCase().trim();
+    if (purpose === 'reset') {
+      const user = await this.users.findByEmail(target);
+      return this.codes.issue(target, 'reset', locale, ip, { deliver: Boolean(user) });
+    }
+    const existing = await this.users.findByEmail(target);
+    if (existing) {
+      throw new ConflictException({ code: 'AUTH_EMAIL_TAKEN', message: 'Email already registered' });
+    }
+    return this.codes.issue(target, 'register', locale, ip, { deliver: true });
+  }
+
+  /** 找回密码：用邮箱验证码设置新密码（校验 → 改密码 → 强制下线全部旧会话） */
+  async resetPassword(email: string, code: string, password: string): Promise<void> {
+    const target = email.toLowerCase().trim();
+    await this.codes.verify(target, 'reset', code);
+    const user = await this.users.findByEmail(target);
+    if (!user) {
+      // 码有效但账号已注销（并发删除的窗口），按「用户不存在」走
+      throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
+    }
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    // 验证码本身即「证明能收这封信」，顺手把邮箱标为已验证
+    await this.users.setPassword(user.id, passwordHash, { emailVerified: true });
+    await this.codes.clear(target, 'reset');
   }
 
   async login(dto: LoginDto, ip?: string) {
