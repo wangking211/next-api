@@ -17,12 +17,13 @@ import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ApiKeyGuard } from './guards/api-key.guard';
 import { GatewayErrorFilter } from './gateway-error.filter';
+import { ExecSupportService } from './exec-support.service';
 import { ChannelResolverService } from './channel-resolver.service';
 import { ProviderRegistry } from './providers/provider.registry';
 import { ChannelHealthService } from './channel-health.service';
 import { RoutingMetricsService } from './routing-metrics.service';
 import { GatewayAuthContext, GatewayRequest, ResolvedChannel, StreamResult, UpstreamError, openaiError } from './types';
-import { detectRequiredCapabilities } from './capabilities';
+import { upstreamErrorMessage } from './upstream-error.util';
 import { trackClientClose } from './client-close';
 import {
   AnthropicStreamTranslator,
@@ -44,62 +45,7 @@ import {
 import { SseUsageCollector } from '../usage/sse-usage.collector';
 import { estimatePromptTokens, estimateTokensFromText } from '../usage/token.util';
 import { flattenMessages, extractAssistantText } from '../usage/content.util';
-import { redactSecrets } from '../common/redact.util';
-import { Channel, ChannelOwnerType, ChannelShareMode } from '@prisma/client';
-
-/** 仅提取上游错误消息，避免把上游原始错误体（可能含内部细节）原样透传给客户端 */
-function upstreamErrorMessage(e: UpstreamError): string {
-  const body = e.body;
-  const msg =
-    (typeof body?.error?.message === 'string' && body.error.message) ||
-    (typeof body?.message === 'string' && body.message) ||
-    e.message;
-  // 上游文案里常混着渠道密钥（如 `token 无效：sk-...`）→ 回传前统一脱敏
-  return redactSecrets(String(msg)).slice(0, 500);
-}
-
-/** 上游错误的可判定文本：message + code + type（UpstreamError.message 只有 "Upstream error 429"，语义在 body 里） */
-function upstreamErrorSignal(e: UpstreamError): string {
-  const body = e.body;
-  const parts = [
-    typeof body?.error?.message === 'string' ? body.error.message : '',
-    typeof body?.error?.code === 'string' ? body.error.code : '',
-    typeof body?.error?.type === 'string' ? body.error.type : '',
-    typeof body?.message === 'string' ? body.message : '',
-  ];
-  return parts.filter(Boolean).join(' ');
-}
-
-/** 配额/限流特征：429，或 4xx 错误文本命中限额语义（订阅号日限额常见 400/403 + quota 文案） */
-const QUOTA_RE =
-  /(insufficient[_\s-]?quota|rate[_\s-]?limit|too many requests|quota|usage.{0,15}(limit|exceed)|daily.{0,15}(limit|quota)|limit.{0,20}(exceed|exhaust|reach|hit)|exceeded.{0,15}(limit|quota)|请求过于频繁|超出.{0,8}(限额|限制|配额)|限流|配额)/i;
-
-function isRateLimited(e: UpstreamError): boolean {
-  if (e.status === 429) return true;
-  if (e.status < 400 || e.status >= 500) return false;
-  return QUOTA_RE.test(upstreamErrorSignal(e));
-}
-
-/** 拒答/内容过滤特征：用户内容被安全策略拒绝，只降质量分，不伤稳定性也不熔断 */
-const REFUSAL_RE =
-  /(content[_\s-]?filter|content_policy|safety|refusal|refused|内容安全|敏感内容)/i;
-
-function isRefusal(e: UpstreamError): boolean {
-  return REFUSAL_RE.test(upstreamErrorSignal(e));
-}
-
-/**
- * 上游「令牌无权访问该模型」特征（new-api 分组未开通等）：属配置问题，
- * 应换下一家上游试（可能别家有权限），并返回明确的 model_not_found，
- * 且只冷却「该渠道 × 该模型」，不误禁整条渠道。
- */
-const MODEL_ACCESS_RE =
-  /(no access to model|model[_\s-]?not[_\s-]?found|not have access|no permission|permission denied|not authorized|unsupported model|无权访问|没有权限|无权限|未开通|权限不足)/i;
-
-function isModelAccessDenied(e: UpstreamError): boolean {
-  if (e.status !== 403 && e.status !== 404) return false;
-  return MODEL_ACCESS_RE.test(upstreamErrorSignal(e));
-}
+import { Channel } from '@prisma/client';
 
 /** embeddings 请求预览：只取首个输入片段（批量输入全量写日志会撑爆 RequestLog） */
 function embeddingsPreview(body: any): string {
@@ -148,6 +94,7 @@ export class GatewayController {
     private readonly metrics: RoutingMetricsService,
     private readonly groups: GroupsService,
     private readonly videoTasks: VideoTaskService,
+    private readonly support: ExecSupportService,
     config: ConfigService,
   ) {
     this.streamIdleMs =
@@ -364,10 +311,10 @@ export class GatewayController {
       this.billing.getBillingMultiplier(user.id, group.ratio, user),
       this.resolver.resolve(user.id, model, {
         strategy: apiKey.routingStrategy,
-        stickyKey: this.buildStickyKey(req, user.id, body),
+        stickyKey: this.support.buildStickyKey(req, user.id, body),
         groupId: group.id,
       }),
-      this.checkCapabilities(model, body, res, err),
+      this.support.checkCapabilities(model, body, res, err),
     ]);
     if (!capsOk) return;
     if (channels.length === 0) {
@@ -390,7 +337,7 @@ export class GatewayController {
     let lastError: UpstreamError | null = null;
 
     // 平台渠道需余额：0 价模型豁免；对每个候选渠道按“输入 + 最大输出”预估上限做预授权，避免单次调用透支
-    const guards = this.balanceGuards(user.id, billingInfo.value);
+    const guards = this.support.balanceGuards(user.id, billingInfo.value);
     const maxOutputTokens =
       Number(body?.max_tokens ?? body?.max_completion_tokens ?? 0) ||
       this.defaultMaxOutputTokens;
@@ -406,7 +353,7 @@ export class GatewayController {
       const upstreamModel = upstreamModelName ?? model;
       const upstreamBody =
         upstreamModel === model ? body : { ...body, model: upstreamModel };
-      if (this.isChargeable(channel, user.id)) {
+      if (this.support.isChargeable(channel, user.id)) {
         // 预授权：按该渠道的售价预估上限，余额不足则跳过（定价随 resolve 结果带出，免再查）
         const required =
           ((promptFallback / 1_000_000) * pricing.priceInput +
@@ -436,8 +383,8 @@ export class GatewayController {
             attemptStart,
             promptFallback,
             requestPreview,
-            chargeable: this.isChargeable(channel, user.id),
-            share: this.shareContext(channel, user.id),
+            chargeable: this.support.isChargeable(channel, user.id),
+            share: this.support.shareContext(channel, user.id),
             abort: upstreamAbort,
             idleMs: this.streamIdleMs,
             isClientClosed: () => closeTracker.isClosed(),
@@ -468,8 +415,8 @@ export class GatewayController {
             ...usage,
             latencyMs: Date.now() - startedAt,
             status: result.status,
-            chargeable: this.isChargeable(channel, user.id),
-            share: this.shareContext(channel, user.id),
+            chargeable: this.support.isChargeable(channel, user.id),
+            share: this.support.shareContext(channel, user.id),
             isStream: false,
             requestPreview,
             responsePreview: this.logContent
@@ -500,7 +447,7 @@ export class GatewayController {
         if (closeTracker.isClosed()) return;
         if (e instanceof UpstreamError) {
           lastError = e;
-          const action = await this.handleUpstreamFailure(e, {
+          const action = await this.support.handleUpstreamFailure(e, {
             res,
             channel,
             model,
@@ -543,194 +490,6 @@ export class GatewayController {
           'upstream_error',
         ),
       );
-  }
-
-  /** 余额/倍率按用户缓存（同一次请求的多个候选渠道共享，避免重复查库） */
-  /**
-   * 该渠道是否是「他人上架的共享渠道」——决定收费与分成口径。
-   * 自有渠道（含自己上架的）走 BYOK：不收费、不分成（消耗的是自己的上游额度）。
-   */
-  private isSharedFromOthers(channel: Channel, callerUserId: string): boolean {
-    return (
-      channel.ownerType === ChannelOwnerType.USER &&
-      channel.shareMode !== ChannelShareMode.PRIVATE &&
-      !!channel.ownerUserId &&
-      channel.ownerUserId !== callerUserId
-    );
-  }
-
-  /**
-   * 本次调用是否向调用方收费：
-   * - 平台渠道：收费
-   * - 他人已上架的共享渠道：收费（实收按比例分给渠道主）
-   * - 自己的 BYOK 渠道：免费
-   * 预授权与落账必须用同一判定，否则会出现「不预授权但扣费」的白嫖窗口。
-   */
-  private isChargeable(channel: Channel, callerUserId: string): boolean {
-    return (
-      channel.ownerType === ChannelOwnerType.PLATFORM ||
-      this.isSharedFromOthers(channel, callerUserId)
-    );
-  }
-
-  /** 共享分成上下文（落账时给渠道主入账用）；非共享场景返回 undefined */
-  private shareContext(channel: Channel, callerUserId: string): UsageEntry['share'] {
-    if (!this.isSharedFromOthers(channel, callerUserId)) return undefined;
-    return {
-      ownerUserId: channel.ownerUserId as string,
-      feeBps: this.billing.channelShareFeeBps(channel),
-    };
-  }
-
-  private balanceGuards(userId: string, presetMultiplier?: number) {
-    let cachedBalance: number | null = null;
-    let cachedMultiplier: number | null = presetMultiplier ?? null;
-    return {
-      getBalance: async (): Promise<number> => {
-        if (cachedBalance === null) {
-          cachedBalance = (await this.billing.getBalance(userId)).balance;
-        }
-        return cachedBalance;
-      },
-      getUserMultiplier: async (): Promise<number> => {
-        if (cachedMultiplier === null) {
-          cachedMultiplier = await this.billing.getUserMultiplier(userId);
-        }
-        return cachedMultiplier;
-      },
-    };
-  }
-
-  /**
-   * 能力校验：目录声明了 capabilities 时，请求所需能力必须被覆盖（未声明则放行）。
-   * @returns true = 通过；false = 已写出 400 响应，调用方应直接 return。
-   */
-  private async checkCapabilities(
-    model: string,
-    body: Record<string, any>,
-    res: Response,
-    err: (message: string, type?: string, code?: string | null) => any,
-  ): Promise<boolean> {
-    const requiredCaps = detectRequiredCapabilities(body);
-    if (!requiredCaps.length) return true;
-    const cat = await this.resolver.catalogFor([model]);
-    const declared = cat.get(model)?.capabilities ?? [];
-    if (!declared.length) return true;
-    const missing = requiredCaps.filter((c) => !declared.includes(c));
-    if (!missing.length) return true;
-    res.status(400).json(
-      err(
-        `Model "${model}" does not support: ${missing.join(', ')}. ` +
-          `Declared capabilities: ${declared.join(', ')}.`,
-        'invalid_request_error',
-      ),
-    );
-    return false;
-  }
-
-  /**
-   * 上游失败统一处理（chat 与 embeddings 共用）：错误分类 → 记录健康度/路由指标 →
-   * 可故障转移则返回 'continue'（调用方试下一家），否则落用量日志并写出错误响应。
-   */
-  private async handleUpstreamFailure(
-    e: UpstreamError,
-    ctx: {
-      res: Response;
-      channel: Channel;
-      model: string;
-      attemptStart: number;
-      startedAt: number;
-      userId: string;
-      apiKeyId: string;
-      requestPreview: string;
-      isStream: boolean;
-      hasMore: boolean;
-      /** 已解析的定价与倍率（随 resolve 结果带出）：失败落账同样免查 */
-      pricing?: ChannelPricing;
-      multiplier?: number;
-      multiplierSource?: string;
-      errorBody: (message: string, type?: string, code?: string | null) => any;
-    },
-  ): Promise<'continue' | 'responded'> {
-    const latencyMs = Date.now() - ctx.attemptStart;
-    const signal = upstreamErrorSignal(e) || e.message;
-    // 错误分类（客户端 4xx 不计健康度，防止被恶意请求自动禁用渠道）：
-    //  限流/超限 → 冷却退避且不累计失败；5xx/连接故障 → 健康度失败计数；
-    //  上游鉴权失败(401) → 只降路由质量分；拒答/内容过滤 → 只降质量分
-    const limited = isRateLimited(e);
-    const transient = e.retryable && !limited;
-    const authFault = !limited && e.status === 401;
-    const modelDenied = !limited && !authFault && isModelAccessDenied(e);
-    const refusal =
-      !limited && !transient && !authFault && !modelDenied && isRefusal(e);
-    if (limited) {
-      await this.health.recordRateLimited(ctx.channel.id, signal);
-      await this.metrics.record(ctx.channel.id, ctx.model, 'rate_limited', {
-        latencyMs,
-        status: e.status,
-        errorMessage: signal,
-      });
-    } else if (transient) {
-      await this.health.recordFailure(ctx.channel.id, e.message);
-      await this.metrics.record(ctx.channel.id, ctx.model, 'error', {
-        latencyMs,
-        status: e.status,
-        errorMessage: signal,
-      });
-    } else if (modelDenied) {
-      // 无权访问该模型：只记 (渠道×模型) 指标并触发该组合的冷却，不计渠道健康度
-      await this.metrics.record(ctx.channel.id, ctx.model, 'model_denied', {
-        latencyMs,
-        status: e.status,
-        errorMessage: signal,
-      });
-    } else if (authFault || refusal) {
-      await this.metrics.record(ctx.channel.id, ctx.model, authFault ? 'error' : 'refused', {
-        latencyMs,
-        status: e.status,
-        errorMessage: signal,
-      });
-    }
-    // 故障转移：上游故障、限流/超限、鉴权失效、无权访问该模型都要换下一家试
-    if ((transient || limited || authFault || modelDenied) && ctx.hasMore) return 'continue';
-    await this.usage.record({
-      userId: ctx.userId,
-      apiKeyId: ctx.apiKeyId,
-      channelId: ctx.channel.id,
-      model: ctx.model,
-      provider: ctx.channel.provider,
-      promptTokens: 0,
-      completionTokens: 0,
-      totalTokens: 0,
-      latencyMs: Date.now() - ctx.startedAt,
-      status: e.status || 502,
-      errorMessage: e.message,
-      chargeable: this.isChargeable(ctx.channel, ctx.userId),
-      share: this.shareContext(ctx.channel, ctx.userId),
-      isStream: ctx.isStream,
-      requestPreview: ctx.requestPreview,
-      pricing: ctx.pricing,
-      multiplier: ctx.multiplier,
-      multiplierSource: ctx.multiplierSource,
-    });
-    if (modelDenied) {
-      // 所有候选上游都无该模型权限：返回明确的 model_not_found，而非透传上游 403 文案
-      ctx.res
-        .status(404)
-        .json(
-          ctx.errorBody(
-            `No upstream channel has access to model "${ctx.model}". ` +
-              'The configured upstream key/group does not include this model.',
-            'model_not_found',
-            'model_not_found',
-          ),
-        );
-      return 'responded';
-    }
-    ctx.res
-      .status(e.status || 502)
-      .json(ctx.errorBody(upstreamErrorMessage(e), 'upstream_error'));
-    return 'responded';
   }
 
   /**
@@ -784,10 +543,10 @@ export class GatewayController {
       this.billing.getBillingMultiplier(user.id, group.ratio, user),
       this.resolver.resolve(user.id, model, {
         strategy: apiKey.routingStrategy,
-        stickyKey: this.buildStickyKey(req, user.id, body),
+        stickyKey: this.support.buildStickyKey(req, user.id, body),
         groupId: group.id,
       }),
-      this.checkCapabilities(model, body, res, err),
+      this.support.checkCapabilities(model, body, res, err),
     ]);
     if (!capsOk) return;
     if (channels.length === 0) {
@@ -808,7 +567,7 @@ export class GatewayController {
     let lastError: UpstreamError | null = null;
     let unsupported = false; // 存在候选渠道，但其服务商未实现 embeddings 透传
     let insufficientBalance = false;
-    const guards = this.balanceGuards(user.id, billingInfo.value);
+    const guards = this.support.balanceGuards(user.id, billingInfo.value);
 
     // 客户端断开时中止上游请求，避免连接泄漏（closeTracker 仅在提前断开时置位）
     const upstreamAbort = new AbortController();
@@ -825,7 +584,7 @@ export class GatewayController {
         unsupported = true; // 如 anthropic/gemini 暂无兼容端点 → 换下一家
         continue;
       }
-      if (this.isChargeable(channel, user.id)) {
+      if (this.support.isChargeable(channel, user.id)) {
         // 预授权：embeddings 只有输入 token（输出恒为 0），按输入预估上限（定价随 resolve 带出）
         const required =
           (promptFallback / 1_000_000) * pricing.priceInput * (await guards.getUserMultiplier());
@@ -861,8 +620,8 @@ export class GatewayController {
             ...usage,
             latencyMs: Date.now() - startedAt,
             status: result.status,
-            chargeable: this.isChargeable(channel, user.id),
-            share: this.shareContext(channel, user.id),
+            chargeable: this.support.isChargeable(channel, user.id),
+            share: this.support.shareContext(channel, user.id),
             isStream: false,
             requestPreview,
             responsePreview: embeddingsResponsePreview(result.json),
@@ -884,7 +643,7 @@ export class GatewayController {
         if (closeTracker.isClosed()) return;
         if (e instanceof UpstreamError) {
           lastError = e;
-          const action = await this.handleUpstreamFailure(e, {
+          const action = await this.support.handleUpstreamFailure(e, {
             res,
             channel,
             model,
@@ -989,10 +748,10 @@ export class GatewayController {
       this.billing.getBillingMultiplier(user.id, group.ratio, user),
       this.resolver.resolve(user.id, model, {
         strategy: apiKey.routingStrategy,
-        stickyKey: this.buildStickyKey(req, user.id, body),
+        stickyKey: this.support.buildStickyKey(req, user.id, body),
         groupId: group.id,
       }),
-      this.checkCapabilities(model, body, res, err),
+      this.support.checkCapabilities(model, body, res, err),
     ]);
     if (!capsOk) return;
     if (channels.length === 0) {
@@ -1012,7 +771,7 @@ export class GatewayController {
     let lastError: UpstreamError | null = null;
     let unsupported = false; // 有候选但服务商未实现图片生成
     let insufficientBalance = false;
-    const guards = this.balanceGuards(user.id, billingInfo.value);
+    const guards = this.support.balanceGuards(user.id, billingInfo.value);
 
     // 客户端断开时中止上游请求，避免连接泄漏（closeTracker 仅在提前断开时置位）
     const upstreamAbort = new AbortController();
@@ -1032,7 +791,7 @@ export class GatewayController {
       const pricePerCall = pricing.pricePerCall;
       const costPerCall = pricing.costPerCall;
       // 预授权：按次价 × 张数 × 倍率（未配置按次价时不做按次预授权）
-      if (this.isChargeable(channel, user.id) && pricePerCall > 0) {
+      if (this.support.isChargeable(channel, user.id) && pricePerCall > 0) {
         const required = pricePerCall * n * billingInfo.value;
         if ((await guards.getBalance()) < required) {
           insufficientBalance = true;
@@ -1066,8 +825,8 @@ export class GatewayController {
             ...usage,
             latencyMs: Date.now() - startedAt,
             status: result.status,
-            chargeable: this.isChargeable(channel, user.id),
-            share: this.shareContext(channel, user.id),
+            chargeable: this.support.isChargeable(channel, user.id),
+            share: this.support.shareContext(channel, user.id),
             isStream: false,
             requestPreview,
             responsePreview: `[images ${images}]`,
@@ -1094,7 +853,7 @@ export class GatewayController {
         if (closeTracker.isClosed()) return;
         if (e instanceof UpstreamError) {
           lastError = e;
-          const action = await this.handleUpstreamFailure(e, {
+          const action = await this.support.handleUpstreamFailure(e, {
             res,
             channel,
             model,
@@ -1201,7 +960,7 @@ export class GatewayController {
       this.billing.getBillingMultiplier(user.id, group.ratio, user),
       this.resolver.resolve(user.id, model, {
         strategy: apiKey.routingStrategy,
-        stickyKey: this.buildStickyKey(req, user.id, body),
+        stickyKey: this.support.buildStickyKey(req, user.id, body),
         groupId: group.id,
       }),
     ]);
@@ -1222,7 +981,7 @@ export class GatewayController {
     let lastError: UpstreamError | null = null;
     let insufficientBalance = false;
     let unsupported = false;
-    const guards = this.balanceGuards(user.id, billingInfo.value);
+    const guards = this.support.balanceGuards(user.id, billingInfo.value);
 
     // 客户端断开时中止上游请求，避免连接泄漏（closeTracker 仅在提前断开时置位）
     const upstreamAbort = new AbortController();
@@ -1241,7 +1000,7 @@ export class GatewayController {
       const pricePerCall = pricing.pricePerCall;
       const costPerCall = pricing.costPerCall;
       // 预授权：按次价 × 倍率（未配置按次价时不做预授权）
-      if (this.isChargeable(channel, user.id) && pricePerCall > 0) {
+      if (this.support.isChargeable(channel, user.id) && pricePerCall > 0) {
         const required = pricePerCall * billingInfo.value;
         if ((await guards.getBalance()) < required) {
           insufficientBalance = true;
@@ -1277,8 +1036,8 @@ export class GatewayController {
             ...usage,
             latencyMs: Date.now() - startedAt,
             status: result.status,
-            chargeable: this.isChargeable(channel, user.id),
-            share: this.shareContext(channel, user.id),
+            chargeable: this.support.isChargeable(channel, user.id),
+            share: this.support.shareContext(channel, user.id),
             isStream: false,
             requestPreview,
             responsePreview: taskId ? `[video task ${taskId}]` : '[video task]',
@@ -1306,7 +1065,7 @@ export class GatewayController {
         if (closeTracker.isClosed()) return;
         if (e instanceof UpstreamError) {
           lastError = e;
-          const action = await this.handleUpstreamFailure(e, {
+          const action = await this.support.handleUpstreamFailure(e, {
             res,
             channel,
             model,
@@ -1535,25 +1294,6 @@ export class GatewayController {
       return false;
     }
     return true;
-  }
-
-  /**
-   * 会话粘性键：显式 x-session-id 优先（前端可传会话 ID），否则用 用户 + prompt 前缀。   * 同键请求倾向落同一渠道，保住上游 prompt cache；跨会话/跨请求则自然分散。
-   */
-  private buildStickyKey(
-    req: GatewayRequest,
-    userId: string,
-    body: Record<string, any>,
-  ): string {
-    const sid = req.headers['x-session-id'];
-    if (typeof sid === 'string' && sid.trim()) return sid.trim().slice(0, 128);
-    try {
-      const msgs = Array.isArray(body?.messages) ? body.messages.slice(0, 2) : [];
-      const prefix = msgs.length ? JSON.stringify(msgs).slice(0, 256) : '';
-      return `${userId}:${prefix}`;
-    } catch {
-      return userId;
-    }
   }
 
   private estimateUsage(body: Record<string, any>, json: any) {

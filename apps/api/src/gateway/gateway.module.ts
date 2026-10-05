@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { GatewayController } from './gateway.controller';
+import { ExecSupportService } from './exec-support.service';
 import { ApiKeyGuard } from './guards/api-key.guard';
 import { ChannelResolverService } from './channel-resolver.service';
 import { ProvidersModule } from './providers/providers.module';
@@ -21,6 +22,7 @@ import { GroupsModule } from '../groups/groups.module';
     ChannelHealthService,
     RoutingMetricsService,
     VideoTaskService,
+    ExecSupportService,
   ],
   exports: [ChannelResolverService],
 })

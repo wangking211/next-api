@@ -12,6 +12,7 @@ import { ChannelHealthService } from './channel-health.service';
 import { RoutingMetricsService } from './routing-metrics.service';
 import { GroupsService } from '../groups/groups.service';
 import { VideoTaskService } from './video-task.service';
+import { ExecSupportService } from './exec-support.service';
 
 // @nestjs/swagger@12 仅发布 ESM 产物，jest 默认不转换 node_modules →
 // 本地桩掉装饰器（仅影响本 spec，不改共享 jest 配置）
@@ -51,6 +52,7 @@ describe('pipeStream client-closed handling', () => {
       metrics as unknown as RoutingMetricsService,
       {} as unknown as GroupsService,
       {} as unknown as VideoTaskService,
+      {} as unknown as ExecSupportService,
       config as unknown as ConfigService,
     );
 
