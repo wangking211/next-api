@@ -284,14 +284,14 @@ describe('AuthService 找回密码', () => {
     ).rejects.toMatchObject({ status: 404, response: { code: 'USER_NOT_FOUND' } });
   });
 
-  it('改密码后签发的新密码确实落库（bcrypt 轮数校验）', async () => {
+  it('改密码把明文交给 UsersService（哈希与轮数在那里统一，避免两处漂移）', async () => {
     const { auth, users } = svc({ mailEnabled: true });
     users.findByEmail.mockResolvedValue({ id: 'u1' });
 
     await auth.resetPassword(creds.email, creds.code, creds.password);
 
-    const [id, hash] = users.setPassword.mock.calls[0];
-    expect(id).toBe('u1');
-    await expect(bcrypt.compare(creds.password, hash)).resolves.toBe(true);
+    expect(users.setPassword).toHaveBeenCalledWith('u1', creds.password, {
+      emailVerified: true,
+    });
   });
 });

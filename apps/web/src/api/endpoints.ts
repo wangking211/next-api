@@ -440,6 +440,10 @@ export const adminApi = {
   async adjust(id: string, amount: number, description?: string) {
     await api.post(`/admin/users/${id}/adjust`, { amount, description });
   },
+  /** 管理员重置登录密码（同时强制该用户的全部设备登出） */
+  async resetUserPassword(id: string, password: string) {
+    await api.post(`/admin/users/${id}/reset-password`, { password });
+  },
   /** 用户详情抽屉：该用户的全部 Key（管理端只读视图） */
   async userKeys(id: string, signal?: AbortSignal) {
     const { data } = await api.get<ApiKeyInfo[]>(`/admin/users/${id}/keys`, { signal });

@@ -11,11 +11,10 @@ import { Prisma, User } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { UsersService } from '../users/users.service';
 import { RedisService } from '../redis/redis.service';
+import { hashPassword } from '../common/password.util';
 import { EmailCodeService, type IssueResult } from './email-code.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-
-const BCRYPT_ROUNDS = 12;
 
 export interface SafeUser {
   id: string;
@@ -108,7 +107,7 @@ export class AuthService {
       await this.codes.verify(email, 'register', code);
     }
 
-    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
+    const passwordHash = await hashPassword(dto.password);
     let user: User;
     try {
       user = await this.users.create({
@@ -175,9 +174,9 @@ export class AuthService {
       // 码有效但账号已注销（并发删除的窗口），按「用户不存在」走
       throw new NotFoundException({ code: 'USER_NOT_FOUND', message: 'User not found' });
     }
-    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    // 哈希由 setPassword 统一完成（与注册同一轮数）；
     // 验证码本身即「证明能收这封信」，顺手把邮箱标为已验证
-    await this.users.setPassword(user.id, passwordHash, { emailVerified: true });
+    await this.users.setPassword(user.id, password, { emailVerified: true });
     await this.codes.clear(target, 'reset');
   }
 

@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Role, User, UserStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { hashPassword } from '../common/password.util';
 
 /** 用户列表筛选项（全部可选，未提供即不过滤） */
 export interface UserListFilters {
@@ -92,14 +93,17 @@ export class UsersService {
   }
 
   /**
-   * 重置密码：同时自增 tokenVersion，让该用户名下已签发的 JWT 立即失效
-   * （找回密码与管理员重置都要强制下线旧会话，否则改了密码也拦不住已登录的设备）。
+   * 重置密码：入参是**明文**，哈希在服务内完成（与注册同一轮数，调用方不必自己 bcrypt）。
+   *
+   * 同时自增 tokenVersion，让该用户名下已签发的 JWT 立即失效——找回密码与
+   * 管理员重置都要强制下线旧会话，否则改了密码也拦不住已登录的设备。
    */
   async setPassword(
     id: string,
-    passwordHash: string,
+    plainPassword: string,
     opts: { emailVerified?: boolean } = {},
   ): Promise<User> {
+    const passwordHash = await hashPassword(plainPassword);
     return this.prisma.user.update({
       where: { id },
       data: {

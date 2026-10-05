@@ -18,6 +18,7 @@ import type { UserListFilters } from '../users/users.service';
 import { RechargeDto } from './dto/recharge.dto';
 import { AdjustDto } from './dto/adjust.dto';
 import { AdminUpdateUserDto } from './dto/admin-update-user.dto';
+import { AdminResetPasswordDto } from './dto/admin-reset-password.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -214,5 +215,17 @@ export class AdminUsersController {
     @Body() dto: AdjustDto,
   ) {
     return this.billing.adjust(operator.id, id, dto.amount, dto.description);
+  }
+
+  /**
+   * 管理员重置该用户的登录密码：邮箱验证码自助找回不可用时的运维止血手段
+   * （SMTP 未配置、用户邮箱已失效等）。哈希与轮数在 `setPassword` 内统一完成，
+   * 成功后该用户名下所有已签发令牌立即失效（强制下线全部设备）。
+   */
+  @Post(':id/reset-password')
+  async resetPassword(@Param('id') id: string, @Body() dto: AdminResetPasswordDto) {
+    await this.users.getOrThrow(id);
+    await this.users.setPassword(id, dto.password);
+    return { ok: true };
   }
 }

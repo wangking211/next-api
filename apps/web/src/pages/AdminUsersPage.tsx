@@ -5,6 +5,7 @@ import {
   Card,
   Col,
   DatePicker,
+  Divider,
   Form,
   Input,
   InputNumber,
@@ -56,6 +57,8 @@ export default function AdminUsersPage() {
   const [detailUser, setDetailUser] = useState<AdminUser | null>(null);
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
+  // 重置密码用独立表单实例：与「编辑资料」共用一个 Form 会被 OK 按钮一并提交
+  const [resetForm] = Form.useForm();
 
   const filters = {
     q: q || undefined,
@@ -151,7 +154,21 @@ export default function AdminUsersPage() {
       agentId: u.agentId ?? undefined,
       groupId: u.groupId ?? undefined,
     });
+    resetForm.resetFields();
   };
+
+  // 重置登录密码：独立提交，不与上面的资料编辑混在同一个 onFinish 里
+  const resetPasswordMut = useMutation({
+    mutationFn: async (password: string) => {
+      if (!editUser) return;
+      await adminApi.resetUserPassword(editUser.id, password);
+    },
+    onSuccess: () => {
+      // 密码不出现在列表里，无需 invalidate；只清表单免得二次使用时带上旧值
+      resetForm.resetFields();
+      message.success(t('admin.users.resetPasswordSuccess'));
+    },
+  });
 
   const { data: uSummary } = useQuery({
     queryKey: ['admin', 'user-usage', 'summary', usageUser?.id],
@@ -568,6 +585,7 @@ export default function AdminUsersPage() {
         onCancel={() => {
           setEditUser(null);
           editForm.resetFields();
+          resetForm.resetFields();
         }}
         onOk={() => editForm.submit()}
         confirmLoading={saveEditMut.isPending}
@@ -638,6 +656,42 @@ export default function AdminUsersPage() {
               placeholder={t('admin.users.rebatePlaceholder')}
             />
           </Form.Item>
+        </Form>
+
+        {/* 独立表单：重置密码不随「保存」一起提交，避免误改 */}
+        <Divider plain>{t('admin.users.resetPasswordTitle')}</Divider>
+        <Form
+          form={resetForm}
+          layout="vertical"
+          onFinish={(v) => resetPasswordMut.mutate(v.password)}
+          requiredMark={false}
+        >
+          <Form.Item
+            name="password"
+            label={t('admin.users.resetPasswordLabel')}
+            extra={t('admin.users.resetPasswordExtra')}
+            rules={[
+              { required: true, message: t('auth.form.passwordRequired') },
+              { min: 8, message: t('auth.form.passwordMinLength') },
+              {
+                pattern: /(?=.*[A-Za-z])(?=.*\d)/,
+                message: t('auth.form.passwordComplexity'),
+              },
+            ]}
+          >
+            <Input.Password
+              placeholder={t('auth.form.passwordRegisterPlaceholder')}
+              autoComplete="new-password"
+            />
+          </Form.Item>
+          <Button
+            type="primary"
+            htmlType="submit"
+            block
+            loading={resetPasswordMut.isPending}
+          >
+            {t('admin.users.resetPasswordSubmit')}
+          </Button>
         </Form>
       </Modal>
 

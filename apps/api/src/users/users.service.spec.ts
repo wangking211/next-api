@@ -1,5 +1,6 @@
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
+import * as bcrypt from 'bcryptjs';
 
 describe('UsersService.list 筛选与排序', () => {
   function svc() {
@@ -178,5 +179,41 @@ describe('UsersService 登录标识查找', () => {
     expect(findFirst).toHaveBeenCalledWith({
       where: { username: { equals: 'Admin', mode: 'insensitive' } },
     });
+  });
+});
+
+describe('UsersService.setPassword 管理员/自助重置密码', () => {
+  function svc() {
+    const prisma = { user: { update: jest.fn().mockResolvedValue({ id: 'u1' }) } };
+    return { service: new UsersService(prisma as unknown as PrismaService), prisma };
+  }
+
+  it('入参是明文，服务内完成 bcrypt 哈希，并自增 tokenVersion 强制下线旧会话', async () => {
+    const { service, prisma } = svc();
+
+    await service.setPassword('u1', 'newpass123');
+
+    const arg = prisma.user.update.mock.calls[0][0];
+    expect(arg.where).toEqual({ id: 'u1' });
+    expect(arg.data.passwordHash).not.toBe('newpass123');
+    await expect(bcrypt.compare('newpass123', arg.data.passwordHash)).resolves.toBe(true);
+    // 不是明文、也不是空串，且确实要求自增（幂等写死值会让旧会话继续有效）
+    expect(arg.data.tokenVersion).toEqual({ increment: 1 });
+  });
+
+  it('未传 opts 时不写 emailVerified（管理员重置不篡改邮箱验证状态）', async () => {
+    const { service, prisma } = svc();
+
+    await service.setPassword('u1', 'newpass123');
+
+    expect(prisma.user.update.mock.calls[0][0].data).not.toHaveProperty('emailVerified');
+  });
+
+  it('自助找回密码带 emailVerified=true 时才落库', async () => {
+    const { service, prisma } = svc();
+
+    await service.setPassword('u1', 'newpass123', { emailVerified: true });
+
+    expect(prisma.user.update.mock.calls[0][0].data.emailVerified).toBe(true);
   });
 });
