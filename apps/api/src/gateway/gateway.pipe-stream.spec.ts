@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { Response } from 'express';
 import type { Channel } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
-import { GatewayController } from './gateway.controller';
+import { ChatExecutorService } from './chat-executor.service';
 import type { StreamResult } from './types';
 import { ChannelResolverService } from './channel-resolver.service';
 import { ProviderRegistry } from './providers/provider.registry';
@@ -11,18 +11,7 @@ import { BillingService } from '../billing/billing.service';
 import { ChannelHealthService } from './channel-health.service';
 import { RoutingMetricsService } from './routing-metrics.service';
 import { GroupsService } from '../groups/groups.service';
-import { VideoExecutorService } from './video-executor.service';
-import { EmbeddingsExecutorService } from './embeddings-executor.service';
-import { ImagesExecutorService } from './images-executor.service';
 import { ExecSupportService } from './exec-support.service';
-
-// @nestjs/swagger@12 仅发布 ESM 产物，jest 默认不转换 node_modules →
-// 本地桩掉装饰器（仅影响本 spec，不改共享 jest 配置）
-jest.mock('@nestjs/swagger', () => ({
-  ApiTags: () => () => undefined,
-  ApiOperation: () => () => undefined,
-  ApiBearerAuth: () => () => undefined,
-}));
 
 /**
  * D1（a）快照缺陷回归：旧 pipeStream 在 for await 循环**前**一次性读取
@@ -45,7 +34,7 @@ describe('pipeStream client-closed handling', () => {
     const health = { recordSuccess: jest.fn(), recordFailure: jest.fn() };
     const metrics = { record: jest.fn() };
     const config = { get: (_k: string, d?: string) => d };
-    const controller = new GatewayController(
+    const executor = new ChatExecutorService(
       {} as unknown as ChannelResolverService,
       {} as unknown as ProviderRegistry,
       usage as unknown as UsageService,
@@ -54,9 +43,6 @@ describe('pipeStream client-closed handling', () => {
       metrics as unknown as RoutingMetricsService,
       {} as unknown as GroupsService,
       {} as unknown as ExecSupportService,
-      {} as unknown as VideoExecutorService,
-      {} as unknown as EmbeddingsExecutorService,
-      {} as unknown as ImagesExecutorService,
       config as unknown as ConfigService,
     );
 
@@ -83,7 +69,7 @@ describe('pipeStream client-closed handling', () => {
       failureCount: 0,
     } as unknown as Channel;
 
-    return { controller, usage, health, metrics, res: res as unknown as Response, channel };
+    return { executor, usage, health, metrics, res: res as unknown as Response, channel };
   }
 
   function metaOf(channel: Channel, isClientClosed: () => boolean) {
@@ -105,7 +91,7 @@ describe('pipeStream client-closed handling', () => {
   }
 
   it('records 499 + client-closed message and skips channel health on mid-stream disconnect', async () => {
-    const { controller, usage, health, metrics, res, channel } = setup();
+    const { executor, usage, health, metrics, res, channel } = setup();
     let disconnected = false;
     const result: StreamResult = {
       status: 200,
@@ -116,7 +102,7 @@ describe('pipeStream client-closed handling', () => {
       })(),
     };
 
-    await controller['pipeStream'](res, result, metaOf(channel, () => disconnected));
+    await executor['pipeStream'](res, result, metaOf(channel, () => disconnected));
 
     expect(usage.record).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -131,7 +117,7 @@ describe('pipeStream client-closed handling', () => {
   });
 
   it('records 200 + channel success on normal completion (no false 499)', async () => {
-    const { controller, usage, health, res, channel } = setup();
+    const { executor, usage, health, res, channel } = setup();
     const result: StreamResult = {
       status: 200,
       chunks: (async function* () {
@@ -140,7 +126,7 @@ describe('pipeStream client-closed handling', () => {
       })(),
     };
 
-    await controller['pipeStream'](res, result, metaOf(channel, () => false));
+    await executor['pipeStream'](res, result, metaOf(channel, () => false));
 
     expect(usage.record).toHaveBeenCalledWith(
       expect.objectContaining({ status: 200, errorMessage: null }),

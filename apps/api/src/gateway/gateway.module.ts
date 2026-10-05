@@ -4,6 +4,7 @@ import { ExecSupportService } from './exec-support.service';
 import { VideoExecutorService } from './video-executor.service';
 import { EmbeddingsExecutorService } from './embeddings-executor.service';
 import { ImagesExecutorService } from './images-executor.service';
+import { ChatExecutorService } from './chat-executor.service';
 import { ApiKeyGuard } from './guards/api-key.guard';
 import { ChannelResolverService } from './channel-resolver.service';
 import { ProvidersModule } from './providers/providers.module';
@@ -29,6 +30,7 @@ import { GroupsModule } from '../groups/groups.module';
     VideoExecutorService,
     EmbeddingsExecutorService,
     ImagesExecutorService,
+    ChatExecutorService,
   ],
   exports: [ChannelResolverService],
 })
