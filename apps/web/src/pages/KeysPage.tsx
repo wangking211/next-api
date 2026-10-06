@@ -143,7 +143,15 @@ export default function KeysPage() {
         scroll={{ x: 1100 }}
         columns={[
           { title: t('keys.table.name'), dataIndex: 'name' },
-          { title: 'Key', dataIndex: 'keyPrefix', render: (v: string) => <code>{v}</code> },
+          {
+            title: <Tooltip title={t('keys.table.keyTooltip')}>Key</Tooltip>,
+            dataIndex: 'keyPrefix',
+            render: (v: string) => (
+              <Tooltip title={t('keys.table.keyTooltip')}>
+                <code>{v}</code>
+              </Tooltip>
+            ),
+          },
           {
             title: t('common.status'),
             dataIndex: 'status',

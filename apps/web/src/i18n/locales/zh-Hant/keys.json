@@ -4,6 +4,7 @@
   "keys.enable": "啟用",
   "keys.confirmDeleteKey": "確定刪除該 Key？",
   "keys.table.name": "名稱",
+  "keys.table.keyTooltip": "完整 Key 僅在建立時顯示一次，清單只保存前綴，無法再次複製；若已遺失，請刪除後重新建立",
   "keys.table.tokenUsage": "Token 用量",
   "keys.table.costUsage": "費用用量",
   "keys.table.costUsageTooltip": "僅累計實際扣費的呼叫；BYOK 自帶金鑰的呼叫不消耗費用限額",

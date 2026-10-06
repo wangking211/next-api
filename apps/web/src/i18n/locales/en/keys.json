@@ -4,6 +4,7 @@
   "keys.enable": "Enable",
   "keys.confirmDeleteKey": "Delete this key?",
   "keys.table.name": "Name",
+  "keys.table.keyTooltip": "The full key is shown only once at creation; this list stores just the prefix and cannot copy it again. Delete the key and create a new one if it was lost",
   "keys.table.tokenUsage": "Token usage",
   "keys.table.costUsage": "Cost usage",
   "keys.table.costUsageTooltip": "Counts only billable calls; BYOK keys do not consume quota",
