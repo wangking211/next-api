@@ -19,9 +19,20 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          package-manager-cache: false
       - name: Enable pnpm (corepack)
         run: corepack enable
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path 2>/dev/null || echo "$HOME/.local/share/pnpm/store")" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.pnpm-store.outputs.path }}
+            ~/.cache/node/corepack
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Prisma generate
@@ -75,9 +86,20 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          package-manager-cache: false
       - name: Enable pnpm (corepack)
         run: corepack enable
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path 2>/dev/null || echo "$HOME/.local/share/pnpm/store")" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.pnpm-store.outputs.path }}
+            ~/.cache/node/corepack
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Prisma generate
