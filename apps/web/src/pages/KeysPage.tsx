@@ -15,10 +15,12 @@ import {
   Tooltip,
   Typography,
 } from 'antd';
-import { PlusOutlined, CopyOutlined } from '@ant-design/icons';
+import { PlusOutlined, CopyOutlined, ApiOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { keysApi, groupsApi } from '../api/endpoints';
+import { testKeyConnectivity } from '../api/keyConnectivity';
+import type { KeyConnectivityResult } from '../api/keyConnectivity';
 import { useAuth } from '../auth/AuthContext';
 import { formatDateTime, formatCredits } from '../utils/format';
 import QueryError from '../components/QueryError';
@@ -63,7 +65,27 @@ export default function KeysPage() {
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [created, setCreated] = useState<ApiKeyCreated | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<KeyConnectivityResult | null>(null);
   const [form] = Form.useForm();
+
+  /** 关闭创建弹窗并清掉连通测试结果，避免下次打开残留上次状态 */
+  const closeCreated = () => {
+    setCreated(null);
+    setTestResult(null);
+  };
+
+  /** 用弹窗里的一次性明文 Key 请求 /v1/models：验证 Key 有效且网关可达（不计费） */
+  const runConnectivityTest = async () => {
+    if (!created?.plaintext) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      setTestResult(await testKeyConnectivity(created.plaintext));
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const {
     data: keys = [],
@@ -378,9 +400,9 @@ export default function KeysPage() {
       <Modal
         title={t('keys.createdModal.title')}
         open={!!created}
-        onCancel={() => setCreated(null)}
+        onCancel={closeCreated}
         footer={[
-          <Button key="close" type="primary" onClick={() => setCreated(null)}>
+          <Button key="close" type="primary" onClick={closeCreated}>
             {t('keys.createdModal.saved')}
           </Button>,
         ]}
@@ -392,6 +414,29 @@ export default function KeysPage() {
             {t('common.copy')}
           </Button>
         </Space.Compact>
+        <Space style={{ marginTop: 12 }}>
+          <Button
+            icon={<ApiOutlined />}
+            loading={testing}
+            disabled={!created?.plaintext}
+            onClick={runConnectivityTest}
+          >
+            {t('keys.createdModal.test')}
+          </Button>
+          {testResult?.ok ? (
+            <Typography.Text type="success">
+              {t('keys.createdModal.testOk', {
+                count: testResult.modelCount,
+                ms: testResult.latencyMs,
+              })}
+            </Typography.Text>
+          ) : null}
+          {testResult && !testResult.ok ? (
+            <Typography.Text type="danger">
+              {t('keys.createdModal.testFail', { detail: testResult.detail })}
+            </Typography.Text>
+          ) : null}
+        </Space>
       </Modal>
     </Card>
   );
