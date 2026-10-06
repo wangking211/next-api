@@ -38,6 +38,7 @@
   "keys.form.modelsPlaceholder": "e.g. gpt-4o-mini, press Enter to add",
   "keys.form.example": "e.g. {{value}}",
   "keys.createdModal.title": "API key created",
+  "keys.createdModal.warning": "Save this key now — the plaintext is shown only here, once, and cannot be retrieved after you close this dialog",
   "keys.createdModal.saved": "I've saved it",
   "keys.toast.updated": "Updated",
   "keys.toast.deleted": "Deleted",

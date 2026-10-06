@@ -38,6 +38,7 @@
   "keys.form.modelsPlaceholder": "例如 gpt-4o-mini，回车添加",
   "keys.form.example": "例如 {{value}}",
   "keys.createdModal.title": "Key 创建成功",
+  "keys.createdModal.warning": "请立即保存该 Key：明文只在这里显示一次，关闭弹窗后无法再次查看",
   "keys.createdModal.saved": "我已保存",
   "keys.toast.updated": "已更新",
   "keys.toast.deleted": "已删除",

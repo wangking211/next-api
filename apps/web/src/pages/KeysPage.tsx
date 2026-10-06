@@ -65,7 +65,12 @@ export default function KeysPage() {
   const [created, setCreated] = useState<ApiKeyCreated | null>(null);
   const [form] = Form.useForm();
 
-  const { data: keys = [], isLoading, isError, refetch } = useQuery({
+  const {
+    data: keys = [],
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
     queryKey: ['keys'],
     queryFn: ({ signal }) => keysApi.list(signal),
   });
@@ -86,8 +91,7 @@ export default function KeysPage() {
   });
 
   const updateMut = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      keysApi.update(id, { status }),
+    mutationFn: ({ id, status }: { id: string; status: string }) => keysApi.update(id, { status }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['keys'] });
       message.success(t('keys.toast.updated'));
@@ -150,7 +154,8 @@ export default function KeysPage() {
           },
           {
             title: t('keys.table.tokenUsage'),
-            render: (_, r) => (r.quotaLimit ? `${r.quotaUsed} / ${r.quotaLimit}` : `${r.quotaUsed} / ∞`),
+            render: (_, r) =>
+              r.quotaLimit ? `${r.quotaUsed} / ${r.quotaLimit}` : `${r.quotaUsed} / ∞`,
           },
           {
             title: (
@@ -166,7 +171,7 @@ export default function KeysPage() {
           {
             title: 'RPM',
             dataIndex: 'rpmLimit',
-            render: (v: number | null) => (v ?? '∞'),
+            render: (v: number | null) => v ?? '∞',
           },
           {
             title: (
@@ -177,12 +182,16 @@ export default function KeysPage() {
             dataIndex: 'routingStrategy',
             width: 100,
             render: (v: RoutingStrategy | null) =>
-              v ? <Tag color="blue">{t(STRATEGY_LABEL[v])}</Tag> : <Tag>{t('keys.strategyLabel.default')}</Tag>,
+              v ? (
+                <Tag color="blue">{t(STRATEGY_LABEL[v])}</Tag>
+              ) : (
+                <Tag>{t('keys.strategyLabel.default')}</Tag>
+              ),
           },
           {
             title: 'TPM',
             dataIndex: 'tpmLimit',
-            render: (v: number | null) => (v ?? '∞'),
+            render: (v: number | null) => v ?? '∞',
           },
           {
             title: t('keys.table.modelWhitelist'),
@@ -235,11 +244,17 @@ export default function KeysPage() {
             render: (_, r) => (
               <Space>
                 {r.status === 'ACTIVE' ? (
-                  <Button size="small" onClick={() => updateMut.mutate({ id: r.id, status: 'DISABLED' })}>
+                  <Button
+                    size="small"
+                    onClick={() => updateMut.mutate({ id: r.id, status: 'DISABLED' })}
+                  >
                     {t('keys.disable')}
                   </Button>
                 ) : (
-                  <Button size="small" onClick={() => updateMut.mutate({ id: r.id, status: 'ACTIVE' })}>
+                  <Button
+                    size="small"
+                    onClick={() => updateMut.mutate({ id: r.id, status: 'ACTIVE' })}
+                  >
                     {t('keys.enable')}
                   </Button>
                 )}
@@ -271,20 +286,34 @@ export default function KeysPage() {
           onFinish={(v) => createMut.mutate(v)}
           requiredMark={false}
         >
-          <Form.Item name="name" label={t('keys.form.name')} rules={[{ required: true, message: t('keys.form.nameRequired') }]}>
+          <Form.Item
+            name="name"
+            label={t('keys.form.name')}
+            rules={[{ required: true, message: t('keys.form.nameRequired') }]}
+          >
             <Input placeholder={t('keys.form.namePlaceholder')} />
           </Form.Item>
           <Form.Item name="quotaLimit" label={t('keys.form.quotaLimit')}>
-            <InputNumber min={1} style={{ width: '100%' }} placeholder={t('keys.form.example', { value: 1000000 })} />
+            <InputNumber
+              min={1}
+              style={{ width: '100%' }}
+              placeholder={t('keys.form.example', { value: 1000000 })}
+            />
           </Form.Item>
-          <Form.Item
-            name="costLimit"
-            label={t('keys.form.costLimit')}
-          >
-            <InputNumber min={0} step={0.1} style={{ width: '100%' }} placeholder={t('keys.form.example', { value: 10 })} />
+          <Form.Item name="costLimit" label={t('keys.form.costLimit')}>
+            <InputNumber
+              min={0}
+              step={0.1}
+              style={{ width: '100%' }}
+              placeholder={t('keys.form.example', { value: 10 })}
+            />
           </Form.Item>
           <Form.Item name="rpmLimit" label={t('keys.form.rpmLimit')}>
-            <InputNumber min={1} style={{ width: '100%' }} placeholder={t('keys.form.example', { value: 60 })} />
+            <InputNumber
+              min={1}
+              style={{ width: '100%' }}
+              placeholder={t('keys.form.example', { value: 60 })}
+            />
           </Form.Item>
           <Form.Item
             name="routingStrategy"
@@ -294,11 +323,18 @@ export default function KeysPage() {
             <Select
               allowClear
               placeholder={t('keys.strategyOption.balanced')}
-              options={STRATEGY_OPTIONS.map(({ value, labelKey }) => ({ value, label: t(labelKey) }))}
+              options={STRATEGY_OPTIONS.map(({ value, labelKey }) => ({
+                value,
+                label: t(labelKey),
+              }))}
             />
           </Form.Item>
           <Form.Item name="tpmLimit" label={t('keys.form.tpmLimit')}>
-            <InputNumber min={1} style={{ width: '100%' }} placeholder={t('keys.form.example', { value: 100000 })} />
+            <InputNumber
+              min={1}
+              style={{ width: '100%' }}
+              placeholder={t('keys.form.example', { value: 100000 })}
+            />
           </Form.Item>
           {isAdmin && (
             <Form.Item
@@ -316,7 +352,9 @@ export default function KeysPage() {
           <Form.Item
             name="models"
             label={t('keys.form.models')}
-            normalize={(v: unknown) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : v)}
+            normalize={(v: unknown) =>
+              Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : v
+            }
           >
             <Select
               mode="tags"
@@ -339,14 +377,12 @@ export default function KeysPage() {
           </Button>,
         ]}
       >
-        <Typography.Paragraph type="warning">
-          {created?.warning}
-        </Typography.Paragraph>
+        <Typography.Paragraph type="warning">{t('keys.createdModal.warning')}</Typography.Paragraph>
         <Space.Compact style={{ width: '100%' }}>
           <Input readOnly value={created?.plaintext} />
-          <Tooltip title={t('common.copy')}>
-            <Button icon={<CopyOutlined />} onClick={() => copy(created!.plaintext)} />
-          </Tooltip>
+          <Button type="primary" icon={<CopyOutlined />} onClick={() => copy(created!.plaintext)}>
+            {t('common.copy')}
+          </Button>
         </Space.Compact>
       </Modal>
     </Card>
