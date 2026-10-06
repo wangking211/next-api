@@ -19,6 +19,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+          # corepack 在本步之后才启用，setup-node 此时找不到 pnpm → 必须关闭它的包管理器缓存；
+          # pnpm store / corepack 下载由下面的 actions/cache 兜住
+          package-manager-cache: false
       - name: Enable pnpm (corepack)
         run: corepack enable
       - name: Resolve pnpm store path
@@ -86,6 +89,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+          # corepack 在本步之后才启用，setup-node 此时找不到 pnpm → 必须关闭它的包管理器缓存；
+          # pnpm store / corepack 下载由下面的 actions/cache 兜住
+          package-manager-cache: false
       - name: Enable pnpm (corepack)
         run: corepack enable
       - name: Resolve pnpm store path
