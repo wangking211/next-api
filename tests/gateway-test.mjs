@@ -1,20 +1,5 @@
-const API = 'http://localhost:3000';
-let pass = 0;
-let fail = 0;
-function check(name, cond, extra) {
-  if (cond) { pass++; console.log(`PASS  ${name}`); }
-  else { fail++; console.log(`FAIL  ${name}  -> ${JSON.stringify(extra)}`); }
-}
-async function api(method, path, { token, body } = {}) {
-  const res = await fetch(API + path, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  let data = null;
-  try { data = await res.json(); } catch { /* ignore */ }
-  return { status: res.status, data };
-}
+import { API, api, check, finish } from './helpers.mjs';
+
 async function collectStream(path, key, body) {
   const res = await fetch(API + path, {
     method: 'POST',
@@ -59,7 +44,9 @@ const tGood = await api('POST', `/api/channels/${chGood.data.id}/test`, {
 });
 check(
   'channel test ok',
-  tGood.status === 201 && tGood.data.summary?.ok === 1 && tGood.data.results?.[0]?.sample === 'Hello from mock',
+  tGood.status === 201 &&
+    tGood.data.summary?.ok === 1 &&
+    tGood.data.results?.[0]?.sample === 'Hello from mock',
   tGood.data,
 );
 const tBad = await api('POST', `/api/channels/${chBad.data.id}/test`, { token: jwt, body: {} });
@@ -68,15 +55,27 @@ check(
   tBad.status === 201 && tBad.data.summary?.failed === 1 && tBad.data.results?.[0]?.status === 500,
   tBad.data,
 );
-const tMissing = await api('POST', `/api/channels/00000000-0000-0000-0000-000000000000/test`, { token: jwt, body: {} });
+const tMissing = await api('POST', `/api/channels/00000000-0000-0000-0000-000000000000/test`, {
+  token: jwt,
+  body: {},
+});
 check('channel test unknown id -> 404', tMissing.status === 404, tMissing.status);
 
 // 弹窗内测试（未保存配置）+ 多模型批量
 const tcInline = await api('POST', '/api/channels/test-connection', {
   token: jwt,
-  body: { provider: 'openai', baseUrl: 'http://localhost:4001/good/v1', apiKey: 'inline-key', models: ['gpt-test'] },
+  body: {
+    provider: 'openai',
+    baseUrl: 'http://localhost:4001/good/v1',
+    apiKey: 'inline-key',
+    models: ['gpt-test'],
+  },
 });
-check('test-connection inline ok', tcInline.status === 201 && tcInline.data.summary?.ok === 1, tcInline.data);
+check(
+  'test-connection inline ok',
+  tcInline.status === 201 && tcInline.data.summary?.ok === 1,
+  tcInline.data,
+);
 const tcMulti = await api('POST', '/api/channels/test-connection', {
   token: jwt,
   body: {
@@ -88,14 +87,26 @@ const tcMulti = await api('POST', '/api/channels/test-connection', {
 });
 check(
   'test-connection batch tests all models',
-  tcMulti.status === 201 && tcMulti.data.summary?.total === 3 && tcMulti.data.summary?.ok === 3 && tcMulti.data.results.length === 3,
+  tcMulti.status === 201 &&
+    tcMulti.data.summary?.total === 3 &&
+    tcMulti.data.summary?.ok === 3 &&
+    tcMulti.data.results.length === 3,
   tcMulti.data,
 );
 const tcStored = await api('POST', '/api/channels/test-connection', {
   token: jwt,
-  body: { provider: 'openai', baseUrl: 'http://localhost:4001/good/v1', channelId: chGood.data.id, models: ['gpt-test'] },
+  body: {
+    provider: 'openai',
+    baseUrl: 'http://localhost:4001/good/v1',
+    channelId: chGood.data.id,
+    models: ['gpt-test'],
+  },
 });
-check('test-connection reuses stored key', tcStored.status === 201 && tcStored.data.summary?.ok === 1, tcStored.data);
+check(
+  'test-connection reuses stored key',
+  tcStored.status === 201 && tcStored.data.summary?.ok === 1,
+  tcStored.data,
+);
 const tcNoModel = await api('POST', '/api/channels/test-connection', {
   token: jwt,
   body: { provider: 'openai', baseUrl: 'http://localhost:4001/good/v1', apiKey: 'k' },
@@ -109,7 +120,10 @@ const edit = await api('PATCH', `/api/channels/${chGood.data.id}`, {
 });
 check(
   'edit channel updates fields',
-  edit.status === 200 && edit.data.name === 'good-openai-edited' && edit.data.priority === 7 && edit.data.hasApiKey === true,
+  edit.status === 200 &&
+    edit.data.name === 'good-openai-edited' &&
+    edit.data.priority === 7 &&
+    edit.data.hasApiKey === true,
   edit.data,
 );
 
@@ -137,53 +151,104 @@ const nonStream = await fetch(API + '/v1/chat/completions', {
 });
 const nonStreamJson = await nonStream.json();
 check('openai non-stream 200', nonStream.status === 200, nonStreamJson);
-check('openai non-stream content', nonStreamJson.choices?.[0]?.message?.content === 'Hello from mock', nonStreamJson);
+check(
+  'openai non-stream content',
+  nonStreamJson.choices?.[0]?.message?.content === 'Hello from mock',
+  nonStreamJson,
+);
 check('openai non-stream usage', nonStreamJson.usage?.total_tokens === 18, nonStreamJson.usage);
 
 // 4. OpenAI 流式
 const s1 = await collectStream('/v1/chat/completions', sk, {
-  model: 'gpt-test', stream: true, messages: [{ role: 'user', content: 'hi' }],
+  model: 'gpt-test',
+  stream: true,
+  messages: [{ role: 'user', content: 'hi' }],
 });
 check('openai stream 200', s1.status === 200, s1.status);
-check('openai stream has content chunks', s1.text.includes('"content":"Hello"'), s1.text.slice(0, 200));
+check(
+  'openai stream has content chunks',
+  s1.text.includes('"content":"Hello"'),
+  s1.text.slice(0, 200),
+);
 check('openai stream DONE', s1.text.includes('data: [DONE]'), s1.text.slice(-120));
 
 // 5. Anthropic 非流式（协议转换）
 const anth = await fetch(API + '/v1/chat/completions', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sk}` },
-  body: JSON.stringify({ model: 'claude-test', messages: [{ role: 'system', content: 'be nice' }, { role: 'user', content: 'hi' }] }),
+  body: JSON.stringify({
+    model: 'claude-test',
+    messages: [
+      { role: 'system', content: 'be nice' },
+      { role: 'user', content: 'hi' },
+    ],
+  }),
 });
 const anthJson = await anth.json();
 check('anthropic non-stream 200', anth.status === 200, anthJson);
-check('anthropic -> openai shape', anthJson.object === 'chat.completion' && anthJson.choices?.[0]?.message?.content === 'Hello from claude', anthJson);
-check('anthropic usage mapped', anthJson.usage?.prompt_tokens === 9 && anthJson.usage?.completion_tokens === 5, anthJson.usage);
+check(
+  'anthropic -> openai shape',
+  anthJson.object === 'chat.completion' &&
+    anthJson.choices?.[0]?.message?.content === 'Hello from claude',
+  anthJson,
+);
+check(
+  'anthropic usage mapped',
+  anthJson.usage?.prompt_tokens === 9 && anthJson.usage?.completion_tokens === 5,
+  anthJson.usage,
+);
 
 // 6. Anthropic 流式（SSE 事件 -> OpenAI chunk）
 const s2 = await collectStream('/v1/chat/completions', sk, {
-  model: 'claude-test', stream: true, messages: [{ role: 'user', content: 'hi' }],
+  model: 'claude-test',
+  stream: true,
+  messages: [{ role: 'user', content: 'hi' }],
 });
 check('anthropic stream 200', s2.status === 200, s2.status);
-check('anthropic stream converted to openai chunk', s2.text.includes('"object":"chat.completion.chunk"') && s2.text.includes('"content":"Hello"'), s2.text.slice(0, 300));
+check(
+  'anthropic stream converted to openai chunk',
+  s2.text.includes('"object":"chat.completion.chunk"') && s2.text.includes('"content":"Hello"'),
+  s2.text.slice(0, 300),
+);
 check('anthropic stream DONE', s2.text.includes('data: [DONE]'), s2.text.slice(-120));
 
 // 7. Gemini 非流式（原生协议转换）
 const gem = await fetch(API + '/v1/chat/completions', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sk}` },
-  body: JSON.stringify({ model: 'gemini-test', messages: [{ role: 'system', content: 'be brief' }, { role: 'user', content: 'hi' }] }),
+  body: JSON.stringify({
+    model: 'gemini-test',
+    messages: [
+      { role: 'system', content: 'be brief' },
+      { role: 'user', content: 'hi' },
+    ],
+  }),
 });
 const gemJson = await gem.json();
 check('gemini non-stream 200', gem.status === 200, gemJson);
-check('gemini -> openai shape', gemJson.object === 'chat.completion' && gemJson.choices?.[0]?.message?.content === 'Hello gemini', gemJson);
-check('gemini usage mapped', gemJson.usage?.prompt_tokens === 8 && gemJson.usage?.completion_tokens === 4, gemJson.usage);
+check(
+  'gemini -> openai shape',
+  gemJson.object === 'chat.completion' && gemJson.choices?.[0]?.message?.content === 'Hello gemini',
+  gemJson,
+);
+check(
+  'gemini usage mapped',
+  gemJson.usage?.prompt_tokens === 8 && gemJson.usage?.completion_tokens === 4,
+  gemJson.usage,
+);
 
 // 8. Gemini 流式（SSE -> OpenAI chunk）
 const s3 = await collectStream('/v1/chat/completions', sk, {
-  model: 'gemini-test', stream: true, messages: [{ role: 'user', content: 'hi' }],
+  model: 'gemini-test',
+  stream: true,
+  messages: [{ role: 'user', content: 'hi' }],
 });
 check('gemini stream 200', s3.status === 200, s3.status);
-check('gemini stream converted', s3.text.includes('"object":"chat.completion.chunk"') && s3.text.includes('"content":"Hello"'), s3.text.slice(0, 300));
+check(
+  'gemini stream converted',
+  s3.text.includes('"object":"chat.completion.chunk"') && s3.text.includes('"content":"Hello"'),
+  s3.text.slice(0, 300),
+);
 check('gemini stream DONE', s3.text.includes('data: [DONE]'), s3.text.slice(-120));
 
 // 8.5. embeddings（OpenAI 兼容透传：批量/单条/入参校验/鉴权）
@@ -211,7 +276,11 @@ const embOne = await api('POST', '/v1/embeddings', {
   token: sk,
   body: { model: 'gpt-test', input: 'single string' },
 });
-check('embeddings single string -> 1 vector', embOne.status === 200 && embOne.data?.data?.length === 1, embOne.data);
+check(
+  'embeddings single string -> 1 vector',
+  embOne.status === 200 && embOne.data?.data?.length === 1,
+  embOne.data,
+);
 const embNoInput = await api('POST', '/v1/embeddings', { token: sk, body: { model: 'gpt-test' } });
 check('embeddings missing input -> 400', embNoInput.status === 400, embNoInput.data);
 const embNoModel = await api('POST', '/v1/embeddings', { token: sk, body: { input: 'x' } });
@@ -233,7 +302,9 @@ check(
   vOai.data,
 );
 
-const vgNoKey = await api('POST', '/v1/video/generations', { body: { model: 'seed-test', prompt: 'x' } });
+const vgNoKey = await api('POST', '/v1/video/generations', {
+  body: { model: 'seed-test', prompt: 'x' },
+});
 check('video/generations no api key -> 401', vgNoKey.status === 401, vgNoKey.status);
 
 const vgNoModel = await api('POST', '/v1/video/generations', { token: sk, body: { prompt: 'x' } });
@@ -285,5 +356,4 @@ const modelsJson = await models.json();
 const ids = (modelsJson.data || []).map((m) => m.id);
 check('/v1/models lists channels', ids.includes('gpt-test') && ids.includes('claude-test'), ids);
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+finish();

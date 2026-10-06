@@ -1,49 +1,5 @@
-const API = 'http://localhost:3000';
-let pass = 0,
-  fail = 0;
-function check(name, cond, extra) {
-  if (cond) {
-    pass++;
-    console.log(`PASS  ${name}`);
-  } else {
-    fail++;
-    console.log(`FAIL  ${name}  -> ${JSON.stringify(extra)}`);
-  }
-}
-async function api(method, path, { token, body } = {}) {
-  const res = await fetch(API + path, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-    /* ignore */
-  }
-  return { status: res.status, data };
-}
-const chat = (sk, body) =>
-  fetch(API + '/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sk}` },
-    body: JSON.stringify(body),
-  });
+import { api, check, chat, finish, until } from './helpers.mjs';
 
-// 落账在响应写出之后后台完成（settleInBackground），读侧必须轮询等它落地，
-// 否则「刚打完就查」会抢跑：固定 sleep 换成条件轮询，慢机器上也不会偶发失败。
-async function until(cond, timeoutMs = 5000, stepMs = 100) {
-  const start = Date.now();
-  for (;;) {
-    if (await cond()) return true;
-    if (Date.now() - start >= timeoutMs) return false;
-    await new Promise((r) => setTimeout(r, stepMs));
-  }
-}
 const summary = () => api('GET', '/api/usage/summary', { token: jwt });
 
 const suffix = Date.now().toString().slice(-6);
@@ -225,5 +181,4 @@ check(
   userAllView.data.requests,
 );
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+finish();
