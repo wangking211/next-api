@@ -13,7 +13,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "pnpm --filter @ai-gateway/api test",
+    "test": "pnpm -r test",
     "test:e2e": "node tests/run-e2e.mjs",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
