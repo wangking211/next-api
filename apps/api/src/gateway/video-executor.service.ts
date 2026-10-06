@@ -16,6 +16,7 @@ import { ChannelHealthService } from './channel-health.service';
 import { RoutingMetricsService } from './routing-metrics.service';
 import { ProviderRegistry } from './providers/provider.registry';
 import { ExecSupportService } from './exec-support.service';
+import { settleInBackground } from './settle.util';
 import { VideoTaskService } from './video-task.service';
 import { upstreamErrorMessage } from './upstream-error.util';
 import { UpstreamError, openaiError } from './types';
@@ -55,11 +56,8 @@ export class VideoExecutorService {
     /** 可选响应体映射：兼容格式入口把 OpenAI 形状换成 {task_id,status} */
     mapResponse?: (json: Record<string, any>) => Record<string, any>,
   ) {
-    const err = (
-      message: string,
-      type = 'invalid_request_error',
-      code: string | null = null,
-    ) => openaiError(message, type, code);
+    const err = (message: string, type = 'invalid_request_error', code: string | null = null) =>
+      openaiError(message, type, code);
     const { user, apiKey } = req.gateway;
     const requested: string | undefined = body?.model;
     if (!requested) {
@@ -67,9 +65,7 @@ export class VideoExecutorService {
     }
     const prompt = body?.prompt;
     if (typeof prompt !== 'string' || !prompt.trim()) {
-      return res
-        .status(400)
-        .json(err('Missing required field: prompt (non-empty string)'));
+      return res.status(400).json(err('Missing required field: prompt (non-empty string)'));
     }
 
     const [model, group] = await Promise.all([
@@ -124,8 +120,7 @@ export class VideoExecutorService {
     for (let i = 0; i < channels.length; i++) {
       const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
       const upstreamModel = upstreamModelName ?? model;
-      const upstreamBody =
-        upstreamModel === model ? body : { ...body, model: upstreamModel };
+      const upstreamBody = upstreamModel === model ? body : { ...body, model: upstreamModel };
       const provider = this.providers.resolve(channel.provider);
       if (typeof provider.videosCreate !== 'function') {
         unsupported = true; // 未实现视频透传的服务商 → 换下一家
@@ -148,8 +143,7 @@ export class VideoExecutorService {
           body: upstreamBody,
           signal: upstreamAbort.signal,
         });
-        const usage =
-          result.usage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+        const usage = result.usage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
         const perCall = pricePerCall > 0;
         const taskId = typeof result.json?.id === 'string' ? result.json.id : '';
         if (taskId) {
@@ -160,7 +154,12 @@ export class VideoExecutorService {
             userId: user.id,
           });
         }
-        await Promise.all([
+        // 先把响应写出去：客户端不必等 DB 事务 + Redis 写完
+        const response = res
+          .status(result.status)
+          .json(mapResponse ? mapResponse(result.json) : result.json);
+        // 计费/健康度/路由指标互不依赖 → 响应写出后并行后台结算
+        settleInBackground([
           this.usage.record({
             userId: user.id,
             apiKeyId: apiKey.id,
@@ -192,9 +191,7 @@ export class VideoExecutorService {
             totalTokens: usage.totalTokens,
           }),
         ]);
-        return res
-          .status(result.status)
-          .json(mapResponse ? mapResponse(result.json) : result.json);
+        return response;
       } catch (e) {
         if (closeTracker.isClosed()) return;
         if (e instanceof UpstreamError) {
@@ -248,10 +245,7 @@ export class VideoExecutorService {
     return res
       .status(lastError?.status ?? 502)
       .json(
-        err(
-          lastError ? upstreamErrorMessage(lastError) : 'All channels failed',
-          'upstream_error',
-        ),
+        err(lastError ? upstreamErrorMessage(lastError) : 'All channels failed', 'upstream_error'),
       );
   }
 
@@ -263,11 +257,8 @@ export class VideoExecutorService {
     /** 可选响应体映射：兼容格式入口换字段形状（url/format/metadata） */
     mapResponse?: (json: Record<string, any>) => Record<string, any>,
   ) {
-    const err = (
-      message: string,
-      type = 'invalid_request_error',
-      code: string | null = null,
-    ) => openaiError(message, type, code);
+    const err = (message: string, type = 'invalid_request_error', code: string | null = null) =>
+      openaiError(message, type, code);
     if (!VIDEO_TASK_ID_RE.test(taskId)) {
       return res.status(400).json(err('Invalid video task id'));
     }
@@ -279,17 +270,14 @@ export class VideoExecutorService {
       if (typeof provider.videoStatus !== 'function') continue;
       try {
         const result = await provider.videoStatus(c.channel, c.apiKey, { taskId });
-        const model =
-          typeof result.json?.model === 'string' ? result.json.model : resolvedModel;
+        const model = typeof result.json?.model === 'string' ? result.json.model : resolvedModel;
         // 回填映射：下次（含重启后）直接命中
         this.videoTasks.remember(taskId, {
           channelId: c.channel.id,
           model,
           userId: req.gateway.user.id,
         });
-        return res
-          .status(result.status)
-          .json(mapResponse ? mapResponse(result.json) : result.json);
+        return res.status(result.status).json(mapResponse ? mapResponse(result.json) : result.json);
       } catch (e) {
         if (e instanceof UpstreamError) {
           lastError = e;
@@ -303,11 +291,8 @@ export class VideoExecutorService {
 
   /** 视频内容透传：二进制流直接转发（不计费） */
   async executeVideoContent(req: GatewayRequest, res: Response, taskId: string) {
-    const err = (
-      message: string,
-      type = 'invalid_request_error',
-      code: string | null = null,
-    ) => openaiError(message, type, code);
+    const err = (message: string, type = 'invalid_request_error', code: string | null = null) =>
+      openaiError(message, type, code);
     if (!VIDEO_TASK_ID_RE.test(taskId)) {
       return res.status(400).json(err('Invalid video task id'));
     }
@@ -430,12 +415,10 @@ export class VideoExecutorService {
     return true;
   }
 
-
   /** 兼容格式状态响应里的成片直链 → 我们的内容端点（客户端沿用同一把 API key 下载） */
   videoContentUrl(req: GatewayRequest, taskId: string): string {
     const host = req.get('host');
     if (!host) return '';
     return `${req.protocol}://${host}/v1/videos/${encodeURIComponent(taskId)}/content`;
   }
-
 }

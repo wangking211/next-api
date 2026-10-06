@@ -10,6 +10,7 @@ import { ChannelHealthService } from './channel-health.service';
 import { RoutingMetricsService } from './routing-metrics.service';
 import { ProviderRegistry } from './providers/provider.registry';
 import { ExecSupportService } from './exec-support.service';
+import { settleInBackground } from './settle.util';
 import { upstreamErrorMessage } from './upstream-error.util';
 import { UpstreamError, openaiError } from './types';
 import type { GatewayRequest } from './types';
@@ -32,16 +33,9 @@ export class ImagesExecutorService {
    * 计费：配置了按次价（目录 perCallPrice / 渠道 pricePerCall）则按次计费（×张数 ×倍率）；
    * 否则回退 token 计价（如 gpt-image 系列上游返回 usage）。
    */
-  async executeImages(
-    req: GatewayRequest,
-    res: Response,
-    body: Record<string, any>,
-  ) {
-    const err = (
-      message: string,
-      type = 'invalid_request_error',
-      code: string | null = null,
-    ) => openaiError(message, type, code);
+  async executeImages(req: GatewayRequest, res: Response, body: Record<string, any>) {
+    const err = (message: string, type = 'invalid_request_error', code: string | null = null) =>
+      openaiError(message, type, code);
     const { user, apiKey } = req.gateway;
     const requested: string | undefined = body?.model;
     if (!requested) {
@@ -49,9 +43,7 @@ export class ImagesExecutorService {
     }
     const prompt = body?.prompt;
     if (typeof prompt !== 'string' || !prompt.trim()) {
-      return res
-        .status(400)
-        .json(err('Missing required field: prompt (non-empty string)'));
+      return res.status(400).json(err('Missing required field: prompt (non-empty string)'));
     }
     const n = Math.max(1, Math.min(Math.floor(Number(body?.n ?? 1) || 1), 10));
 
@@ -109,8 +101,7 @@ export class ImagesExecutorService {
       const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
       // 模型映射：对外规范名 → 上游真实名
       const upstreamModel = upstreamModelName ?? model;
-      const upstreamBody =
-        upstreamModel === model ? body : { ...body, model: upstreamModel };
+      const upstreamBody = upstreamModel === model ? body : { ...body, model: upstreamModel };
       const provider = this.providers.resolve(channel.provider);
       if (typeof provider.imagesGenerate !== 'function') {
         unsupported = true;
@@ -139,11 +130,11 @@ export class ImagesExecutorService {
           completionTokens: 0,
           totalTokens: 0,
         };
-        const images = Array.isArray(result.json?.data)
-          ? result.json.data.length
-          : n;
-        // 计费/健康度/路由指标互不依赖 → 并行落地
-        await Promise.all([
+        const images = Array.isArray(result.json?.data) ? result.json.data.length : n;
+        // 先把响应写出去：客户端不必等 DB 事务 + Redis 写完
+        const response = res.status(result.status).json(result.json);
+        // 计费/健康度/路由指标互不依赖 → 响应写出后并行后台结算
+        settleInBackground([
           this.usage.record({
             userId: user.id,
             apiKeyId: apiKey.id,
@@ -175,7 +166,7 @@ export class ImagesExecutorService {
             totalTokens: usage.totalTokens,
           }),
         ]);
-        return res.status(result.status).json(result.json);
+        return response;
       } catch (e) {
         // 客户端已断开：中止是本端触发的，不计渠道失败、不再故障转移
         if (closeTracker.isClosed()) return;
@@ -230,10 +221,7 @@ export class ImagesExecutorService {
     return res
       .status(lastError?.status ?? 502)
       .json(
-        err(
-          lastError ? upstreamErrorMessage(lastError) : 'All channels failed',
-          'upstream_error',
-        ),
+        err(lastError ? upstreamErrorMessage(lastError) : 'All channels failed', 'upstream_error'),
       );
   }
 }

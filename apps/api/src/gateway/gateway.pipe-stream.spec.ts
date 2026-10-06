@@ -102,7 +102,11 @@ describe('pipeStream client-closed handling', () => {
       })(),
     };
 
-    await executor['pipeStream'](res, result, metaOf(channel, () => disconnected));
+    await executor['pipeStream'](
+      res,
+      result,
+      metaOf(channel, () => disconnected),
+    );
 
     expect(usage.record).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -126,12 +130,68 @@ describe('pipeStream client-closed handling', () => {
       })(),
     };
 
-    await executor['pipeStream'](res, result, metaOf(channel, () => false));
+    await executor['pipeStream'](
+      res,
+      result,
+      metaOf(channel, () => false),
+    );
 
     expect(usage.record).toHaveBeenCalledWith(
       expect.objectContaining({ status: 200, errorMessage: null }),
     );
     expect(health.recordSuccess).toHaveBeenCalledWith('ch1', 0);
     expect(health.recordFailure).not.toHaveBeenCalled();
+  });
+
+  it('流收尾先结束响应，落账/健康度转后台完成（响应先行）', async () => {
+    const { executor, usage, health, res, channel } = setup();
+    const order: string[] = [];
+    health.recordSuccess.mockImplementation(
+      () =>
+        new Promise<void>((r) =>
+          setTimeout(() => {
+            order.push('health');
+            r();
+          }, 10),
+        ),
+    );
+    usage.record.mockImplementation(
+      () =>
+        new Promise<void>((r) =>
+          setTimeout(() => {
+            order.push('record');
+            r();
+          }, 30),
+        ),
+    );
+    // 记录 res.end 的时刻，用于和结算完成时刻比先后
+    const target = res as unknown as { end: () => void };
+    const originalEnd = target.end;
+    target.end = function (this: unknown) {
+      order.push('end');
+      return originalEnd.call(this);
+    };
+
+    const result: StreamResult = {
+      status: 200,
+      chunks: (async function* () {
+        yield 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n';
+        yield 'data: [DONE]\n\n';
+      })(),
+    };
+
+    await executor['pipeStream'](
+      res,
+      result,
+      metaOf(channel, () => false),
+    );
+
+    // 客户端已收完整个流：连接先关，不等落账（旧实现是 await 完才 end）
+    expect(order).toEqual(['end']);
+    await new Promise<void>((r) => setTimeout(r, 60));
+    expect(order).toEqual(['end', 'health', 'record']);
+    expect(usage.record).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 200, errorMessage: null }),
+    );
   });
 });

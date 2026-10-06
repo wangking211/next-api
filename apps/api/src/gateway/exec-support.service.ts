@@ -18,6 +18,7 @@ import { ChannelResolverService } from './channel-resolver.service';
 import { ChannelHealthService } from './channel-health.service';
 import { RoutingMetricsService } from './routing-metrics.service';
 import { detectRequiredCapabilities } from './capabilities';
+import { settleInBackground } from './settle.util';
 import type { GatewayRequest, UpstreamError } from './types';
 import {
   upstreamErrorMessage,
@@ -110,13 +111,15 @@ export class ExecSupportService {
     if (!declared.length) return true;
     const missing = requiredCaps.filter((c) => !declared.includes(c));
     if (!missing.length) return true;
-    res.status(400).json(
-      err(
-        `Model "${model}" does not support: ${missing.join(', ')}. ` +
-          `Declared capabilities: ${declared.join(', ')}.`,
-        'invalid_request_error',
-      ),
-    );
+    res
+      .status(400)
+      .json(
+        err(
+          `Model "${model}" does not support: ${missing.join(', ')}. ` +
+            `Declared capabilities: ${declared.join(', ')}.`,
+          'invalid_request_error',
+        ),
+      );
     return false;
   }
 
@@ -153,8 +156,7 @@ export class ExecSupportService {
     const transient = e.retryable && !limited;
     const authFault = !limited && e.status === 401;
     const modelDenied = !limited && !authFault && isModelAccessDenied(e);
-    const refusal =
-      !limited && !transient && !authFault && !modelDenied && isRefusal(e);
+    const refusal = !limited && !transient && !authFault && !modelDenied && isRefusal(e);
     if (limited) {
       await this.health.recordRateLimited(ctx.channel.id, signal);
       await this.metrics.record(ctx.channel.id, ctx.model, 'rate_limited', {
@@ -185,26 +187,29 @@ export class ExecSupportService {
     }
     // 故障转移：上游故障、限流/超限、鉴权失效、无权访问该模型都要换下一家试
     if ((transient || limited || authFault || modelDenied) && ctx.hasMore) return 'continue';
-    await this.usage.record({
-      userId: ctx.userId,
-      apiKeyId: ctx.apiKeyId,
-      channelId: ctx.channel.id,
-      model: ctx.model,
-      provider: ctx.channel.provider,
-      promptTokens: 0,
-      completionTokens: 0,
-      totalTokens: 0,
-      latencyMs: Date.now() - ctx.startedAt,
-      status: e.status || 502,
-      errorMessage: e.message,
-      chargeable: this.isChargeable(ctx.channel, ctx.userId),
-      share: this.shareContext(ctx.channel, ctx.userId),
-      isStream: ctx.isStream,
-      requestPreview: ctx.requestPreview,
-      pricing: ctx.pricing,
-      multiplier: ctx.multiplier,
-      multiplierSource: ctx.multiplierSource,
-    });
+    // 错误响应同样不该等落库：落账转后台结算（allSettled 兜底，不产生未处理拒绝）
+    settleInBackground([
+      this.usage.record({
+        userId: ctx.userId,
+        apiKeyId: ctx.apiKeyId,
+        channelId: ctx.channel.id,
+        model: ctx.model,
+        provider: ctx.channel.provider,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        latencyMs: Date.now() - ctx.startedAt,
+        status: e.status || 502,
+        errorMessage: e.message,
+        chargeable: this.isChargeable(ctx.channel, ctx.userId),
+        share: this.shareContext(ctx.channel, ctx.userId),
+        isStream: ctx.isStream,
+        requestPreview: ctx.requestPreview,
+        pricing: ctx.pricing,
+        multiplier: ctx.multiplier,
+        multiplierSource: ctx.multiplierSource,
+      }),
+    ]);
     if (modelDenied) {
       // 所有候选上游都无该模型权限：返回明确的 model_not_found，而非透传上游 403 文案
       ctx.res
@@ -219,22 +224,15 @@ export class ExecSupportService {
         );
       return 'responded';
     }
-    ctx.res
-      .status(e.status || 502)
-      .json(ctx.errorBody(upstreamErrorMessage(e), 'upstream_error'));
+    ctx.res.status(e.status || 502).json(ctx.errorBody(upstreamErrorMessage(e), 'upstream_error'));
     return 'responded';
   }
-
 
   /**
    * 会话粘性键：显式 x-session-id 优先（前端可传会话 ID），否则用 用户 + prompt 前缀。
    * 同键请求倾向落同一渠道，保住上游 prompt cache；跨会话/跨请求则自然分散。
    */
-  buildStickyKey(
-    req: GatewayRequest,
-    userId: string,
-    body: Record<string, any>,
-  ): string {
+  buildStickyKey(req: GatewayRequest, userId: string, body: Record<string, any>): string {
     const sid = req.headers['x-session-id'];
     if (typeof sid === 'string' && sid.trim()) return sid.trim().slice(0, 128);
     try {
@@ -245,5 +243,4 @@ export class ExecSupportService {
       return userId;
     }
   }
-
 }

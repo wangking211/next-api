@@ -21,9 +21,14 @@ import { upstreamErrorMessage } from './upstream-error.util';
 import { ChannelResolverService } from './channel-resolver.service';
 import { GroupsService } from '../groups/groups.service';
 import { ExecSupportService } from './exec-support.service';
+import { settleInBackground } from './settle.util';
 import { UpstreamError, openaiError } from './types';
 import type { GatewayAuthContext, GatewayRequest, StreamResult } from './types';
-import { AnthropicStreamTranslator, openAiToAnthropicResponse, toAnthropicErrorBody } from './anthropic-format';
+import {
+  AnthropicStreamTranslator,
+  openAiToAnthropicResponse,
+  toAnthropicErrorBody,
+} from './anthropic-format';
 
 @Injectable()
 export class ChatExecutorService {
@@ -43,8 +48,7 @@ export class ChatExecutorService {
     private readonly support: ExecSupportService,
     config: ConfigService,
   ) {
-    this.streamIdleMs =
-      Number(config.get<string>('STREAM_IDLE_TIMEOUT_MS', '120000')) || 120000;
+    this.streamIdleMs = Number(config.get<string>('STREAM_IDLE_TIMEOUT_MS', '120000')) || 120000;
     this.defaultMaxOutputTokens =
       Number(config.get<string>('PREAUTH_MAX_OUTPUT_TOKENS', '4096')) || 4096;
     this.logContent = config.get<string>('LOG_CONTENT', 'false') !== 'false';
@@ -57,11 +61,7 @@ export class ChatExecutorService {
     apiFormat: 'openai' | 'anthropic',
   ) {
     /** 按客户端协议返回错误体 */
-    const err = (
-      message: string,
-      type = 'invalid_request_error',
-      code: string | null = null,
-    ) =>
+    const err = (message: string, type = 'invalid_request_error', code: string | null = null) =>
       apiFormat === 'anthropic'
         ? toAnthropicErrorBody(message, type)
         : openaiError(message, type, code);
@@ -119,8 +119,7 @@ export class ChatExecutorService {
     // 平台渠道需余额：0 价模型豁免；对每个候选渠道按“输入 + 最大输出”预估上限做预授权，避免单次调用透支
     const guards = this.support.balanceGuards(user.id, billingInfo.value);
     const maxOutputTokens =
-      Number(body?.max_tokens ?? body?.max_completion_tokens ?? 0) ||
-      this.defaultMaxOutputTokens;
+      Number(body?.max_tokens ?? body?.max_completion_tokens ?? 0) || this.defaultMaxOutputTokens;
     let insufficientBalance = false;
 
     // 客户端断开时中止上游请求，避免连接泄漏（closeTracker 仅在提前断开时置位，正常完成的 close 不算）
@@ -131,8 +130,7 @@ export class ChatExecutorService {
       const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
       // 模型映射：对外规范名 → 上游真实名（渠道×模型未配置则用规范名）
       const upstreamModel = upstreamModelName ?? model;
-      const upstreamBody =
-        upstreamModel === model ? body : { ...body, model: upstreamModel };
+      const upstreamBody = upstreamModel === model ? body : { ...body, model: upstreamModel };
       if (this.support.isChargeable(channel, user.id)) {
         // 预授权：按该渠道的售价预估上限，余额不足则跳过（定价随 resolve 结果带出，免再查）
         const required =
@@ -184,8 +182,12 @@ export class ChatExecutorService {
         const usage = result.usage ?? this.estimateUsage(body, result.json);
         // TPM 回填：结算在 guard 的 finish 监听里按 实际−预估 校正
         if (req.gateway.tpm) req.gateway.tpm.actual = usage.totalTokens;
-        // 计费/健康度/路由指标互不依赖 → 并行落地，缩短响应路径串行耗时
-        await Promise.all([
+        // 先把响应写出去：客户端不必等 DB 事务 + Redis 写完
+        const payload =
+          apiFormat === 'anthropic' ? openAiToAnthropicResponse(result.json, model) : result.json;
+        const response = res.status(result.status).json(payload);
+        // 计费/健康度/路由指标互不依赖 → 响应写出后并行后台结算
+        settleInBackground([
           this.usage.record({
             userId: user.id,
             apiKeyId: apiKey.id,
@@ -199,9 +201,7 @@ export class ChatExecutorService {
             share: this.support.shareContext(channel, user.id),
             isStream: false,
             requestPreview,
-            responsePreview: this.logContent
-              ? extractAssistantText(result.json)
-              : null,
+            responsePreview: this.logContent ? extractAssistantText(result.json) : null,
             multiplier: billingInfo.value,
             multiplierSource: billingInfo.source,
             pricing,
@@ -214,13 +214,7 @@ export class ChatExecutorService {
             status: result.status,
           }),
         ]);
-        return res
-          .status(result.status)
-          .json(
-            apiFormat === 'anthropic'
-              ? openAiToAnthropicResponse(result.json, model)
-              : result.json,
-          );
+        return response;
       } catch (e) {
         // 客户端已断开：中止是本端触发的，不计渠道失败、不再故障转移
         //（全部候选共享同一 signal，继续试只会连败触发冷却/自动禁用）
@@ -265,18 +259,14 @@ export class ChatExecutorService {
     return res
       .status(lastError?.status ?? 502)
       .json(
-        err(
-          lastError ? upstreamErrorMessage(lastError) : 'All channels failed',
-          'upstream_error',
-        ),
+        err(lastError ? upstreamErrorMessage(lastError) : 'All channels failed', 'upstream_error'),
       );
   }
 
   private estimateUsage(body: Record<string, any>, json: any) {
     const promptTokens = estimatePromptTokens(body);
     const text = json?.choices?.[0]?.message?.content;
-    const completionTokens =
-      typeof text === 'string' ? estimateTokensFromText(text) : 0;
+    const completionTokens = typeof text === 'string' ? estimateTokensFromText(text) : 0;
     return {
       promptTokens,
       completionTokens,
@@ -427,8 +417,8 @@ export class ChatExecutorService {
         );
       }
     }
-    await Promise.all(tasks);
-
+    // 客户端已收完整个流：先结束响应，落账/健康度/指标转后台结算，不拖长连接占用
     if (!res.writableEnded) res.end();
+    settleInBackground(tasks);
   }
 }

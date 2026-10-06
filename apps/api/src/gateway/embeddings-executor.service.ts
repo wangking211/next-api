@@ -14,6 +14,7 @@ import { ChannelHealthService } from './channel-health.service';
 import { RoutingMetricsService } from './routing-metrics.service';
 import { ProviderRegistry } from './providers/provider.registry';
 import { ExecSupportService } from './exec-support.service';
+import { settleInBackground } from './settle.util';
 import { upstreamErrorMessage } from './upstream-error.util';
 import { UpstreamError, openaiError } from './types';
 import type { GatewayRequest } from './types';
@@ -23,10 +24,7 @@ function embeddingsPreview(body: any): string {
   const input = body?.input;
   if (typeof input === 'string') return input.slice(0, 500);
   if (Array.isArray(input) && input.length > 0) {
-    const first =
-      typeof input[0] === 'string'
-        ? input[0]
-        : JSON.stringify(input[0]) ?? '';
+    const first = typeof input[0] === 'string' ? input[0] : (JSON.stringify(input[0]) ?? '');
     const more = input.length > 1 ? `（+${input.length - 1} 条）` : '';
     return `${first.slice(0, 500)}${more}`;
   }
@@ -59,16 +57,9 @@ export class EmbeddingsExecutorService {
    * 差异：只走非流式单跳；input 为 string / string[] / token id 数组；无输出 token；
    * 只有实现了 embeddingsNonStream 的服务商（当前为 OpenAI 兼容类）参与候选。
    */
-  async executeEmbeddings(
-    req: GatewayRequest,
-    res: Response,
-    body: Record<string, any>,
-  ) {
-    const err = (
-      message: string,
-      type = 'invalid_request_error',
-      code: string | null = null,
-    ) => openaiError(message, type, code);
+  async executeEmbeddings(req: GatewayRequest, res: Response, body: Record<string, any>) {
+    const err = (message: string, type = 'invalid_request_error', code: string | null = null) =>
+      openaiError(message, type, code);
     const { user, apiKey } = req.gateway;
     const requested: string | undefined = body?.model;
     if (!requested) {
@@ -76,8 +67,7 @@ export class EmbeddingsExecutorService {
     }
     const input = body?.input;
     const hasInput =
-      (typeof input === 'string' && input.length > 0) ||
-      (Array.isArray(input) && input.length > 0);
+      (typeof input === 'string' && input.length > 0) || (Array.isArray(input) && input.length > 0);
     if (!hasInput) {
       return res
         .status(400)
@@ -139,8 +129,7 @@ export class EmbeddingsExecutorService {
       const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
       // 模型映射：对外规范名 → 上游真实名
       const upstreamModel = upstreamModelName ?? model;
-      const upstreamBody =
-        upstreamModel === model ? body : { ...body, model: upstreamModel };
+      const upstreamBody = upstreamModel === model ? body : { ...body, model: upstreamModel };
       const provider = this.providers.resolve(channel.provider);
       if (typeof provider.embeddingsNonStream !== 'function') {
         unsupported = true; // 如 anthropic/gemini 暂无兼容端点 → 换下一家
@@ -171,8 +160,10 @@ export class EmbeddingsExecutorService {
         };
         // TPM 回填：结算在 guard 的 finish 监听里按 实际−预估 校正
         if (req.gateway.tpm) req.gateway.tpm.actual = usage.totalTokens;
-        // 计费/健康度/路由指标互不依赖 → 并行落地，缩短响应路径串行耗时
-        await Promise.all([
+        // 先把响应写出去：客户端不必等 DB 事务 + Redis 写完
+        const response = res.status(result.status).json(result.json);
+        // 计费/健康度/路由指标互不依赖 → 响应写出后并行后台结算
+        settleInBackground([
           this.usage.record({
             userId: user.id,
             apiKeyId: apiKey.id,
@@ -199,7 +190,7 @@ export class EmbeddingsExecutorService {
             status: result.status,
           }),
         ]);
-        return res.status(result.status).json(result.json);
+        return response;
       } catch (e) {
         // 客户端已断开：中止是本端触发的，不计渠道失败、不再故障转移
         if (closeTracker.isClosed()) return;
@@ -254,11 +245,7 @@ export class EmbeddingsExecutorService {
     return res
       .status(lastError?.status ?? 502)
       .json(
-        err(
-          lastError ? upstreamErrorMessage(lastError) : 'All channels failed',
-          'upstream_error',
-        ),
+        err(lastError ? upstreamErrorMessage(lastError) : 'All channels failed', 'upstream_error'),
       );
   }
-
 }
