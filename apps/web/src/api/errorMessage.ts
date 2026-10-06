@@ -27,6 +27,8 @@ const ERROR_CODE_KEYS = {
   AUTH_TOKEN_INVALID: 'api.unauthorized',
   AUTH_TOKEN_REVOKED: 'err.auth.tokenRevoked',
   FORBIDDEN_INSUFFICIENT_PERMISSIONS: 'api.forbidden',
+  // —— 限流（控制台每 IP 全局限流 ConsoleRateLimitGuard）——
+  RATE_LIMITED: 'api.tooManyRequests',
   // —— 代理 ——
   AGENT_EMAIL_TAKEN: 'api.authEmailTaken',
   AGENT_USERNAME_TAKEN: 'api.authUsernameTaken',

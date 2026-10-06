@@ -32,6 +32,17 @@ describe('错误码优先级', () => {
     expect(msg).not.toBe('key not found');
   });
 
+  it('控制台每 IP 限流 code RATE_LIMITED 本地化（不回显后端英文原文）', () => {
+    const msg = errorMessage(
+      axiosError(
+        { code: 'RATE_LIMITED', message: 'Rate limit exceeded: 600 requests per 60s' },
+        429,
+      ),
+    );
+    expectLocalized(msg, 'api.tooManyRequests');
+    expect(msg).not.toBe('Rate limit exceeded: 600 requests per 60s');
+  });
+
   it('details 作为插值参数生成动态文案', () => {
     const msg = errorMessage(
       axiosError({ code: 'CHANNEL_UPSTREAM_ERROR', details: { status: 500, detail: 'boom' } }),

@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { join } from 'path';
+import { ConsoleRateLimitGuard } from './common/console-rate-limit.guard';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { CommonModule } from './common/common.module';
@@ -27,10 +29,7 @@ import { ObservabilityModule } from './observability/observability.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: [
-        join(process.cwd(), '.env'),
-        join(process.cwd(), 'apps/api/.env'),
-      ],
+      envFilePath: [join(process.cwd(), '.env'), join(process.cwd(), 'apps/api/.env')],
     }),
     JwtModule.registerAsync({
       global: true,
@@ -63,6 +62,10 @@ import { ObservabilityModule } from './observability/observability.module';
     WithdrawalModule,
     PaymentModule,
     ObservabilityModule,
+  ],
+  providers: [
+    // 全局守卫：控制台 /api/** 每 IP 全局限流（/v1 在守卫内直接跳过）
+    { provide: APP_GUARD, useClass: ConsoleRateLimitGuard },
   ],
 })
 export class AppModule {}
