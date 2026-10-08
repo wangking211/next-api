@@ -176,8 +176,11 @@ describe('响应先行（结算转后台）', () => {
     expect(s.usage.record).toHaveBeenCalledTimes(1);
     expect(s.health.recordSuccess).toHaveBeenCalledTimes(1);
 
-    await wait(60);
-    expect(s.order).toEqual(['response', 'health', 'record']);
+    // health/record 的相对先后取决于定时器调度（并行负载下 10ms/30ms 会漂移），
+    // 产品不变量只有「两笔都排在 response 之后」：轮询等两笔落地（上限 2s）再断言
+    for (let i = 0; i < 100 && s.order.length < 3; i++) await wait(20);
+    expect(s.order[0]).toBe('response');
+    expect([...s.order.slice(1)].sort()).toEqual(['health', 'record']);
   });
 
   it('错误路径：错误响应先写出，落账不再挡在前面', async () => {
