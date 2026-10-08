@@ -49,10 +49,7 @@ export default function BillingPage() {
   const payEnabled = isPayEnabled();
   const creditsPerCny = getCreditsPerCny();
   const payRate = getPayRate();
-  const isMobile = useMemo(
-    () => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent),
-    [],
-  );
+  const isMobile = useMemo(() => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent), []);
 
   const TYPE_META: Record<BalanceTxType, { color: string; label: string }> = {
     RECHARGE: { color: 'green', label: t('billing.txnType.recharge') },
@@ -85,7 +82,11 @@ export default function BillingPage() {
       }),
     });
 
-  const { data: balance } = useQuery({
+  const {
+    data: balance,
+    isError: balErr,
+    refetch: balRefetch,
+  } = useQuery({
     queryKey: ['billing', 'me'],
     queryFn: ({ signal }) => billingApi.me(signal),
   });
@@ -93,15 +94,14 @@ export default function BillingPage() {
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['billing', 'transactions', pg.page, pg.pageSize, type],
     queryFn: ({ signal }) =>
-      billingApi.transactions(
-        pg.page,
-        pg.pageSize,
-        type === 'ALL' ? undefined : type,
-        signal,
-      ),
+      billingApi.transactions(pg.page, pg.pageSize, type === 'ALL' ? undefined : type, signal),
     placeholderData: keepPreviousData,
   });
-  const { data: orders } = useQuery({
+  const {
+    data: orders,
+    isError: ordersErr,
+    refetch: ordersRefetch,
+  } = useQuery({
     queryKey: ['billing', 'pay-orders'],
     queryFn: ({ signal }) => paymentApi.orders(8, signal),
     enabled: payEnabled,
@@ -112,9 +112,7 @@ export default function BillingPage() {
   const redeemMut = useMutation({
     mutationFn: billingApi.redeem,
     onSuccess: (res) => {
-      message.success(
-        t('billing.redeem.success', { credits: creditsText(toCredits(res.amount)) }),
-      );
+      message.success(t('billing.redeem.success', { credits: creditsText(toCredits(res.amount)) }));
       setCode('');
       qc.invalidateQueries({ queryKey: ['billing'] });
     },
@@ -157,9 +155,11 @@ export default function BillingPage() {
     <Row gutter={[16, 16]}>
       <Col span={24}>
         <Card>
+          {/* 余额查询失败必须显式报错：静默渲染 0.00 会被读成「账户没钱」 */}
+          <QueryError show={balErr} onRetry={balRefetch} />
           <Statistic
             title={t('billing.balance.title')}
-            value={toCredits(balance?.balance).toFixed(2)}
+            value={balErr ? '—' : toCredits(balance?.balance).toFixed(2)}
             suffix={t('billing.balance.suffix')}
           />
           <Space.Compact style={{ marginTop: 16, maxWidth: 420 }}>
@@ -198,11 +198,7 @@ export default function BillingPage() {
         <Col span={24}>
           <Card title={t('billing.pay.title')}>
             {!creditsPerCny ? (
-              <Alert
-                type="warning"
-                showIcon
-                message={t('billing.pay.rateError')}
-              />
+              <Alert type="warning" showIcon message={t('billing.pay.rateError')} />
             ) : (
               <Space direction="vertical" size={12} style={{ width: '100%' }}>
                 <Space wrap align="center">
@@ -254,9 +250,11 @@ export default function BillingPage() {
         </Col>
       )}
 
-      {payEnabled && (orders?.items?.length ?? 0) > 0 && (
+      {/* 查询失败时也要露出卡片并给出重试，而不是整块消失（最近订单静默不可见） */}
+      {payEnabled && ((orders?.items?.length ?? 0) > 0 || ordersErr) && (
         <Col span={24}>
           <Card title={t('billing.orders.title')} size="small">
+            <QueryError show={ordersErr} onRetry={ordersRefetch} />
             <Table<PaymentOrder>
               rowKey="id"
               size="small"
@@ -394,19 +392,17 @@ export default function BillingPage() {
                 <QRCode value={created.payData} size={220} />
               )
             ) : (
-              <Typography.Text type="warning">
-                {t('billing.payModal.qrMissing')}
-              </Typography.Text>
+              <Typography.Text type="warning">{t('billing.payModal.qrMissing')}</Typography.Text>
             )}
             <Typography.Paragraph style={{ marginTop: 12, marginBottom: 4 }}>
               {t('billing.payModal.payable')}{' '}
-              <Typography.Text strong>¥{((created?.amountCents ?? 0) / 100).toFixed(2)}</Typography.Text>
+              <Typography.Text strong>
+                ¥{((created?.amountCents ?? 0) / 100).toFixed(2)}
+              </Typography.Text>
               {t('billing.payModal.credited')}{' '}
               <Typography.Text strong>{creditsText(created?.credits ?? 0)}</Typography.Text>
             </Typography.Paragraph>
-            <Typography.Text type="secondary">
-              {t('billing.payModal.hint')}
-            </Typography.Text>
+            <Typography.Text type="secondary">{t('billing.payModal.hint')}</Typography.Text>
           </div>
         )}
       </Modal>

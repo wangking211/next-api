@@ -62,8 +62,7 @@ export default function ChannelsPage() {
   // 表单里只有管理员能看到抽成字段；非管理员回退到该渠道已有的设置
   const feePercentValue = Form.useWatch('shareFeeBps', form);
   const effectiveFeePercent =
-    feePercentValue ??
-    (editing?.shareFeeBps != null ? editing.shareFeeBps / 100 : undefined);
+    feePercentValue ?? (editing?.shareFeeBps != null ? editing.shareFeeBps / 100 : undefined);
   // 渠道主实际到手比例（提示文案用）
   const ownerSharePct = 100 - (effectiveFeePercent ?? 20);
 
@@ -337,13 +336,11 @@ export default function ChannelsPage() {
         </Button>
       }
     >
+      {/* 重置只清筛选状态；表单字段清理由 ChannelFilterForm 自己完成，不能动弹窗的 form */}
       <ChannelFilterForm
         isAdmin={isAdmin}
         onSearch={applyFilters}
-        onReset={() => {
-          form.resetFields();
-          applyFilters({});
-        }}
+        onReset={() => applyFilters({})}
       />
 
       <QueryError show={isError} onRetry={refetch} />
@@ -397,7 +394,12 @@ export default function ChannelsPage() {
           >
             {t('common.cancel')}
           </Button>,
-          <Button key="save" type="primary" loading={saveMut.isPending} onClick={() => form.submit()}>
+          <Button
+            key="save"
+            type="primary"
+            loading={saveMut.isPending}
+            onClick={() => form.submit()}
+          >
             {t('common.save')}
           </Button>,
         ]}
@@ -445,7 +447,11 @@ export default function ChannelsPage() {
               />
             </Form.Item>
           )}
-          <Form.Item name="provider" label={t('channels.form.provider')} rules={[{ required: true }]}>
+          <Form.Item
+            name="provider"
+            label={t('channels.form.provider')}
+            rules={[{ required: true }]}
+          >
             <Select
               options={PROVIDERS.map((p) => ({ value: p.value, label: p.label() }))}
               onChange={(v) => {
@@ -470,7 +476,9 @@ export default function ChannelsPage() {
           >
             <Input.Password
               placeholder={
-                editing ? t('channels.form.apiKeyPlaceholderKeep') : t('channels.form.apiKeyPlaceholderNew')
+                editing
+                  ? t('channels.form.apiKeyPlaceholderKeep')
+                  : t('channels.form.apiKeyPlaceholderNew')
               }
             />
           </Form.Item>
@@ -543,7 +551,12 @@ export default function ChannelsPage() {
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 {t('channels.form.pricingHint')}
               </Typography.Text>
-              <PricingTable models={selectedModels} pricing={pricing} setP={setP} catalog={catalog} />
+              <PricingTable
+                models={selectedModels}
+                pricing={pricing}
+                setP={setP}
+                catalog={catalog}
+              />
             </div>
           )}
           <Space size={16} wrap>
@@ -558,14 +571,22 @@ export default function ChannelsPage() {
               label={t('channels.form.dailyRequestLimit')}
               tooltip={t('channels.form.dailyRequestLimitTip')}
             >
-              <InputNumber min={0} placeholder={t('channels.form.unlimited')} style={{ width: 130 }} />
+              <InputNumber
+                min={0}
+                placeholder={t('channels.form.unlimited')}
+                style={{ width: 130 }}
+              />
             </Form.Item>
             <Form.Item
               name="dailyTokenLimit"
               label={t('channels.form.dailyTokenLimit')}
               tooltip={t('channels.form.dailyTokenLimitTip')}
             >
-              <InputNumber min={0} placeholder={t('channels.form.unlimited')} style={{ width: 150 }} />
+              <InputNumber
+                min={0}
+                placeholder={t('channels.form.unlimited')}
+                style={{ width: 150 }}
+              />
             </Form.Item>
           </Space>
 
@@ -753,7 +774,12 @@ export default function ChannelsPage() {
           {t('channels.pricing.hint')}
         </Typography.Paragraph>
         {priceChannel && (
-          <PricingTable models={priceChannel.models} pricing={pricing} setP={setP} catalog={catalog} />
+          <PricingTable
+            models={priceChannel.models}
+            pricing={pricing}
+            setP={setP}
+            catalog={catalog}
+          />
         )}
       </Modal>
     </Card>

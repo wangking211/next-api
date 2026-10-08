@@ -6,6 +6,7 @@ import { adminApi, usageApi } from '../api/endpoints';
 import { formatCredits, formatDateTime, toCredits } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
 import { usePagination } from '../hooks/usePagination';
+import QueryError from '../components/QueryError';
 import type {
   AdminUser,
   ApiKeyInfo,
@@ -39,20 +40,35 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
     resetTxPage();
   }, [user?.id, resetPages, resetTxPage]);
 
-  const { data: keys, isLoading: keysLoading } = useQuery({
+  const {
+    data: keys,
+    isLoading: keysLoading,
+    isError: keysErr,
+    refetch: keysRefetch,
+  } = useQuery({
     queryKey: ['admin', 'user-keys', user?.id],
     queryFn: ({ signal }) => adminApi.userKeys(user!.id, signal),
     enabled: !!user,
   });
 
-  const { data: logs, isLoading: logsLoading } = useQuery({
+  const {
+    data: logs,
+    isLoading: logsLoading,
+    isError: logsErr,
+    refetch: logsRefetch,
+  } = useQuery({
     queryKey: ['admin', 'user-detail-logs', user?.id, logsPg.page],
     queryFn: ({ signal }) =>
       usageApi.logs(logsPg.page, PAGE_SIZE, undefined, { userId: user!.id }, signal),
     enabled: !!user,
   });
 
-  const { data: txs, isLoading: txsLoading } = useQuery({
+  const {
+    data: txs,
+    isLoading: txsLoading,
+    isError: txsErr,
+    refetch: txsRefetch,
+  } = useQuery({
     queryKey: ['admin', 'user-tx', user?.id, txPg.page],
     queryFn: ({ signal }) => adminApi.userTransactions(user!.id, txPg.page, PAGE_SIZE, signal),
     enabled: !!user,
@@ -108,12 +124,8 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
       title={`${t('admin.users.detail.title')} - ${user.username}`}
     >
       <Descriptions size="small" column={2} bordered>
-        <Descriptions.Item label={t('admin.users.column.email')}>
-          {user.email}
-        </Descriptions.Item>
-        <Descriptions.Item label={t('admin.users.column.role')}>
-          {roleLabel}
-        </Descriptions.Item>
+        <Descriptions.Item label={t('admin.users.column.email')}>{user.email}</Descriptions.Item>
+        <Descriptions.Item label={t('admin.users.column.role')}>{roleLabel}</Descriptions.Item>
         <Descriptions.Item label={t('common.status')}>
           {user.status === 'ACTIVE' ? (
             <Tag color="green">{t('admin.users.statusActive')}</Tag>
@@ -148,6 +160,8 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
       </Descriptions>
 
       {sectionTitle(t('admin.users.detail.keys'), keys?.length ?? 0)}
+      {/* 查询失败必须与「没有 Key」的空态区分开，否则 emptyText 会误导 */}
+      <QueryError show={keysErr} onRetry={keysRefetch} />
       <Table<ApiKeyInfo>
         size="small"
         rowKey="id"
@@ -190,7 +204,7 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
             title: t('admin.users.detail.rpm'),
             dataIndex: 'rpmLimit',
             width: 80,
-            render: (v: number | null) => (v ?? t('keys.table.unlimited')),
+            render: (v: number | null) => v ?? t('keys.table.unlimited'),
           },
           {
             title: t('keys.table.lastUsed'),
@@ -202,6 +216,7 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
       />
 
       {sectionTitle(t('admin.users.detail.recentCalls'), logs?.total ?? 0)}
+      <QueryError show={logsErr} onRetry={logsRefetch} />
       <Table<RequestLogRow>
         size="small"
         rowKey="id"
@@ -248,6 +263,7 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
       />
 
       {sectionTitle(t('admin.users.detail.transactions'), txs?.total ?? 0)}
+      <QueryError show={txsErr} onRetry={txsRefetch} />
       <Table<BalanceTransaction>
         size="small"
         rowKey="id"
@@ -270,11 +286,7 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
             dataIndex: 'type',
             width: 90,
             render: (v: BalanceTxType) =>
-              TX_META[v] ? (
-                <Tag color={TX_META[v].color}>{TX_META[v].label}</Tag>
-              ) : (
-                <Tag>{v}</Tag>
-              ),
+              TX_META[v] ? <Tag color={TX_META[v].color}>{TX_META[v].label}</Tag> : <Tag>{v}</Tag>,
           },
           {
             title: t('billing.txnTable.amount'),

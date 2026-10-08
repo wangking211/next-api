@@ -23,7 +23,7 @@ import { useTranslation } from 'react-i18next';
 import { adminApi, groupsApi, usageApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { downloadBlob } from '../utils/csv';
-import { formatCredits, fromCredits } from '../utils/format';
+import { formatCredits, formatDateTime, fromCredits } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
 import { usePagination } from '../hooks/usePagination';
 import QueryError from '../components/QueryError';
@@ -37,6 +37,8 @@ export default function AdminUsersPage() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [q, setQ] = useState('');
+  // 搜索框的显示值（受控）：与已应用的 q 分离，「重置」才能连输入框一起清掉
+  const [qText, setQText] = useState('');
   const pg = usePagination();
   const [role, setRole] = useState<string | undefined>();
   const [status, setStatus] = useState<string | undefined>();
@@ -46,7 +48,9 @@ export default function AdminUsersPage() {
   const [balanceMax, setBalanceMax] = useState<number | undefined>();
   // RangePicker 的 dayjs 区间（避免额外引入 dayjs 类型）
   const [range, setRange] = useState<any>(null);
-  const [sortBy, setSortBy] = useState<'createdAt' | 'balance' | 'username' | 'lastActiveAt'>('createdAt');
+  const [sortBy, setSortBy] = useState<'createdAt' | 'balance' | 'username' | 'lastActiveAt'>(
+    'createdAt',
+  );
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [hasKeys, setHasKeys] = useState<boolean | undefined>();
   const [hasChannels, setHasChannels] = useState<boolean | undefined>();
@@ -68,8 +72,9 @@ export default function AdminUsersPage() {
     agentId,
     balanceMin,
     balanceMax,
-    createdFrom: range?.[0] ? range[0].toISOString() : undefined,
-    createdTo: range?.[1] ? range[1].toISOString() : undefined,
+    // RangePicker 无 showTime 时两端都是当天 00:00：终点必须补到当天 23:59:59.999，否则选中的最后一天整天被排除
+    createdFrom: range?.[0] ? range[0].startOf('day').toISOString() : undefined,
+    createdTo: range?.[1] ? range[1].endOf('day').toISOString() : undefined,
     hasKeys,
     hasChannels,
     sortBy,
@@ -78,6 +83,7 @@ export default function AdminUsersPage() {
 
   const resetFilters = () => {
     setQ('');
+    setQText('');
     setRole(undefined);
     setStatus(undefined);
     setGroupId(undefined);
@@ -170,12 +176,21 @@ export default function AdminUsersPage() {
     },
   });
 
-  const { data: uSummary } = useQuery({
+  const {
+    data: uSummary,
+    isError: uSumErr,
+    refetch: uSumRefetch,
+  } = useQuery({
     queryKey: ['admin', 'user-usage', 'summary', usageUser?.id],
     queryFn: ({ signal }) => usageApi.summary(30, undefined, signal, usageUser!.id),
     enabled: !!usageUser,
   });
-  const { data: uAnalytics } = useQuery({
+  const {
+    data: uAnalytics,
+    isLoading: uAnaLoading,
+    isError: uAnaErr,
+    refetch: uAnaRefetch,
+  } = useQuery({
     queryKey: ['admin', 'user-usage', 'analytics', usageUser?.id],
     queryFn: ({ signal }) => usageApi.analytics(30, undefined, signal, usageUser!.id),
     enabled: !!usageUser,
@@ -197,7 +212,9 @@ export default function AdminUsersPage() {
       qc.invalidateQueries({ queryKey: ['billing'] });
       setTarget(null);
       form.resetFields();
-      message.success(mode === 'recharge' ? t('admin.users.rechargeSuccess') : t('admin.users.adjustSuccess'));
+      message.success(
+        mode === 'recharge' ? t('admin.users.rechargeSuccess') : t('admin.users.adjustSuccess'),
+      );
     },
   });
 
@@ -216,11 +233,13 @@ export default function AdminUsersPage() {
             prefix={<SearchOutlined />}
             placeholder={t('admin.users.searchPlaceholder')}
             style={{ width: 220 }}
+            value={qText}
             onPressEnter={(e) => {
               setQ((e.target as HTMLInputElement).value);
               pg.reset();
             }}
             onChange={(e) => {
+              setQText(e.target.value);
               if (!e.target.value) {
                 setQ('');
                 pg.reset();
@@ -316,10 +335,7 @@ export default function AdminUsersPage() {
         <Col>
           <DatePicker.RangePicker
             value={range}
-            placeholder={[
-              t('admin.users.filter.createdFrom'),
-              t('admin.users.filter.createdTo'),
-            ]}
+            placeholder={[t('admin.users.filter.createdFrom'), t('admin.users.filter.createdTo')]}
             onChange={(v) => {
               setRange(v);
               pg.reset();
@@ -463,8 +479,7 @@ export default function AdminUsersPage() {
           },
           {
             title: t('admin.users.column.lastActive'),
-            render: (_, r) =>
-              r.lastActiveAt ? new Date(r.lastActiveAt).toLocaleString() : '-',
+            render: (_, r) => formatDateTime(r.lastActiveAt),
           },
           {
             title: t('common.action'),
@@ -504,7 +519,9 @@ export default function AdminUsersPage() {
         <Form form={form} layout="vertical" onFinish={(v) => mutate.mutate(v)} requiredMark={false}>
           <Form.Item
             name="amount"
-            label={mode === 'recharge' ? t('admin.users.rechargeAmount') : t('admin.users.adjustAmount')}
+            label={
+              mode === 'recharge' ? t('admin.users.rechargeAmount') : t('admin.users.adjustAmount')
+            }
             rules={[{ required: true, message: t('admin.users.amountRequired') }]}
           >
             <InputNumber
@@ -531,6 +548,13 @@ export default function AdminUsersPage() {
         ]}
         width={760}
       >
+        <QueryError
+          show={uSumErr || uAnaErr}
+          onRetry={() => {
+            if (uSumErr) uSumRefetch();
+            if (uAnaErr) uAnaRefetch();
+          }}
+        />
         {uSummary && (
           <Row gutter={16} style={{ marginBottom: 12 }}>
             <Col span={6}>
@@ -540,7 +564,10 @@ export default function AdminUsersPage() {
               <Statistic title="Token" value={uSummary.totalTokens} />
             </Col>
             <Col span={6}>
-              <Statistic title={t('admin.users.statCost')} value={formatCredits(uSummary.billedCost ?? 0)} />
+              <Statistic
+                title={t('admin.users.statCost')}
+                value={formatCredits(uSummary.billedCost ?? 0)}
+              />
             </Col>
             <Col span={6}>
               <Statistic
@@ -557,7 +584,7 @@ export default function AdminUsersPage() {
           size="small"
           rowKey="model"
           pagination={false}
-          loading={!uAnalytics}
+          loading={uAnaLoading}
           dataSource={uAnalytics?.byModel ?? []}
           columns={[
             { title: t('common.model'), dataIndex: 'model', ellipsis: true },
@@ -684,12 +711,7 @@ export default function AdminUsersPage() {
               autoComplete="new-password"
             />
           </Form.Item>
-          <Button
-            type="primary"
-            htmlType="submit"
-            block
-            loading={resetPasswordMut.isPending}
-          >
+          <Button type="primary" htmlType="submit" block loading={resetPasswordMut.isPending}>
             {t('admin.users.resetPasswordSubmit')}
           </Button>
         </Form>

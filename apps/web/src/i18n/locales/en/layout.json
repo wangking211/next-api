@@ -35,5 +35,6 @@
   "layout.error.title": "Something went wrong",
   "layout.error.subTitle": "Please refresh the page and try again. If the problem persists, contact the administrator.",
   "layout.error.refresh": "Refresh Page",
-  "layout.adminRoute.forbidden": "You need admin permission to access this page."
+  "layout.adminRoute.forbidden": "You need admin permission to access this page.",
+  "layout.roleRoute.forbidden": "Your account does not have permission to access this page."
 }

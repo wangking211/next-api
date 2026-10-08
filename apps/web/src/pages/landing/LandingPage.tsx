@@ -16,6 +16,7 @@ import type { TFunction } from 'i18next';
 import { useAuth } from '../../auth/AuthContext';
 import { publicApi } from '../../api/endpoints';
 import Logo from '../../components/Logo';
+import QueryError from '../../components/QueryError';
 import { LangSwitch } from '../../components/LangSwitch';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 import Quickstart from './Quickstart';
@@ -93,25 +94,29 @@ export default function LandingPage() {
 
   const items = modelsQuery.data?.items ?? [];
   const stats = statsQuery.data;
-  const sampleModel =
-    items.find((m) => m.name === 'gpt-5.6')?.name ?? items[0]?.name ?? 'gpt-5.6';
+  const sampleModel = items.find((m) => m.name === 'gpt-5.6')?.name ?? items[0]?.name ?? 'gpt-5.6';
 
   const statCards = [
     {
       label: t('landing.stats.models.label'),
-      value: statsQuery.isLoading ? '—' : String(stats?.modelCount ?? 0),
+      // 查询失败显示 — 而不是假的 0（0 会被读成「平台上没有模型」）
+      value: statsQuery.isLoading || statsQuery.isError ? '—' : String(stats?.modelCount ?? 0),
       sub: stats?.providerCount
         ? t('landing.stats.models.subWithProviders', { num: stats.providerCount })
         : t('landing.stats.models.subFallback'),
     },
     {
       label: t('landing.stats.channels.label'),
-      value: statsQuery.isLoading ? '—' : String(stats?.channelCount ?? 0),
+      value: statsQuery.isLoading || statsQuery.isError ? '—' : String(stats?.channelCount ?? 0),
       sub: t('landing.stats.channels.sub'),
     },
     {
       label: t('landing.stats.protocols.label'),
-      value: stats ? `${Math.round((stats.protocolCount / 3) * 100)}%` : '100%',
+      value: statsQuery.isError
+        ? '—'
+        : stats
+          ? `${Math.round((stats.protocolCount / 3) * 100)}%`
+          : '100%',
       sub: 'OpenAI · Anthropic · Gemini',
     },
     {
@@ -233,6 +238,8 @@ export default function LandingPage() {
             <h2>{t('landing.section.pricing.title')}</h2>
             <p>{t('landing.section.pricing.desc')}</p>
           </div>
+          {/* 模型目录查询失败与「目录为空」必须区分，否则定价区空态会被读成平台没模型 */}
+          <QueryError show={modelsQuery.isError} onRetry={() => modelsQuery.refetch()} />
           <PricingSection data={modelsQuery.data} loading={modelsQuery.isLoading} />
         </div>
       </section>

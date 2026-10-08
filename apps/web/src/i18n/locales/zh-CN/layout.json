@@ -35,5 +35,6 @@
   "layout.error.title": "页面出错了",
   "layout.error.subTitle": "请刷新页面重试；若问题持续，请联系管理员。",
   "layout.error.refresh": "刷新页面",
-  "layout.adminRoute.forbidden": "需要管理员权限才能访问该页面。"
+  "layout.adminRoute.forbidden": "需要管理员权限才能访问该页面。",
+  "layout.roleRoute.forbidden": "当前账号无权访问该页面。"
 }

@@ -1,6 +1,7 @@
 import { Button, Popconfirm, Space, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { ChannelInfo } from '../../api/types';
+import { formatDateTime } from '../../utils/format';
 import i18n from '../../i18n';
 
 export type ChannelColumnDeps = {
@@ -60,7 +61,7 @@ export function buildChannelColumns({
           quotaReq != null
             ? t('channels.share.quotaRequests', { used: usedReq, quota: quotaReq })
             : null,
-          until ? t('channels.share.until', { until: new Date(until).toLocaleString() }) : null,
+          until ? t('channels.share.until', { until: formatDateTime(until) }) : null,
         ].filter(Boolean);
         const label = t(
           r.shareMode === 'PUBLIC' ? 'channels.share.public' : 'channels.share.group',
@@ -153,12 +154,8 @@ export function buildChannelColumns({
       title: t('channels.table.priceDiscount'),
       render: (_: unknown, r: ChannelInfo) => {
         const rows = r.modelPrices ?? [];
-        const priced = rows.filter(
-          (m) => m.priceInput != null || m.priceOutput != null,
-        ).length;
-        const discounts = rows
-          .map((m) => m.discount)
-          .filter((d): d is number => d != null);
+        const priced = rows.filter((m) => m.priceInput != null || m.priceOutput != null).length;
+        const discounts = rows.map((m) => m.discount).filter((d): d is number => d != null);
         return (
           <Space size={4} wrap>
             {priced ? (
@@ -167,7 +164,9 @@ export function buildChannelColumns({
               <Typography.Text type="secondary">{t('channels.table.defaultPrice')}</Typography.Text>
             )}
             {discounts.length > 0 && (
-              <Tag color="orange">{t('channels.table.discountTag', { value: Math.min(...discounts) })}</Tag>
+              <Tag color="orange">
+                {t('channels.table.discountTag', { value: Math.min(...discounts) })}
+              </Tag>
             )}
           </Space>
         );
@@ -179,11 +178,7 @@ export function buildChannelColumns({
       width: 340,
       render: (_, r) => (
         <Space>
-          <Button
-            size="small"
-            loading={testingId === r.id}
-            onClick={() => onTest(r)}
-          >
+          <Button size="small" loading={testingId === r.id} onClick={() => onTest(r)}>
             {t('channels.action.test')}
           </Button>
           <Button size="small" onClick={() => onPricing(r)}>

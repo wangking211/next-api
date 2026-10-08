@@ -5,6 +5,7 @@ import { AuthProvider } from './auth/AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminRoute from './components/AdminRoute';
+import RoleRoute from './components/RoleRoute';
 import AppLayout from './components/AppLayout';
 
 const LandingPage = lazy(() => import('./pages/landing/LandingPage'));
@@ -53,7 +54,10 @@ export default function App() {
                 <Route path="/logs" element={<LogsPage />} />
                 <Route path="/usage-stats" element={<UsageStatsPage />} />
                 <Route path="/billing" element={<BillingPage />} />
-                <Route path="/agent" element={<AgentPage />} />
+                {/* 菜单只对代理/管理员展示，但直达 URL 也必须拦：后端 /api/agent 全线 403 */}
+                <Route element={<RoleRoute roles={['AGENT', 'ADMIN']} />}>
+                  <Route path="/agent" element={<AgentPage />} />
+                </Route>
                 <Route element={<AdminRoute />}>
                   <Route path="/users" element={<AdminUsersPage />} />
                   <Route path="/groups" element={<GroupsPage />} />

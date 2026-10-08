@@ -17,8 +17,7 @@ export default function AuditLogsPage() {
   const pg = usePagination();
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['audit-logs', action, pg.page, pg.pageSize],
-    queryFn: ({ signal }) =>
-      auditApi.list(pg.page, pg.pageSize, action || undefined, signal),
+    queryFn: ({ signal }) => auditApi.list(pg.page, pg.pageSize, action || undefined, signal),
     placeholderData: keepPreviousData,
   });
 
@@ -36,6 +35,13 @@ export default function AuditLogsPage() {
           onPressEnter={(e) => {
             setAction((e.target as HTMLInputElement).value);
             pg.reset();
+          }}
+          onChange={(e) => {
+            // allowClear 的 X 只触发 onChange：清空时立即应用（本框没有提交按钮）
+            if (!(e.target as HTMLInputElement).value) {
+              setAction('');
+              pg.reset();
+            }
           }}
         />
       }
@@ -61,7 +67,11 @@ export default function AuditLogsPage() {
               r.actorName ? (
                 <span>
                   {r.actorName}
-                  {r.actorRole === 'ADMIN' && <Tag color="gold" style={{ marginLeft: 6 }}>{t('admin.audit.adminTag')}</Tag>}
+                  {r.actorRole === 'ADMIN' && (
+                    <Tag color="gold" style={{ marginLeft: 6 }}>
+                      {t('admin.audit.adminTag')}
+                    </Tag>
+                  )}
                 </span>
               ) : (
                 <Typography.Text type="secondary">{t('admin.audit.anonymous')}</Typography.Text>

@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Alert, Button, Card, Col, Row, Switch, Table, Tag, Space } from 'antd';
+import { Card, Col, Row, Switch, Table, Tag, Space } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { usageApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
-import { toCredits } from '../utils/format';
+import { formatDateTime, toCredits } from '../utils/format';
+import QueryError from '../components/QueryError';
 import type { RequestLogRow } from '../api/types';
 import { StatCard } from './dashboard/StatCard';
 import { RankList } from './dashboard/RankBar';
@@ -18,22 +19,47 @@ export default function DashboardPage() {
   const [all, setAll] = useState(false);
   const scope = isAdmin && all ? 'all' : undefined;
 
-  const { data: summary, isError, refetch } = useQuery({
+  const {
+    data: summary,
+    isError,
+    refetch,
+  } = useQuery({
     queryKey: ['usage', 'summary', scope],
     queryFn: ({ signal }) => usageApi.summary(30, scope, signal),
   });
-  const { data: daily = [] } = useQuery({
+  const {
+    data: daily = [],
+    isError: dailyErr,
+    refetch: dailyRefetch,
+  } = useQuery({
     queryKey: ['usage', 'daily', scope],
     queryFn: ({ signal }) => usageApi.daily(30, scope, signal),
   });
-  const { data: analytics } = useQuery({
+  const {
+    data: analytics,
+    isError: analyticsErr,
+    refetch: analyticsRefetch,
+  } = useQuery({
     queryKey: ['usage', 'analytics', scope],
     queryFn: ({ signal }) => usageApi.analytics(30, scope, signal),
   });
-  const { data: logs } = useQuery({
+  const {
+    data: logs,
+    isError: logsErr,
+    refetch: logsRefetch,
+  } = useQuery({
     queryKey: ['usage', 'logs', 'recent', scope],
     queryFn: ({ signal }) => usageApi.logs(1, 8, scope, {}, signal),
   });
+
+  // 任一子查询失败都收敛到同一条提示：单块静默渲染空数据会被误读成「没有数据」
+  const anyErr = isError || dailyErr || analyticsErr || logsErr;
+  const retryAll = () => {
+    if (isError) refetch();
+    if (dailyErr) dailyRefetch();
+    if (analyticsErr) analyticsRefetch();
+    if (logsErr) logsRefetch();
+  };
 
   const successRate =
     summary && summary.requests > 0
@@ -48,19 +74,7 @@ export default function DashboardPage() {
 
   return (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
-      {isError && (
-        <Alert
-          type="error"
-          showIcon
-          message={t('dashboard.alert.errorTitle')}
-          description={t('dashboard.alert.errorDesc')}
-          action={
-            <Button size="small" onClick={() => refetch()}>
-              {t('common.retry')}
-            </Button>
-          }
-        />
-      )}
+      <QueryError show={anyErr} onRetry={retryAll} />
       <PageHeader
         title={t('dashboard.header.title')}
         extra={
@@ -162,13 +176,17 @@ export default function DashboardPage() {
             {
               title: t('common.time'),
               dataIndex: 'createdAt',
-              render: (v: string) => new Date(v).toLocaleString(),
+              render: (v: string) => formatDateTime(v),
             },
             { title: t('common.model'), dataIndex: 'model' },
             { title: 'Key', render: (_, r) => r.apiKey?.name ?? '-' },
             { title: t('dashboard.table.channel'), render: (_, r) => r.channel?.name ?? '-' },
             { title: 'Tokens', dataIndex: 'totalTokens' },
-            { title: t('dashboard.table.latency'), dataIndex: 'latencyMs', render: (v) => (v != null ? `${v}ms` : '-') },
+            {
+              title: t('dashboard.table.latency'),
+              dataIndex: 'latencyMs',
+              render: (v) => (v != null ? `${v}ms` : '-'),
+            },
             {
               title: t('common.status'),
               dataIndex: 'status',

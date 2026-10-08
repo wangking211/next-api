@@ -34,19 +34,39 @@ export default function AgentPage() {
   const [rechargeForm] = Form.useForm();
   const [withdrawForm] = Form.useForm();
 
-  const { data: overview, isLoading, isError, refetch } = useQuery({
+  const {
+    data: overview,
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
     queryKey: ['agent', 'overview'],
     queryFn: ({ signal }) => agentApi.overview(signal),
   });
-  const { data: members, isLoading: mLoading } = useQuery({
+  const {
+    data: members,
+    isLoading: mLoading,
+    isError: mErr,
+    refetch: mRefetch,
+  } = useQuery({
     queryKey: ['agent', 'members'],
     queryFn: ({ signal }) => agentApi.members(signal),
   });
-  const { data: commissions } = useQuery({
+  const {
+    data: commissions,
+    isLoading: cLoading,
+    isError: cErr,
+    refetch: cRefetch,
+  } = useQuery({
     queryKey: ['agent', 'commissions'],
     queryFn: ({ signal }) => billingApi.transactions(1, 50, 'COMMISSION', signal),
   });
-  const { data: withdrawals } = useQuery({
+  const {
+    data: withdrawals,
+    isLoading: wLoading,
+    isError: wErr,
+    refetch: wRefetch,
+  } = useQuery({
     queryKey: ['agent', 'withdrawals'],
     queryFn: ({ signal }) => withdrawalsApi.mine(signal),
   });
@@ -109,7 +129,10 @@ export default function AgentPage() {
         </Typography.Paragraph>
         <Row gutter={16}>
           <Col xs={12} md={6}>
-            <Statistic title={t('agent.overview.balance')} value={formatCredits(overview?.balance ?? 0)} />
+            <Statistic
+              title={t('agent.overview.balance')}
+              value={formatCredits(overview?.balance ?? 0)}
+            />
           </Col>
           <Col xs={12} md={6}>
             <Statistic
@@ -142,6 +165,7 @@ export default function AgentPage() {
       </Card>
 
       <Card title={t('agent.member.title')} size="small">
+        <QueryError show={mErr} onRetry={mRefetch} />
         <Table<AgentMember>
           rowKey="id"
           size="small"
@@ -205,9 +229,11 @@ export default function AgentPage() {
       </Card>
 
       <Card title={t('agent.commission.title')} size="small">
+        <QueryError show={cErr} onRetry={cRefetch} />
         <Table<BalanceTransaction>
           rowKey="id"
           size="small"
+          loading={cLoading}
           dataSource={commissions?.items ?? []}
           pagination={false}
           columns={[
@@ -242,7 +268,12 @@ export default function AgentPage() {
         confirmLoading={createMut.isPending}
         destroyOnClose
       >
-        <Form form={createForm} layout="vertical" onFinish={(v) => createMut.mutate(v)} requiredMark={false}>
+        <Form
+          form={createForm}
+          layout="vertical"
+          onFinish={(v) => createMut.mutate(v)}
+          requiredMark={false}
+        >
           <Form.Item
             name="email"
             label={t('agent.member.email')}
@@ -290,7 +321,9 @@ export default function AgentPage() {
         <Form
           form={rechargeForm}
           layout="vertical"
-          onFinish={(v) => rechargeTarget && rechargeMut.mutate({ id: rechargeTarget.id, amount: v.amount })}
+          onFinish={(v) =>
+            rechargeTarget && rechargeMut.mutate({ id: rechargeTarget.id, amount: v.amount })
+          }
           requiredMark={false}
         >
           <Form.Item
@@ -303,9 +336,11 @@ export default function AgentPage() {
         </Form>
       </Modal>
       <Card title={t('agent.withdraw.recordsTitle')} size="small">
+        <QueryError show={wErr} onRetry={wRefetch} />
         <Table<Withdrawal>
           rowKey="id"
           size="small"
+          loading={wLoading}
           dataSource={withdrawals ?? []}
           pagination={false}
           columns={[

@@ -75,7 +75,12 @@ export default function LogsPage() {
   });
 
   usePageClamp(pg.page, pg.setPage, data);
-  const { data: detail, isLoading: detailLoading } = useQuery({
+  const {
+    data: detail,
+    isLoading: detailLoading,
+    isError: detailErr,
+    refetch: detailRefetch,
+  } = useQuery({
     queryKey: ['usage', 'log', detailId, scope],
     queryFn: ({ signal }) => usageApi.logDetail(detailId!, scope, signal),
     enabled: !!detailId,
@@ -120,7 +125,18 @@ export default function LogsPage() {
       extra={
         isAdmin && (
           <span>
-            {t('logs.viewAllUsers')} <Switch checked={all} onChange={setAll} />
+            {t('logs.viewAllUsers')}{' '}
+            <Switch
+              checked={all}
+              onChange={(checked) => {
+                setAll(checked);
+                // 「按用户筛选」只属于全量侧：切换范围时清掉该字段（含隐藏状态）并回第一页，
+                // 否则 userId 会带着 scope 一起查（后端 userId 优先于 scope），看到的是另一侧的数据
+                form.setFieldValue('userId', undefined);
+                setFilters((f) => ({ ...f, userId: undefined }));
+                pg.reset();
+              }}
+            />
           </span>
         )
       }
@@ -201,19 +217,29 @@ export default function LogsPage() {
             render: (v: string) => formatDateTime(v),
           },
           { title: t('common.model'), dataIndex: 'model' },
-          { title: t('logs.column.provider'), dataIndex: 'provider', render: (v: string | null) => v ?? '-' },
+          {
+            title: t('logs.column.provider'),
+            dataIndex: 'provider',
+            render: (v: string | null) => v ?? '-',
+          },
           { title: 'Key', render: (_, r) => r.apiKey?.name ?? '-' },
           { title: t('logs.column.channel'), render: (_, r) => r.channel?.name ?? '-' },
           {
             title: t('logs.column.type'),
             dataIndex: 'isStream',
             width: 70,
-            render: (v: boolean) => (v ? <Tag>{t('logs.stream')}</Tag> : <Tag>{t('logs.nonStream')}</Tag>),
+            render: (v: boolean) =>
+              v ? <Tag>{t('logs.stream')}</Tag> : <Tag>{t('logs.nonStream')}</Tag>,
           },
           {
             title: 'Tokens',
             render: (_, r) => (
-              <Tooltip title={t('logs.tokensInOut', { prompt: r.promptTokens, completion: r.completionTokens })}>
+              <Tooltip
+                title={t('logs.tokensInOut', {
+                  prompt: r.promptTokens,
+                  completion: r.completionTokens,
+                })}
+              >
                 {r.totalTokens}
               </Tooltip>
             ),
@@ -231,7 +257,11 @@ export default function LogsPage() {
                 </Tooltip>
               ),
           },
-          { title: t('logs.column.latency'), dataIndex: 'latencyMs', render: (v: number | null) => (v != null ? `${v}ms` : '-') },
+          {
+            title: t('logs.column.latency'),
+            dataIndex: 'latencyMs',
+            render: (v: number | null) => (v != null ? `${v}ms` : '-'),
+          },
           {
             title: t('common.status'),
             dataIndex: 'status',
@@ -257,8 +287,16 @@ export default function LogsPage() {
         ]}
       />
 
-      <Drawer title={t('logs.detail.title')} width={760} open={!!detailId} onClose={() => setDetailId(null)}>
-        {detailLoading || !detail ? (
+      <Drawer
+        title={t('logs.detail.title')}
+        width={760}
+        open={!!detailId}
+        onClose={() => setDetailId(null)}
+      >
+        {detailErr ? (
+          // 查询失败不能停在 Spin 上（!detail 永远为真 → 永久转圈），给出重试入口
+          <QueryError show onRetry={detailRefetch} />
+        ) : detailLoading || !detail ? (
           <Spin />
         ) : (
           <>
@@ -267,8 +305,12 @@ export default function LogsPage() {
                 {formatDateTime(detail.createdAt)}
               </Descriptions.Item>
               <Descriptions.Item label={t('common.model')}>{detail.model}</Descriptions.Item>
-              <Descriptions.Item label={t('logs.detail.provider')}>{detail.provider ?? '-'}</Descriptions.Item>
-              <Descriptions.Item label={t('logs.detail.channel')}>{detail.channel?.name ?? '-'}</Descriptions.Item>
+              <Descriptions.Item label={t('logs.detail.provider')}>
+                {detail.provider ?? '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('logs.detail.channel')}>
+                {detail.channel?.name ?? '-'}
+              </Descriptions.Item>
               <Descriptions.Item label="Key">{detail.apiKey?.name ?? '-'}</Descriptions.Item>
               <Descriptions.Item label={t('logs.detail.type')}>
                 {detail.isStream ? t('logs.stream') : t('logs.nonStream')}
@@ -276,7 +318,9 @@ export default function LogsPage() {
               <Descriptions.Item label={t('logs.detail.ioTokens')}>
                 {detail.promptTokens} / {detail.completionTokens}
               </Descriptions.Item>
-              <Descriptions.Item label={t('logs.detail.totalTokens')}>{detail.totalTokens}</Descriptions.Item>
+              <Descriptions.Item label={t('logs.detail.totalTokens')}>
+                {detail.totalTokens}
+              </Descriptions.Item>
               <Descriptions.Item label={t('logs.detail.cost')}>
                 {detail.chargeable ? (
                   formatCredits(detail.cost)
@@ -298,7 +342,9 @@ export default function LogsPage() {
               </Descriptions.Item>
               <Descriptions.Item label={t('logs.detail.id')}>{detail.id}</Descriptions.Item>
             </Descriptions>
-            {detail.errorMessage && <TextBlock title={t('logs.detail.error')} text={detail.errorMessage} />}
+            {detail.errorMessage && (
+              <TextBlock title={t('logs.detail.error')} text={detail.errorMessage} />
+            )}
             <TextBlock title={t('logs.detail.request')} text={detail.requestPreview} />
             <TextBlock title={t('logs.detail.response')} text={detail.responsePreview} />
           </>

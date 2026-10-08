@@ -35,5 +35,6 @@
   "layout.error.title": "頁面發生錯誤",
   "layout.error.subTitle": "請重新整理頁面重試；若問題持續，請聯絡管理員。",
   "layout.error.refresh": "重新整理",
-  "layout.adminRoute.forbidden": "需要管理員權限才能存取該頁面。"
+  "layout.adminRoute.forbidden": "需要管理員權限才能存取該頁面。",
+  "layout.roleRoute.forbidden": "當前帳號無權存取該頁面。"
 }
