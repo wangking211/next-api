@@ -30,7 +30,10 @@ export function consumeSessionExpired(): boolean {
   }
 }
 
-export const api = axios.create({ baseURL: '/api' });
+// 全局超时：axios 默认 0（永不超时），请求挂起会把 loading 态永久卡住
+// （启动白屏、转圈不散都源于此）。30s 对常规接口足够宽裕；CSV 导出等慢调用
+// 在 endpoints.ts 里单独放宽。
+export const api = axios.create({ baseURL: '/api', timeout: 30_000 });
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem(TOKEN_KEY);

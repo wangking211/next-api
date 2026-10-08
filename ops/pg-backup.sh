@@ -2,7 +2,9 @@
 #
 # 每日数据库备份：对运行中的 ai-gateway-postgres 容器执行 pg_dump 并 gzip。
 # 用法：  /opt/AiProject/ops/pg-backup.sh
-# 还原：  gunzip -c <file>.sql.gz | docker exec -i ai-gateway-postgres psql -U aigw -d ai_gateway
+# 还原：  /opt/AiProject/ops/pg-restore.sh <file>.sql.gz ai_gateway --yes
+#        （勿直接 gunzip|psql：纯格式 dump 无 DROP，灌已有库会逐表 already exists，
+#          且 psql 遇错继续 → 半套库；pg-restore.sh 原子恢复，见其头注释）
 #
 # 环境变量（均有默认值）：
 #   BACKUP_DIR     备份目录           默认 /var/backups/aigw

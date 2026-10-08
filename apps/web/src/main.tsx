@@ -38,54 +38,59 @@ function LocaleShell({ children }: { children: ReactNode }) {
     <ConfigProvider
       locale={lang === 'en' ? enUS : lang === 'zh-Hant' ? zhTW : zhCN}
       theme={{
-          algorithm: theme.darkAlgorithm,
-          token: {
-            colorPrimary: '#22d3ee',
-            colorInfo: '#22d3ee',
-            colorSuccess: '#5fc992',
-            colorWarning: '#ffbc33',
-            colorError: '#ff6363',
-            colorLink: '#67e8f9',
-            colorBgBase: '#07080a',
-            colorTextBase: '#f4f7f8',
-            // 主按钮电光青底 + 深字（NVIDIA 式，DESIGN.md §8 对比度 >10:1）
-            colorTextLightSolid: '#061016',
-            borderRadius: 8,
-            fontFamily:
-              "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
+        algorithm: theme.darkAlgorithm,
+        token: {
+          colorPrimary: '#22d3ee',
+          colorInfo: '#22d3ee',
+          colorSuccess: '#5fc992',
+          colorWarning: '#ffbc33',
+          colorError: '#ff6363',
+          colorLink: '#67e8f9',
+          colorBgBase: '#07080a',
+          colorTextBase: '#f4f7f8',
+          // 主按钮电光青底 + 深字（NVIDIA 式，DESIGN.md §8 对比度 >10:1）
+          colorTextLightSolid: '#061016',
+          borderRadius: 8,
+          fontFamily:
+            "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
+        },
+        components: {
+          Layout: {
+            siderBg: '#0a0c0f',
+            headerBg: '#101111',
+            bodyBg: '#07080a',
           },
-          components: {
-            Layout: {
-              siderBg: '#0a0c0f',
-              headerBg: '#101111',
-              bodyBg: '#07080a',
-            },
-            Menu: {
-              darkItemBg: '#0a0c0f',
-              // 深色菜单项文字在 antd 里由 colorTextLightSolid 推导，而该种子为满足
-              // 主按钮「青底深字」被设成近黑 → 深侧栏上近乎不可读。此处按令牌显式改写：
-              // 常规项 = --ink-text（深色面上的正文），悬浮 = --brand-link，选中 = --brand
-              darkItemColor: '#eef2f5',
-              darkItemHoverColor: '#67e8f9',
-              darkItemSelectedColor: '#22d3ee',
-              darkItemDisabledColor: 'rgba(238, 242, 245, 0.25)',
-              darkItemSelectedBg: 'rgba(34, 211, 238, 0.12)',
-              darkItemHoverBg: 'rgba(34, 211, 238, 0.06)',
-            },
-            Card: { colorBgContainer: '#101111' },
-            Table: { colorBgContainer: '#101111', headerBg: '#16181a' },
-            Modal: { contentBg: '#101111', headerBg: '#101111' },
-            Drawer: { colorBgElevated: '#101111' },
+          Menu: {
+            darkItemBg: '#0a0c0f',
+            // 深色菜单项文字在 antd 里由 colorTextLightSolid 推导，而该种子为满足
+            // 主按钮「青底深字」被设成近黑 → 深侧栏上近乎不可读。此处按令牌显式改写：
+            // 常规项 = --ink-text（深色面上的正文），悬浮 = --brand-link，选中 = --brand
+            darkItemColor: '#eef2f5',
+            darkItemHoverColor: '#67e8f9',
+            darkItemSelectedColor: '#22d3ee',
+            darkItemDisabledColor: 'rgba(238, 242, 245, 0.25)',
+            darkItemSelectedBg: 'rgba(34, 211, 238, 0.12)',
+            darkItemHoverBg: 'rgba(34, 211, 238, 0.06)',
           },
-        }}
-      >
-        {children}
-      </ConfigProvider>
-    );
+          Card: { colorBgContainer: '#101111' },
+          Table: { colorBgContainer: '#101111', headerBg: '#16181a' },
+          Modal: { contentBg: '#101111', headerBg: '#101111' },
+          Drawer: { colorBgElevated: '#101111' },
+        },
+      }}
+    >
+      {children}
+    </ConfigProvider>
+  );
 }
 
-loadConfig().finally(() => {
-  ReactDOM.createRoot(document.getElementById('root')!).render(
+// 立即挂载、不等 /api/config：原先是 loadConfig().finally(() => render)，把整个
+// 应用的启动门禁绑在单个请求上，而 axios 默认无超时 → /config 一挂起就是永久
+// 白屏。现在先用默认配置渲染，config settle 后再 render 一次（React 重复 render
+// 从根重新协调），读取 getCreditsPerUsd/getPayRate 等 getter 的消费方即拿到新值。
+const root = ReactDOM.createRoot(document.getElementById('root')!);
+const renderApp = () =>
+  root.render(
     <React.StrictMode>
       <LocaleShell>
         <AntApp>
@@ -99,4 +104,6 @@ loadConfig().finally(() => {
       </LocaleShell>
     </React.StrictMode>,
   );
-});
+
+renderApp();
+void loadConfig().then(renderApp);

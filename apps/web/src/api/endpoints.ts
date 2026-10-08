@@ -5,7 +5,8 @@ import {
   AdminUser,
   AgentMember,
   AgentOverview,
-  AuditLog,  AvailableChannelModels,
+  AuditLog,
+  AvailableChannelModels,
   BalanceTransaction,
   BalanceTxType,
   ChannelInfo,
@@ -36,10 +37,10 @@ import {
 
 export const authApi = {
   async login(identifier: string, password: string) {
-    const { data } = await api.post<{ accessToken: string; user: UserInfo }>(
-      '/auth/login',
-      { identifier, password },
-    );
+    const { data } = await api.post<{ accessToken: string; user: UserInfo }>('/auth/login', {
+      identifier,
+      password,
+    });
     return data;
   },
   async register(email: string, username: string, password: string, emailCode?: string) {
@@ -52,9 +53,11 @@ export const authApi = {
   },
   /** 邮件通道状态：注册是否强制验证码、找回密码入口是否可用 */
   async mailStatus() {
-    const { data } = await api.get<{ enabled: boolean; cooldownSeconds: number; ttlMinutes: number }>(
-      '/auth/mail-status',
-    );
+    const { data } = await api.get<{
+      enabled: boolean;
+      cooldownSeconds: number;
+      ttlMinutes: number;
+    }>('/auth/mail-status');
     return data;
   },
   /** 请求邮箱验证码（注册 / 找回密码共用；带 IP 与重发冷却限流） */
@@ -336,7 +339,13 @@ export const usageApi = {
     });
     return data;
   },
-  async logs(page = 1, pageSize = 20, scope?: 'all', filters: LogFilters = {}, signal?: AbortSignal) {
+  async logs(
+    page = 1,
+    pageSize = 20,
+    scope?: 'all',
+    filters: LogFilters = {},
+    signal?: AbortSignal,
+  ) {
     const { data } = await api.get<Paginated<RequestLogRow>>('/usage/logs', {
       params: { page, pageSize, scope, ...filters },
       signal,
@@ -350,14 +359,13 @@ export const usageApi = {
     });
     return data;
   },
-  async exportLogs(
-    params: { scope?: 'all' } & LogFilters,
-    signal?: AbortSignal,
-  ): Promise<Blob> {
+  async exportLogs(params: { scope?: 'all' } & LogFilters, signal?: AbortSignal): Promise<Blob> {
     const res = await api.get('/usage/logs/export', {
       params,
       responseType: 'blob',
       signal,
+      // 大表导出可能超过全局 30s 超时
+      timeout: 120_000,
     });
     return res.data as Blob;
   },
@@ -369,17 +377,16 @@ export const billingApi = {
     return data;
   },
   async transactions(page = 1, pageSize = 20, type?: BalanceTxType, signal?: AbortSignal) {
-    const { data } = await api.get<Paginated<BalanceTransaction>>(
-      '/billing/transactions',
-      { params: { page, pageSize, type }, signal },
-    );
+    const { data } = await api.get<Paginated<BalanceTransaction>>('/billing/transactions', {
+      params: { page, pageSize, type },
+      signal,
+    });
     return data;
   },
   async redeem(code: string) {
-    const { data } = await api.post<{ balance: number; amount: number }>(
-      '/billing/redeem',
-      { code },
-    );
+    const { data } = await api.post<{ balance: number; amount: number }>('/billing/redeem', {
+      code,
+    });
     return data;
   },
 };
@@ -452,6 +459,8 @@ export const adminApi = {
       params,
       responseType: 'blob',
       signal,
+      // 大表导出可能超过全局 30s 超时
+      timeout: 120_000,
     });
     return res.data as Blob;
   },
@@ -494,12 +503,7 @@ export const adminApi = {
 };
 
 export const redeemCodesApi = {
-  async generate(body: {
-    amount: number;
-    quantity: number;
-    note?: string;
-    expiresAt?: string;
-  }) {
+  async generate(body: { amount: number; quantity: number; note?: string; expiresAt?: string }) {
     const { data } = await api.post<GenerateCodesResult>('/admin/redeem-codes', body);
     return data;
   },

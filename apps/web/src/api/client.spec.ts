@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { SESSION_EXPIRED_KEY, consumeSessionExpired, loginPathWithRedirect } from './client';
+import { SESSION_EXPIRED_KEY, api, consumeSessionExpired, loginPathWithRedirect } from './client';
 
 beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
+});
+
+describe('api 客户端', () => {
+  it('带全局请求超时：axios 默认 0（永不超时），请求挂起会把页面永久卡住', () => {
+    expect(api.defaults.timeout).toBe(30_000);
+    expect(api.defaults.baseURL).toBe('/api');
+  });
 });
 
 describe('loginPathWithRedirect', () => {
