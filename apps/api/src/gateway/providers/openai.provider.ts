@@ -37,9 +37,7 @@ function extractUsage(json: any) {
  * 判定口径（保守）：先看有没有「正常载荷」特征字段，有就直接放行；
  * 否则要求出现 error 对象或「非成功 code」（New-API 风格 code=0/success 视为成功）。
  */
-export function detectErrorPayload(
-  json: any,
-): { status: number; retryable: boolean } | null {
+export function detectErrorPayload(json: any): { status: number; retryable: boolean } | null {
   if (!json || typeof json !== 'object' || Array.isArray(json)) return null;
   const hasPayload =
     Array.isArray(json.choices) ||
@@ -74,7 +72,16 @@ export function detectErrorPayload(
  */
 export class OpenAiCompatibleProvider implements Provider {
   readonly name = 'openai';
-  readonly aliases = ['openai', 'deepseek', 'moonshot', 'qwen', 'zhipu', 'azure', 'custom', 'openai-compatible'];
+  readonly aliases = [
+    'openai',
+    'deepseek',
+    'moonshot',
+    'qwen',
+    'zhipu',
+    'azure',
+    'custom',
+    'openai-compatible',
+  ];
 
   private headers(apiKey: string) {
     return {
@@ -109,11 +116,7 @@ export class OpenAiCompatibleProvider implements Provider {
     return this.postJson(joinUrl(channel.baseUrl, 'images/generations'), apiKey, req);
   }
 
-  async videosCreate(
-    channel: Channel,
-    apiKey: string,
-    req: ChatRequest,
-  ): Promise<NonStreamResult> {
+  async videosCreate(channel: Channel, apiKey: string, req: ChatRequest): Promise<NonStreamResult> {
     // OpenAI 兼容 /videos：请求体 {model, prompt, seconds|duration, image, metadata}
     return this.postJson(joinUrl(channel.baseUrl, 'videos'), apiKey, req);
   }
@@ -140,11 +143,7 @@ export class OpenAiCompatibleProvider implements Provider {
         signal: combineSignals(req.timeoutMs, req.signal),
       });
     } catch (e: any) {
-      throw new UpstreamError(
-        `Upstream connection failed: ${describeFetchError(e)}`,
-        502,
-        true,
-      );
+      throw new UpstreamError(`Upstream connection failed: ${describeFetchError(e)}`, 502, true);
     }
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => '');
@@ -160,7 +159,12 @@ export class OpenAiCompatibleProvider implements Provider {
         };
       }
       const status = res.status || 502;
-      throw new UpstreamError(`Upstream error ${status}`, status, status >= 500 || status === 429, json);
+      throw new UpstreamError(
+        `Upstream error ${status}`,
+        status,
+        status >= 500 || status === 429,
+        json,
+      );
     }
     return {
       status: res.status,
@@ -179,11 +183,7 @@ export class OpenAiCompatibleProvider implements Provider {
   }
 
   /** 非流式 POST JSON 透传：chat / embeddings / images / videos 共用 */
-  private async postJson(
-    url: string,
-    apiKey: string,
-    req: ChatRequest,
-  ): Promise<NonStreamResult> {
+  private async postJson(url: string, apiKey: string, req: ChatRequest): Promise<NonStreamResult> {
     let res: Response;
     try {
       res = await fetch(url, {
@@ -194,11 +194,7 @@ export class OpenAiCompatibleProvider implements Provider {
         signal: combineSignals(req.timeoutMs, req.signal),
       });
     } catch (e: any) {
-      throw new UpstreamError(
-        `Upstream connection failed: ${describeFetchError(e)}`,
-        502,
-        true,
-      );
+      throw new UpstreamError(`Upstream connection failed: ${describeFetchError(e)}`, 502, true);
     }
     return this.readJson(res);
   }
@@ -218,11 +214,7 @@ export class OpenAiCompatibleProvider implements Provider {
         signal: combineSignals(req.timeoutMs, req.signal),
       });
     } catch (e: any) {
-      throw new UpstreamError(
-        `Upstream connection failed: ${describeFetchError(e)}`,
-        502,
-        true,
-      );
+      throw new UpstreamError(`Upstream connection failed: ${describeFetchError(e)}`, 502, true);
     }
     return this.readJson(res);
   }
@@ -252,27 +244,34 @@ export class OpenAiCompatibleProvider implements Provider {
     return { status: res.status, json, usage: extractUsage(json), rawText: text };
   }
 
-  async chatStream(
-    channel: Channel,
-    apiKey: string,
-    req: ChatRequest,
-  ): Promise<StreamResult> {
+  async chatStream(channel: Channel, apiKey: string, req: ChatRequest): Promise<StreamResult> {
     const url = joinUrl(channel.baseUrl, 'chat/completions');
-    let res: Response;
-    try {
-      res = await fetch(url, {
+    // 流式用量：上游默认不回 usage 分片，只能按字符数估算（中文低估 2~4 倍，
+    // 直接影响扣费与分成）→ 显式请求 include_usage 拿真实用量；客户端自己指定了
+    // stream_options 则以客户端为准。个别老兼容上游不认识该字段
+    //（400 且报错提到 stream_options）→ 去掉重试一次，仍失败才按正常错误抛。
+    const wantsUsage = req.body?.stream_options === undefined;
+    const doFetch = (withUsage: boolean) =>
+      fetch(url, {
         method: 'POST',
         headers: { ...this.headers(apiKey), Accept: 'text/event-stream' },
-        body: JSON.stringify({ ...req.body, stream: true }),
+        body: JSON.stringify({
+          ...req.body,
+          stream: true,
+          ...(withUsage ? { stream_options: { include_usage: true } } : {}),
+        }),
         redirect: 'manual',
         signal: combineSignals(req.timeoutMs, req.signal),
       });
+    let res: Response;
+    try {
+      res = await doFetch(wantsUsage);
+      if (wantsUsage && res.status === 400) {
+        const probe = await res.clone().text();
+        if (/stream_options/i.test(probe)) res = await doFetch(false);
+      }
     } catch (e: any) {
-      throw new UpstreamError(
-        `Upstream connection failed: ${describeFetchError(e)}`,
-        502,
-        true,
-      );
+      throw new UpstreamError(`Upstream connection failed: ${describeFetchError(e)}`, 502, true);
     }
 
     if (!res.ok) {

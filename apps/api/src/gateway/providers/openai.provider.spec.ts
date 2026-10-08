@@ -7,10 +7,33 @@ describe('OpenAiCompatibleProvider', () => {
   afterEach(() => jest.restoreAllMocks());
 
   function jsonResponse(json: any, status = 200) {
-    return {
+    const text = JSON.stringify(json);
+    const r: any = {
       ok: status >= 200 && status < 300,
       status,
-      text: async () => JSON.stringify(json),
+      text: async () => text,
+      // chatStream 的 stream_options 容错会先 clone() 再读错误体（与真实 Response 一致）
+      clone: () => r,
+    };
+    return r;
+  }
+
+  /** 200 SSE 流式响应（mock，body 可被 pipeRaw 消费） */
+  function streamResponse() {
+    const enc = new TextEncoder();
+    return {
+      ok: true,
+      status: 200,
+      headers: {
+        get: (k: string) => (k.toLowerCase() === 'content-type' ? 'text/event-stream' : null),
+      },
+      body: new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(enc.encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'));
+          c.enqueue(enc.encode('data: [DONE]\n\n'));
+          c.close();
+        },
+      }),
     } as any;
   }
 
@@ -103,5 +126,65 @@ describe('OpenAiCompatibleProvider', () => {
     await expect(
       provider.embeddingsNonStream!(channel, 'k', { model: 'm', body: { input: 'x' } }),
     ).rejects.toMatchObject({ status: 502, retryable: true });
+  });
+
+  describe('chatStream（流式 include_usage 真实用量）', () => {
+    it('默认注入 stream: true + stream_options.include_usage', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue(streamResponse());
+      const provider = new OpenAiCompatibleProvider();
+      const res = await provider.chatStream(channel, 'k', {
+        model: 'm',
+        body: { messages: [] },
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [, init] = fetchSpy.mock.calls[0] as [string, any];
+      expect(JSON.parse(init.body)).toEqual({
+        messages: [],
+        stream: true,
+        stream_options: { include_usage: true },
+      });
+      expect(res.status).toBe(200);
+    });
+
+    it('客户端显式指定 stream_options → 不覆盖', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue(streamResponse());
+      const provider = new OpenAiCompatibleProvider();
+      await provider.chatStream(channel, 'k', {
+        model: 'm',
+        body: { messages: [], stream_options: { include_usage: false } },
+      });
+      const [, init] = fetchSpy.mock.calls[0] as [string, any];
+      expect(JSON.parse(init.body).stream_options).toEqual({ include_usage: false });
+    });
+
+    it('上游不认 stream_options（400 报错提到该字段）→ 去掉重试一次', async () => {
+      const fetchSpy = jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValueOnce(
+          jsonResponse({ error: { message: 'Unknown parameter: stream_options' } }, 400),
+        )
+        .mockResolvedValueOnce(streamResponse());
+      const provider = new OpenAiCompatibleProvider();
+      const res = await provider.chatStream(channel, 'k', {
+        model: 'm',
+        body: { messages: [] },
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      const bodies = fetchSpy.mock.calls.map(([, init]: any) => JSON.parse(init.body));
+      expect(bodies[0].stream_options).toEqual({ include_usage: true });
+      expect(bodies[1].stream_options).toBeUndefined();
+      expect(res.status).toBe(200);
+    });
+
+    it('无关的 400 不重试（单次请求后直接抛错）', async () => {
+      const fetchSpy = jest
+        .spyOn(global, 'fetch')
+        .mockResolvedValue(jsonResponse({ error: { message: 'bad input' } }, 400));
+      const provider = new OpenAiCompatibleProvider();
+      await expect(
+        provider.chatStream(channel, 'k', { model: 'm', body: { messages: [] } }),
+      ).rejects.toMatchObject({ status: 400, retryable: false });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
   });
 });

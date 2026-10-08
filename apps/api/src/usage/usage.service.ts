@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { redactSecrets } from '../common/redact.util';
 import { BillingService, ChannelPricing } from '../billing/billing.service';
@@ -109,8 +110,7 @@ export class UsageService {
     /** 已带出的定价（resolve 结果）：命中即免查渠道价与目录价 */
     pricingOverride?: ChannelPricing,
   ): Promise<{ cost: number; upstreamCost: number }> {
-    const pricing =
-      pricingOverride ?? (await this.billing.getChannelPricing(channelId, model));
+    const pricing = pricingOverride ?? (await this.billing.getChannelPricing(channelId, model));
     const multiplier =
       multiplierOverride ?? (userId ? await this.billing.getUserMultiplier(userId) : 1);
     const nonCached = Math.max(0, promptTokens - cacheReadTokens);
@@ -134,8 +134,7 @@ export class UsageService {
   async record(entry: UsageEntry): Promise<void> {
     // 倍率：网关已解析则直传（与预授权同一口径），否则回退用户/代理倍率
     const multiplier =
-      entry.multiplier ??
-      (entry.userId ? await this.billing.getUserMultiplier(entry.userId) : 1);
+      entry.multiplier ?? (entry.userId ? await this.billing.getUserMultiplier(entry.userId) : 1);
     // 按次计费模型（图片等）直接给定金额；否则按 token 计价
     const { cost, upstreamCost } =
       entry.costOverride != null
@@ -167,11 +166,18 @@ export class UsageService {
       chargeable: entry.chargeable === true,
     });
 
-    // 计费事务整体封装：瞬时失败时重试一次；两次都失败才记错误并返回（record 永不抛出）
+    // 幂等键：整个 record() 预生成一次 RequestLog 主键，所有重放共用。交互式事务
+    // 若在「提交响应丢失」场景下实际已提交，重放会撞该主键、后续写（Key 额度增量、
+    // 余额扣款、共享分成）全部不执行——绝无二次扣费；行存在即视为已完整落账。
+    const logId = randomUUID();
+
+    // 计费事务整体封装：瞬时失败时重试一次（重试幂等，见 logId）；
+    // 两次都失败且确认未落账才记错误并返回（record 永不抛出）
     const runBillingTx = () =>
       this.prisma.$transaction(async (tx) => {
         const log = await tx.requestLog.create({
           data: {
+            id: logId,
             userId: entry.userId,
             apiKeyId: entry.apiKeyId,
             channelId: entry.channelId,
@@ -257,9 +263,7 @@ export class UsageService {
             data: {
               shareUsedRequests: { increment: 1 },
               shareUsedCostUsd: { increment: round6(upstreamCost) },
-              ...(bookedRevenue > 0
-                ? { shareRevenue: { increment: round6(bookedRevenue) } }
-                : {}),
+              ...(bookedRevenue > 0 ? { shareRevenue: { increment: round6(bookedRevenue) } } : {}),
             },
           });
         }
@@ -269,15 +273,26 @@ export class UsageService {
       try {
         await runBillingTx();
       } catch {
-        // 事务整体重试一次（回滚后重放，无重复扣费风险）：交互式事务抛出前已完整回滚，重放是原子的
-        await runBillingTx();
+        // 首次失败：先确认确实回滚（预生成主键的行不存在）——若行已存在，
+        // 说明「已提交但响应丢失」，落账本就完整 → 不重试直接视为成功
+        if (!(await this.billingCommitted(logId))) {
+          // 事务整体重试一次（回滚后重放，同主键保证幂等）
+          await runBillingTx();
+        }
       }
     } catch (e) {
-      // 明细/扣费失败必须可见，避免静默丢失计费
-      this.logger.error(
-        `用量记录失败 user=${entry.userId} model=${entry.model}: ${(e as Error)?.message}`,
-      );
-      return;
+      // 重试尝试本身也可能「提交后丢响应」→ 再确认一次落账状态
+      if (await this.billingCommitted(logId)) {
+        this.logger.warn(
+          `计费事务响应丢失但已确认落账 user=${entry.userId} model=${entry.model} log=${logId}`,
+        );
+      } else {
+        // 明细/扣费失败必须可见，避免静默丢失计费
+        this.logger.error(
+          `用量记录失败 user=${entry.userId} model=${entry.model}: ${(e as Error)?.message}`,
+        );
+        return;
+      }
     }
 
     // 日聚合单独执行：失败不影响已提交的明细与扣费
@@ -294,6 +309,23 @@ export class UsageService {
     await this.touchLastActive(entry.userId);
   }
 
+  /**
+   * 预生成主键的明细行是否已存在 = 计费事务已完整提交（重试幂等判定）。
+   * 查询失败按「未提交」处理：宁可多走一次重试（重放撞主键依旧安全），
+   * 也绝不把真实落账误判为丢失。
+   */
+  private async billingCommitted(logId: string): Promise<boolean> {
+    try {
+      const row = await this.prisma.requestLog.findUnique({
+        where: { id: logId },
+        select: { id: true },
+      });
+      return row != null;
+    } catch {
+      return false;
+    }
+  }
+
   /** 刷新用户最后活跃时间（进程内先节流 5 分钟，再由 DB stale 条件二次把关；失败静默） */
   private async touchLastActive(userId?: string | null): Promise<void> {
     if (!userId) return;
@@ -305,7 +337,10 @@ export class UsageService {
       await this.prisma.user.updateMany({
         where: {
           id: userId,
-          OR: [{ lastActiveAt: null }, { lastActiveAt: { lt: new Date(now - UsageService.LAST_ACTIVE_TTL_MS) } }],
+          OR: [
+            { lastActiveAt: null },
+            { lastActiveAt: { lt: new Date(now - UsageService.LAST_ACTIVE_TTL_MS) } },
+          ],
         },
         data: { lastActiveAt: new Date(now) },
       });
@@ -578,11 +613,7 @@ export class UsageService {
   }
 
   /** 使用分析：按模型/渠道/用户/Key 聚合；支持 days 或显式 from/to 时间段。 */
-  async analytics(
-    userId: string | null,
-    days = 30,
-    range?: { from?: string; to?: string },
-  ) {
+  async analytics(userId: string | null, days = 30, range?: { from?: string; to?: string }) {
     const since = range?.from
       ? new Date(range.from)
       : new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -635,58 +666,56 @@ export class UsageService {
         where: { ...base, status: { gte: 400 } },
         _count: { _all: true },
       }),
-        userId
-          ? Promise.resolve([] as any[])
-          : this.prisma.requestLog.groupBy({
-              by: ['userId'],
-              where: base,
-              _count: { _all: true },
-              _sum: { totalTokens: true, cost: true, upstreamCost: true },
-            }),
-        this.prisma.requestLog.groupBy({
-          by: ['apiKeyId'],
-          where: base,
-          _count: { _all: true },
-          _sum: { totalTokens: true, cost: true, upstreamCost: true },
-        }),
-        this.prisma.requestLog.aggregate({
-          where: base,
-          _count: { _all: true },
-          _sum: { totalTokens: true, cost: true, upstreamCost: true },
-        }),
-        this.prisma.requestLog.count({ where: { ...base, status: { gte: 400 } } }),
-        this.prisma.requestLog.groupBy({
-          by: ['model'],
-          where: billedBase,
-          _sum: billedAgg,
-        }),
-        this.prisma.requestLog.groupBy({
-          by: ['channelId'],
-          where: billedBase,
-          _sum: billedAgg,
-        }),
-        userId
-          ? Promise.resolve([] as any[])
-          : this.prisma.requestLog.groupBy({
-              by: ['userId'],
-              where: billedBase,
-              _sum: billedAgg,
-            }),
-        this.prisma.requestLog.groupBy({
-          by: ['apiKeyId'],
-          where: billedBase,
-          _sum: billedAgg,
-        }),
-        this.prisma.requestLog.aggregate({
-          where: billedBase,
-          _sum: billedAgg,
-        }),
-      ]);
+      userId
+        ? Promise.resolve([] as any[])
+        : this.prisma.requestLog.groupBy({
+            by: ['userId'],
+            where: base,
+            _count: { _all: true },
+            _sum: { totalTokens: true, cost: true, upstreamCost: true },
+          }),
+      this.prisma.requestLog.groupBy({
+        by: ['apiKeyId'],
+        where: base,
+        _count: { _all: true },
+        _sum: { totalTokens: true, cost: true, upstreamCost: true },
+      }),
+      this.prisma.requestLog.aggregate({
+        where: base,
+        _count: { _all: true },
+        _sum: { totalTokens: true, cost: true, upstreamCost: true },
+      }),
+      this.prisma.requestLog.count({ where: { ...base, status: { gte: 400 } } }),
+      this.prisma.requestLog.groupBy({
+        by: ['model'],
+        where: billedBase,
+        _sum: billedAgg,
+      }),
+      this.prisma.requestLog.groupBy({
+        by: ['channelId'],
+        where: billedBase,
+        _sum: billedAgg,
+      }),
+      userId
+        ? Promise.resolve([] as any[])
+        : this.prisma.requestLog.groupBy({
+            by: ['userId'],
+            where: billedBase,
+            _sum: billedAgg,
+          }),
+      this.prisma.requestLog.groupBy({
+        by: ['apiKeyId'],
+        where: billedBase,
+        _sum: billedAgg,
+      }),
+      this.prisma.requestLog.aggregate({
+        where: billedBase,
+        _sum: billedAgg,
+      }),
+    ]);
 
     const errByModel = new Map(byModelErr.map((r) => [r.model, r._count._all]));
-    const errByChannel = new Map(
-      byChannelErr.map((r) => [r.channelId, r._count._all]),
-    );
+    const errByChannel = new Map(byChannelErr.map((r) => [r.channelId, r._count._all]));
 
     /** 平台口径：实收（billedCost）与实付上游成本（billedUpstreamCost），BYOK 两者皆为 0 */
     const billedMap = (rows: any[], key: string) =>
@@ -761,9 +790,7 @@ export class UsageService {
         billedCost: Number(billedTotals._sum.cost ?? 0),
         upstreamCost: Number(totals._sum.upstreamCost ?? 0),
         billedUpstreamCost: Number(billedTotals._sum.upstreamCost ?? 0),
-        margin:
-          Number(billedTotals._sum.cost ?? 0) -
-          Number(billedTotals._sum.upstreamCost ?? 0),
+        margin: Number(billedTotals._sum.cost ?? 0) - Number(billedTotals._sum.upstreamCost ?? 0),
       },
       byModel: byModel
         .map((r) => ({

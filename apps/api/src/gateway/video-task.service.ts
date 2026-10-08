@@ -44,6 +44,23 @@ export class VideoTaskService {
     return hit;
   }
 
+  /**
+   * 按属主分类查询（网关状态/内容查询的准入规则）：
+   * - `missing`：无映射 → 调用方可走「逐渠道探测」兜底（进程重启后映射丢失的场景）；
+   * - `owned`：属主一致 → 正常放行；
+   * - `foreign`：有映射但属主不符 → 调用方必须按未知任务处理（404 video_task_not_found）
+   *   **且禁止走探测兜底**，否则任何持有效 Key 的用户凭 taskId 就能查状态、
+   *   下载他人成片（横向越权）。
+   */
+  classify(
+    taskId: string,
+    userId: string,
+  ): { state: 'missing' } | { state: 'owned'; ref: VideoTaskRef } | { state: 'foreign' } {
+    const hit = this.lookup(taskId);
+    if (!hit) return { state: 'missing' };
+    return hit.userId === userId ? { state: 'owned', ref: hit } : { state: 'foreign' };
+  }
+
   size(): number {
     return this.map.size;
   }

@@ -5,6 +5,7 @@ import {
   Provider,
   StreamResult,
   UpstreamError,
+  UsageInfo,
 } from '../types';
 import { joinUrl, sseEvents, describeFetchError, combineSignals } from './stream.util';
 
@@ -168,11 +169,7 @@ export class GeminiProvider implements Provider {
         signal: combineSignals(timeoutMs, signal),
       });
     } catch (e: any) {
-      throw new UpstreamError(
-        `Upstream connection failed: ${describeFetchError(e)}`,
-        502,
-        true,
-      );
+      throw new UpstreamError(`Upstream connection failed: ${describeFetchError(e)}`, 502, true);
     }
   }
 
@@ -215,11 +212,7 @@ export class GeminiProvider implements Provider {
     };
   }
 
-  async chatStream(
-    channel: Channel,
-    apiKey: string,
-    req: ChatRequest,
-  ): Promise<StreamResult> {
+  async chatStream(channel: Channel, apiKey: string, req: ChatRequest): Promise<StreamResult> {
     const res = await this.request(
       channel,
       apiKey,
@@ -243,21 +236,27 @@ export class GeminiProvider implements Provider {
     if (!res.body) {
       throw new UpstreamError('Upstream returned empty stream', 502, true);
     }
+    // 流式真实用量：Gemini 每个分片都可能带 usageMetadata（末片最全），
+    // 采集进 usageRef，否则只能按字符估算（中文低估 2~4 倍）
+    const usageRef: { usage?: UsageInfo } = {};
     return {
       status: 200,
-      chunks: this.translateStream(res.body, req.model),
+      chunks: this.translateStream(res.body, req.model, usageRef),
       headers: { 'Content-Type': 'text/event-stream' },
+      usageRef,
     };
   }
 
   private async *translateStream(
     stream: ReadableStream<Uint8Array>,
     model: string,
+    usageRef?: { usage?: UsageInfo },
   ): AsyncGenerator<string> {
     const id = `chatcmpl-${Date.now()}`;
     const created = Math.floor(Date.now() / 1000);
     let roleSent = false;
     let finish = 'stop';
+    let captured: UsageInfo | undefined;
 
     for await (const ev of sseEvents(stream)) {
       let data: any;
@@ -266,6 +265,9 @@ export class GeminiProvider implements Provider {
       } catch {
         continue;
       }
+      // 用量随分片累积，最后一个带 usageMetadata 的分片最完整 → 覆盖式采集
+      const u = usageOf(data);
+      if (u) captured = u;
       const candidate = data?.candidates?.[0];
       if (!roleSent) {
         yield chunkLine(id, data?.modelVersion ?? model, created, { role: 'assistant' }, null);
@@ -280,6 +282,7 @@ export class GeminiProvider implements Provider {
       if (candidate?.finishReason) finish = mapFinish(candidate.finishReason);
     }
 
+    if (usageRef && captured) usageRef.usage = captured;
     if (!roleSent) {
       yield chunkLine(id, model, created, { role: 'assistant' }, null);
     }

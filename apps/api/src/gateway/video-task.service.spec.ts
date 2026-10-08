@@ -64,4 +64,30 @@ describe('VideoTaskService（视频任务 → 渠道进程内映射）', () => {
     expect(service.lookup('t4999')).toBeUndefined();
     expect(service.lookup('fresh')).toBeDefined();
   });
+
+  describe('classify（状态/内容查询的属主准入）', () => {
+    it('无映射 → missing（允许走探测兜底）', () => {
+      expect(service.classify('nope', 'u1')).toEqual({ state: 'missing' });
+    });
+
+    it('属主一致 → owned 并带出映射', () => {
+      service.remember('t1', ref);
+      const r = service.classify('t1', 'u1');
+      expect(r.state).toBe('owned');
+      if (r.state === 'owned') expect(r.ref).toMatchObject(ref);
+    });
+
+    it('属主不符 → foreign（调用方按未知任务处理，禁止探测兜底）', () => {
+      service.remember('t1', ref);
+      expect(service.classify('t1', 'u2')).toEqual({ state: 'foreign' });
+    });
+
+    it('映射过期 → missing（foreign 不会因 TTL 残留）', () => {
+      const t0 = 1_700_000_000_000;
+      const now = jest.spyOn(Date, 'now').mockReturnValue(t0);
+      service.remember('t1', ref);
+      now.mockReturnValue(t0 + 24 * 3600 * 1000 + 1);
+      expect(service.classify('t1', 'u2')).toEqual({ state: 'missing' });
+    });
+  });
 });

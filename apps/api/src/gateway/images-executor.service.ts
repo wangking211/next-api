@@ -99,9 +99,11 @@ export class ImagesExecutorService {
 
     for (let i = 0; i < channels.length; i++) {
       const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
-      // 模型映射：对外规范名 → 上游真实名
+      // 模型映射：对外规范名 → 上游真实名。
+      // n 必须用截断后的值写回：否则客户端传 n=100 时预授权/落账按 10 张算、
+      // 上游却按 100 张出图（收入漏损）
       const upstreamModel = upstreamModelName ?? model;
-      const upstreamBody = upstreamModel === model ? body : { ...body, model: upstreamModel };
+      const upstreamBody = { ...body, model: upstreamModel, n };
       const provider = this.providers.resolve(channel.provider);
       if (typeof provider.imagesGenerate !== 'function') {
         unsupported = true;
@@ -130,7 +132,9 @@ export class ImagesExecutorService {
           completionTokens: 0,
           totalTokens: 0,
         };
-        const images = Array.isArray(result.json?.data) ? result.json.data.length : n;
+        // 上游少给按实际张数计费、多给不超预授权（clamp 上限 n）
+        const actual = Array.isArray(result.json?.data) ? result.json.data.length : n;
+        const images = Math.min(actual, n);
         // 先把响应写出去：客户端不必等 DB 事务 + Redis 写完
         const response = res.status(result.status).json(result.json);
         // 计费/健康度/路由指标互不依赖 → 响应写出后并行后台结算
@@ -154,8 +158,8 @@ export class ImagesExecutorService {
             pricing,
             ...(perCall
               ? {
-                  costOverride: pricePerCall * n * billingInfo.value,
-                  upstreamCostOverride: costPerCall * n,
+                  costOverride: pricePerCall * images * billingInfo.value,
+                  upstreamCostOverride: costPerCall * images,
                 }
               : {}),
           }),

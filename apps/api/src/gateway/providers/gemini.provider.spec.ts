@@ -1,7 +1,9 @@
-import { buildGeminiBody, toOpenAiResponse } from './gemini.provider';
+import { buildGeminiBody, toOpenAiResponse, GeminiProvider } from './gemini.provider';
 import { ChatRequest } from '../types';
 
 describe('Gemini conversion', () => {
+  afterEach(() => jest.restoreAllMocks());
+
   it('builds gemini body from openai request', () => {
     const req: ChatRequest = {
       model: 'gemini-1.5-pro',
@@ -56,7 +58,10 @@ describe('Gemini conversion', () => {
     const res = toOpenAiResponse(
       {
         candidates: [
-          { content: { role: 'model', parts: [{ text: 'Hello ' }, { text: 'world' }] }, finishReason: 'STOP' },
+          {
+            content: { role: 'model', parts: [{ text: 'Hello ' }, { text: 'world' }] },
+            finishReason: 'STOP',
+          },
         ],
         usageMetadata: { promptTokenCount: 8, candidatesTokenCount: 4, totalTokenCount: 12 },
         modelVersion: 'gemini-1.5-pro',
@@ -84,5 +89,39 @@ describe('Gemini conversion', () => {
       'm',
     );
     expect(res.choices[0].finish_reason).toBe('length');
+  });
+
+  it('流式翻译时采集分片 usageMetadata 进 usageRef（末片最全，覆盖式）', async () => {
+    const enc = new TextEncoder();
+    const events = [
+      'data: {"candidates":[{"content":{"parts":[{"text":"你"}],"role":"MODEL"}}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":1,"totalTokenCount":5}}\n\n',
+      'data: {"candidates":[{"content":{"parts":[{"text":"好"}],"role":"MODEL"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":6,"totalTokenCount":10,"cachedContentTokenCount":2}}\n\n',
+    ];
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const e of events) controller.enqueue(enc.encode(e));
+          controller.close();
+        },
+      }),
+    } as any);
+
+    const provider = new GeminiProvider();
+    const res = await provider.chatStream({ baseUrl: 'https://x' } as any, 'k', {
+      model: 'gemini-1.5-pro',
+      body: { messages: [{ role: 'user', content: 'hi' }] },
+    });
+    const chunks: string[] = [];
+    for await (const c of res.chunks) chunks.push(c);
+
+    expect(chunks.join('')).toContain('data: [DONE]');
+    expect(res.usageRef?.usage).toEqual({
+      promptTokens: 4,
+      completionTokens: 6,
+      totalTokens: 10,
+      cacheReadTokens: 2,
+    });
   });
 });

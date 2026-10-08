@@ -355,7 +355,12 @@ export class VideoExecutorService {
     taskId: string,
   ): Promise<Array<{ c: ResolvedChannel; model: string }>> {
     const { user, apiKey } = req.gateway;
-    const hit = this.videoTasks.lookup(taskId);
+    const cls = this.videoTasks.classify(taskId, user.id);
+    if (cls.state === 'foreign') {
+      // 非属主：按未知任务处理，且绝不落到探测兜底 —— 否则任何持有效 Key 的
+      // 用户凭 taskId 即可查状态 / 下载他人成片（横向越权）
+      return [];
+    }
     const group = await this.groups.effectiveGroup(user, apiKey.groupId);
     const seen = new Set<string>();
     const out: Array<{ c: ResolvedChannel; model: string }> = [];
@@ -366,13 +371,13 @@ export class VideoExecutorService {
         out.push({ c, model });
       }
     };
-    if (hit) {
+    if (cls.state === 'owned') {
       add(
-        await this.resolver.resolve(user.id, hit.model, {
+        await this.resolver.resolve(user.id, cls.ref.model, {
           strategy: apiKey.routingStrategy,
           groupId: group.id,
         }),
-        hit.model,
+        cls.ref.model,
       );
     }
     if (out.length === 0) {

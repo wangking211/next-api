@@ -24,6 +24,8 @@ function makeService() {
     requestLog: {
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
+      // 幂等判定用（billingCommitted）：默认 null = 未落账，按「可重试」处理
+      findUnique: jest.fn().mockResolvedValue(null),
     },
   };
   const billing = {
@@ -78,7 +80,10 @@ describe('UsageService 计费口径', () => {
     // 费用额度不被免费调用消耗
     expect(tx.apiKey.update).toHaveBeenCalledWith({
       where: { id: 'k1' },
-      data: expect.objectContaining({ quotaUsed: { increment: 1_000_000 }, costUsed: { increment: 0 } }),
+      data: expect.objectContaining({
+        quotaUsed: { increment: 1_000_000 },
+        costUsed: { increment: 0 },
+      }),
     });
     // 日聚合：折算总额照记，实扣为 0
     expect(prisma.usageDaily.create).toHaveBeenCalledWith({
@@ -161,10 +166,13 @@ describe('UsageService 计费口径', () => {
   it('日聚合 create 撞唯一约束（并发首写）时回退 updateMany 自增', async () => {
     const { service, prisma } = makeService();
     prisma.usageDaily.create.mockRejectedValueOnce(
-      new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`userId`,`apiKeyId`,`date`)', {
-        code: 'P2002',
-        clientVersion: '6.2.1',
-      }),
+      new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed on the fields: (`userId`,`apiKeyId`,`date`)',
+        {
+          code: 'P2002',
+          clientVersion: '6.2.1',
+        },
+      ),
     );
 
     await service.record({ ...baseEntry, chargeable: true });
@@ -258,8 +266,10 @@ describe('UsageService 共享分成落账', () => {
 });
 
 /**
- * 计费事务瞬时失败：整体重试一次（交互式事务抛出前已完整回滚，重放原子、无重复扣费风险）。
- * 两次都失败才记 logger.error 并返回——record() 永不抛出（HTTP 响应已发给调用方）。
+ * 计费事务瞬时失败：整体重试一次且重试幂等——RequestLog 主键在 record() 开始时
+ * 预生成，行存在 = 已完整落账（「提交响应丢失」不重试也不误报）；确认未落账才重放
+ * （同键重放撞主键即停，绝无二次扣费）。
+ * 两次都失败且确认未落账才记 logger.error 并返回——record() 永不抛出（HTTP 响应已发给调用方）。
  */
 describe('UsageService 计费事务重试', () => {
   it('$transaction 首次失败、重试成功：事务共尝试两次，日聚合等下游照常执行', async () => {
@@ -270,9 +280,7 @@ describe('UsageService 计费事务重试', () => {
       .mockImplementationOnce((cb: any) => cb(tx));
     const errSpy = jest.spyOn(service['logger'], 'error');
 
-    await expect(
-      service.record({ ...baseEntry, chargeable: true }),
-    ).resolves.toBeUndefined();
+    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toBeUndefined();
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
     // 重试成功后下游照常：日聚合 + 刷新最后活跃
@@ -288,9 +296,7 @@ describe('UsageService 计费事务重试', () => {
     prisma.$transaction = jest.fn().mockRejectedValue(new Error('db down'));
     const errSpy = jest.spyOn(service['logger'], 'error');
 
-    await expect(
-      service.record({ ...baseEntry, chargeable: true }),
-    ).resolves.toBeUndefined();
+    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toBeUndefined();
 
     // 有界重试：总共恰好两次尝试，绝不无限循环
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
@@ -298,6 +304,63 @@ describe('UsageService 计费事务重试', () => {
     // 事务全失败 → 不做日聚合（计费未落库，避免半截数据）
     expect(prisma.usageDaily.create).not.toHaveBeenCalled();
     errSpy.mockRestore();
+  });
+
+  it('首次失败但已确认落账（提交响应丢失）→ 不重试、不告警、下游照常', async () => {
+    const { service, prisma } = makeService();
+    prisma.$transaction = jest.fn().mockRejectedValue(new Error('connection reset at commit'));
+    // 预生成主键的行已存在 = 首次尝试实际已提交
+    prisma.requestLog.findUnique = jest.fn().mockResolvedValue({ id: 'logId' });
+    const errSpy = jest.spyOn(service['logger'], 'error');
+
+    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toBeUndefined();
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1); // 已落账 → 绝不重试
+    expect(errSpy).not.toHaveBeenCalled();
+    expect(prisma.usageDaily.create).toHaveBeenCalledTimes(1); // 视为成功，聚合照常
+    errSpy.mockRestore();
+  });
+
+  it('重试沿用同一预生成主键（重放撞键即已提交，绝无二次扣费）', async () => {
+    const { service, prisma, tx } = makeService();
+    // 首次尝试：事务体执行完后在提交阶段丢响应（模拟已提交但客户端收到错误）
+    prisma.$transaction = jest
+      .fn()
+      .mockImplementationOnce(async (cb: any) => {
+        await cb(tx);
+        throw new Error('commit response lost');
+      })
+      .mockImplementationOnce((cb: any) => cb(tx));
+    prisma.requestLog.findUnique = jest.fn().mockResolvedValue(null); // 首次已回滚判定
+
+    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toBeUndefined();
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    const ids = tx.requestLog.create.mock.calls.map((c: any) => c[0].data.id);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toBe(ids[1]); // 两次尝试同键 → 真实 PG 中重放会撞主键而非双写
+    expect(typeof ids[0]).toBe('string');
+    expect(ids[0].length).toBeGreaterThan(0);
+  });
+
+  it('重试尝试也「提交后丢响应」→ 二次确认落账 → 视为成功、仅 warn 不 error', async () => {
+    const { service, prisma } = makeService();
+    prisma.$transaction = jest.fn().mockRejectedValue(new Error('commit response lost'));
+    prisma.requestLog.findUnique = jest
+      .fn()
+      .mockResolvedValueOnce(null) // 重试前：确认首次确实回滚
+      .mockResolvedValueOnce({ id: 'logId' }); // 二次失败后：确认重试实际已提交
+    const errSpy = jest.spyOn(service['logger'], 'error');
+    const warnSpy = jest.spyOn(service['logger'], 'warn');
+
+    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toBeUndefined();
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(errSpy).not.toHaveBeenCalled(); // 落账成功，绝不误报计费丢失
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(prisma.usageDaily.create).toHaveBeenCalledTimes(1);
+    errSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 });
 
