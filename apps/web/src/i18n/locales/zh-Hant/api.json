@@ -59,6 +59,7 @@
   "err.channel.upstreamError": "上游回傳 {{status}}：{{detail}}",
   "err.channel.testModelRequired": "請提供用於測試的模型名稱",
   "err.channel.groupInvalid": "分組不存在或已停用：{{ids}}",
+  "err.channel.groupsForeign": "非管理員僅可綁定本人所在分組：{{ids}}",
   "err.group.identifierExists": "分組識別 \"{{name}}\" 已存在",
   "err.group.notFound": "分組不存在",
   "err.group.defaultUnremovable": "預設分組不可刪除，請先把其他分組設為預設",

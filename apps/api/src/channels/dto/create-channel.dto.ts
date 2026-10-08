@@ -10,6 +10,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ArrayMaxSize,
   ArrayMinSize,
   ValidateNested,
 } from 'class-validator';
@@ -39,7 +40,10 @@ export class CreateChannelDto {
 
   @IsArray()
   @ArrayMinSize(1)
+  // 数量与单项长度双重封顶：防超大数组/超长字符串撑爆内存与模型行 upsert
+  @ArrayMaxSize(1000)
   @IsString({ each: true })
+  @MaxLength(256, { each: true })
   models!: string[];
 
   /** 仅管理员可传 PLATFORM */
@@ -72,13 +76,18 @@ export class CreateChannelDto {
   /** 逐模型定价（成本/售价/折扣），同模型可跨渠道各异 */
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(1000)
   @ValidateNested({ each: true })
   @Type(() => ChannelModelPriceDto)
   modelPrices?: ChannelModelPriceDto[];
 
-  /** 渠道分组 id 列表（仅管理员可设置）；空 = 公共渠道，任何分组可见 */
+  /**
+   * 渠道分组 id 列表：管理员可绑任意分组；非管理员仅限本人所在分组
+   * （同分组共享，服务端 enforce）。空数组/不传 = 无绑定
+   */
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(100)
   @IsString({ each: true })
   @MaxLength(64, { each: true })
   groups?: string[];

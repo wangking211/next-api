@@ -11,6 +11,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
 import { TtlCacheService } from '../common/ttl-cache.service';
+import { assertChannelUrlSafe } from '../common/url-safety';
 import { ResolvedChannel } from './types';
 import { RoutingMetricsService } from './routing-metrics.service';
 import { GroupsService } from '../groups/groups.service';
@@ -20,12 +21,7 @@ import {
   deriveChannelPricing,
 } from '../billing/pricing.util';
 import { shareExhausted, shareUrgencyBonus } from './channel-share.util';
-import {
-  DEFAULT_STRATEGY,
-  applySticky,
-  isRoutingStrategy,
-  scoreCandidates,
-} from './routing-score';
+import { DEFAULT_STRATEGY, applySticky, isRoutingStrategy, scoreCandidates } from './routing-score';
 
 export interface RouteOptions {
   /** Key 级路由策略；缺省回退 ROUTING_STRATEGY 环境变量 */
@@ -73,11 +69,9 @@ export class ChannelResolverService {
     this.stickyRatio = Number.isFinite(r) && r > 0 && r <= 1 ? r : 0.8;
     this.autoReenableMs =
       Number(config.get<string>('CHANNEL_AUTO_REENABLE_MS', '900000')) || 900000;
-    this.failureThreshold =
-      Number(config.get<string>('CHANNEL_FAILURE_THRESHOLD', '5')) || 5;
+    this.failureThreshold = Number(config.get<string>('CHANNEL_FAILURE_THRESHOLD', '5')) || 5;
     this.debug = config.get<string>('ROUTING_DEBUG') === 'true';
-    this.catalogTtl =
-      Number(config.get<string>('CATALOG_CACHE_TTL_MS', '60000')) || 60_000;
+    this.catalogTtl = Number(config.get<string>('CATALOG_CACHE_TTL_MS', '60000')) || 60_000;
   }
 
   /**
@@ -87,10 +81,8 @@ export class ChannelResolverService {
    */
   private async catalogRows(): Promise<ModelCatalog[] | null> {
     if (!this.cache) return null;
-    return this.cache.getOrLoad<ModelCatalog[]>(
-      'catalog:all',
-      this.catalogTtl,
-      () => this.prisma.modelCatalog.findMany(),
+    return this.cache.getOrLoad<ModelCatalog[]>('catalog:all', this.catalogTtl, () =>
+      this.prisma.modelCatalog.findMany(),
     );
   }
 
@@ -98,18 +90,12 @@ export class ChannelResolverService {
   private async catalogRow(model: string): Promise<ModelCatalog | null> {
     const rows = await this.catalogRows();
     if (rows) return rows.find((r) => r.name === model) ?? null;
-    return this.prisma.modelCatalog
-      .findUnique({ where: { name: model } })
-      .catch(() => null);
+    return this.prisma.modelCatalog.findUnique({ where: { name: model } }).catch(() => null);
   }
 
   /** 目录行按名/别名匹配（内存副本）：精确名优先，其次别名；均未命中返回 null */
   private static matchByName(rows: ModelCatalog[], name: string): ModelCatalog | null {
-    return (
-      rows.find((r) => r.name === name) ??
-      rows.find((r) => r.aliases.includes(name)) ??
-      null
-    );
+    return rows.find((r) => r.name === name) ?? rows.find((r) => r.aliases.includes(name)) ?? null;
   }
 
   /** 半开恢复的冷却截止时刻（早于该时刻的自动禁用渠道重新进入候选） */
@@ -200,11 +186,13 @@ export class ChannelResolverService {
             catalog as CatalogPricingRow | null,
           ),
         },
-        tier: cm.channel.ownerType === ChannelOwnerType.USER &&
-          cm.channel.ownerUserId === userId
-          ? 0
-          : 1,
-        priority: (cm.priority ?? cm.channel.priority) + this.shareUrgencyBonus(cm.channel, cm.qualityScore),
+        tier:
+          cm.channel.ownerType === ChannelOwnerType.USER && cm.channel.ownerUserId === userId
+            ? 0
+            : 1,
+        priority:
+          (cm.priority ?? cm.channel.priority) +
+          this.shareUrgencyBonus(cm.channel, cm.qualityScore),
         cost: rawCost > 0 ? rawCost : Number.POSITIVE_INFINITY,
         weight: Math.max(cm.weight ?? cm.channel.weight, 1),
         qualityScore: Number(cm.qualityScore ?? 1) || 1,
@@ -227,9 +215,7 @@ export class ChannelResolverService {
       const tl = c.c.channel.dailyTokenLimit;
       return (!!rl && m.dayReq >= rl) || (!!tl && m.dayTok >= tl);
     };
-    let eligible = candidates.filter(
-      (c) => !metricsMap.get(c.id)?.open && !overDailyLimit(c),
-    );
+    let eligible = candidates.filter((c) => !metricsMap.get(c.id)?.open && !overDailyLimit(c));
     if (!eligible.length) eligible = candidates;
 
     const strategy = opts.strategy ?? this.defaultStrategy;
@@ -242,7 +228,7 @@ export class ChannelResolverService {
           weight: c.weight,
           qualityScore: c.qualityScore,
           metrics: m,
-          penalized: !!m && (m.open || m.halfOpen) || overDailyLimit(c),
+          penalized: (!!m && (m.open || m.halfOpen)) || overDailyLimit(c),
         };
       }),
       strategy,
@@ -274,7 +260,23 @@ export class ChannelResolverService {
       );
     }
 
-    return ranked.map((r) => r.c);
+    // SSRF 请求时复验：域名可能在保存后被改解析（DNS rebinding —— 保存时是公网、
+    // 请求时解析到内网/云元数据），不安全的渠道从候选剔除（按 scheme://host 60s
+    // 缓存，热路径近零成本）；全部不安全 → 空候选，上层按「无可用渠道」处理
+    const checked = await Promise.all(
+      ranked.map(async (r) => {
+        try {
+          await assertChannelUrlSafe(r.c.channel.baseUrl);
+          return r;
+        } catch (e) {
+          this.logger.warn(
+            `渠道 "${r.c.channel.name}" baseUrl 请求时复验失败，已跳过路由: ${(e as Error)?.message}`,
+          );
+          return null;
+        }
+      }),
+    );
+    return checked.filter((r): r is (typeof ranked)[number] => r !== null).map((r) => r.c);
   }
 
   /**
@@ -371,7 +373,9 @@ export class ChannelResolverService {
    */
   async allowedModelSet(whitelist: string[]): Promise<Set<string> | null> {
     const entries = (whitelist ?? [])
-      .map((m) => (typeof m === 'string' && m.endsWith(':latest') ? m.slice(0, -':latest'.length) : m))
+      .map((m) =>
+        typeof m === 'string' && m.endsWith(':latest') ? m.slice(0, -':latest'.length) : m,
+      )
       .map((m) => m.trim())
       .filter(Boolean);
     if (!entries.length) return null;
@@ -430,9 +434,7 @@ export class ChannelResolverService {
     });
     const names = [
       ...new Set(
-        rows
-          .filter((r) => !this.shareExhausted(r.channel, userId))
-          .map((r) => r.modelName),
+        rows.filter((r) => !this.shareExhausted(r.channel, userId)).map((r) => r.modelName),
       ),
     ].sort();
     return this.filterCatalogEnabled(names);

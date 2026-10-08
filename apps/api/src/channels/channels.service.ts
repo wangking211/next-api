@@ -343,8 +343,9 @@ export class ChannelsService {
     const ownerType = wantPlatform ? ChannelOwnerType.PLATFORM : ChannelOwnerType.USER;
 
     await this.assertSafeBaseUrl(dto.baseUrl);
-    // 分组存在性/启用校验必须在事务启动之前（失败则不写任何行）
+    // 分组存在性/启用校验 + 绑定权限必须在事务启动之前（失败则不写任何行）
     await this.assertGroupsUsable(dto.groups);
+    await this.assertGroupsWritable(user, dto.groups);
 
     // 渠道行 + 模型行 + 终读同一交互事务，失败不残留半份配置
     return this.prisma.$transaction(async (tx) => {
@@ -357,9 +358,7 @@ export class ChannelsService {
           baseUrl: dto.baseUrl,
           apiKeyEnc: this.crypto.encrypt(dto.apiKey),
           models: dto.models,
-          groups: dto.groups?.length
-            ? { connect: dto.groups.map((id) => ({ id })) }
-            : undefined,
+          groups: dto.groups?.length ? { connect: dto.groups.map((id) => ({ id })) } : undefined,
           upstreamGroup: dto.upstreamGroup ?? null,
           // 共享设置：仅自有渠道有意义；抽成只有管理员能设
           shareMode: dto.shareMode ?? ChannelShareMode.PRIVATE,
@@ -383,8 +382,14 @@ export class ChannelsService {
     });
   }
 
-  private async findAccessible(user: AuthUser, id: string): Promise<Channel> {
-    const channel = await this.prisma.channel.findUnique({ where: { id } });
+  private async findAccessible(
+    user: AuthUser,
+    id: string,
+  ): Promise<Channel & { groups: { id: string }[] }> {
+    const channel = await this.prisma.channel.findUnique({
+      where: { id },
+      include: { groups: { select: { id: true } } },
+    });
     if (!channel)
       throw new NotFoundException({
         code: 'CHANNEL_NOT_FOUND',
@@ -425,10 +430,48 @@ export class ChannelsService {
     }
   }
 
+  /**
+   * 分组绑定写权限（与存在性校验一样放在事务外，失败不落任何行）：
+   * - 管理员：任意分组（平台/他人渠道的分组编排统一归管理员）；
+   * - 非管理员：只能绑定「本人所在分组」（同分组共享）。否则任何用户把自有
+   *   渠道绑进任意分组即可劫持该组全部路由 —— 无需分组管理员同意即可向
+   *   组内成员提供上游响应（内容投毒 + 抢占共享分成）；
+   * - groups 未传、或与现值完全一致（表单原样回传的历史绑定）→ 放行，
+   *   保证编辑其他字段不会因历史外组绑定被 403。
+   */
+  private async assertGroupsWritable(
+    user: AuthUser,
+    groups: string[] | undefined,
+    existing?: string[],
+  ): Promise<void> {
+    if (user.role === Role.ADMIN || groups === undefined) return;
+    const next = [...new Set(groups)];
+    if (!next.length) return; // 解绑全部 → 无需分组
+    if (existing) {
+      const cur = new Set(existing);
+      if (next.length === cur.size && next.every((id) => cur.has(id))) return;
+    }
+    const own = await this.groups.effectiveGroup(user);
+    const ownId = own?.id ?? null;
+    const foreign = next.filter((id) => id !== ownId);
+    if (foreign.length) {
+      throw new ForbiddenException({
+        code: 'CHANNEL_GROUPS_FOREIGN',
+        message: `非管理员仅可绑定本人所在分组: ${foreign.join(', ')}`,
+        details: { ids: foreign.join(', ') },
+      });
+    }
+  }
+
   async update(user: AuthUser, id: string, dto: UpdateChannelDto) {
     const existing = await this.findAccessible(user, id);
     if (dto.baseUrl) await this.assertSafeBaseUrl(dto.baseUrl);
     await this.assertGroupsUsable(dto.groups);
+    await this.assertGroupsWritable(
+      user,
+      dto.groups,
+      existing.groups?.map((g) => g.id),
+    );
     // 共享已用量清零：显式要求，或 shareUntil 被延长（新时间严格晚于旧值）
     const nextShare = shareTime(dto.shareUntil ?? '');
     const prevShare = shareTime(existing.shareUntil ?? '');
@@ -444,8 +487,7 @@ export class ChannelsService {
           provider: dto.provider,
           baseUrl: dto.baseUrl,
           models: dto.models,
-          groups:
-            dto.groups !== undefined ? { set: dto.groups.map((id) => ({ id })) } : undefined,
+          groups: dto.groups !== undefined ? { set: dto.groups.map((id) => ({ id })) } : undefined,
           upstreamGroup: dto.upstreamGroup,
           // 共享设置（自有渠道有意义）
           shareMode: dto.shareMode,

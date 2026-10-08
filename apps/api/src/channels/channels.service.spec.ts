@@ -5,10 +5,11 @@ import { ProviderRegistry } from '../gateway/providers/provider.registry';
 import { AuthUser } from '../common/interfaces/auth.interface';
 import { UpstreamError } from '../gateway/types';
 import { GroupsService } from '../groups/groups.service';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ChannelOwnerType, ModelGroupStatus, Role } from '@prisma/client';
 
 const user: AuthUser = { id: 'u1', email: 'u@t.com', username: 'u', role: Role.USER };
+const admin: AuthUser = { id: 'a1', email: 'a@t.com', username: 'a', role: Role.ADMIN };
 
 function makeService(providerImpl: any, channelOverrides: Record<string, unknown> = {}) {
   const channel = {
@@ -78,9 +79,7 @@ function txService(
       findUnique: jest.fn().mockResolvedValue({ ...channelRow, modelPrices: [] }),
     },
     channelModel: {
-      upsert: opts.modelPhaseFails
-        ? jest.fn(failingUpsert)
-        : jest.fn().mockResolvedValue({}),
+      upsert: opts.modelPhaseFails ? jest.fn(failingUpsert) : jest.fn().mockResolvedValue({}),
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
   };
@@ -94,9 +93,7 @@ function txService(
       findUnique: jest.fn().mockResolvedValue(channelRow),
     },
     channelModel: {
-      upsert: opts.modelPhaseFails
-        ? jest.fn(failingUpsert)
-        : jest.fn().mockResolvedValue({}),
+      upsert: opts.modelPhaseFails ? jest.fn(failingUpsert) : jest.fn().mockResolvedValue({}),
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     modelGroup: {
@@ -109,6 +106,10 @@ function txService(
       return Promise.all(arg as Promise<unknown>[]);
     }),
   };
+  const groups = {
+    // 本人生效分组（assertGroupsWritable 用）；用例可覆写
+    effectiveGroup: jest.fn().mockResolvedValue({ id: 'g1' }),
+  };
   const service = new ChannelsService(
     prisma as unknown as PrismaService,
     {
@@ -116,9 +117,10 @@ function txService(
       decrypt: jest.fn().mockReturnValue('upstream-key'),
     } as unknown as CryptoService,
     {} as unknown as ProviderRegistry,
-    {} as unknown as GroupsService,
+    // 非管理员写分组权限：默认本人分组 = g1（用例可覆写 mock 返回值）
+    groups as unknown as GroupsService,
   );
-  return { service, prisma, tx };
+  return { service, prisma, tx, groups };
 }
 
 describe('ChannelsService.testChannel', () => {
@@ -160,7 +162,9 @@ describe('ChannelsService.testChannel', () => {
     const provider = {
       chatNonStream: jest
         .fn()
-        .mockRejectedValue(new UpstreamError('bad', 401, false, { error: { message: 'invalid key' } })),
+        .mockRejectedValue(
+          new UpstreamError('bad', 401, false, { error: { message: 'invalid key' } }),
+        ),
     };
     const { service } = makeService(provider);
     const res: any = await service.testChannel(user, 'c1', { model: 'm1' });
@@ -211,9 +215,7 @@ describe('ChannelsService.testChannel', () => {
             error: { message: 'This endpoint is not available on the current service node.' },
           }),
         )
-        .mockRejectedValueOnce(
-          new UpstreamError('Upstream connection failed: timeout', 502, true),
-        ),
+        .mockRejectedValueOnce(new UpstreamError('Upstream connection failed: timeout', 502, true)),
     };
     const { service, prisma } = makeService(provider);
     prisma.modelCatalog.findFirst.mockResolvedValue({ capabilities: ['video'] });
@@ -258,7 +260,9 @@ describe('ChannelsService.testChannel', () => {
 describe('ChannelsService.testConnection', () => {
   it('tests inline config with provided apiKey', async () => {
     const provider = {
-      chatNonStream: jest.fn().mockResolvedValue({ status: 200, json: { choices: [{ message: { content: 'pong' } }] } }),
+      chatNonStream: jest
+        .fn()
+        .mockResolvedValue({ status: 200, json: { choices: [{ message: { content: 'pong' } }] } }),
     };
     const { service } = makeService(provider);
     const res: any = await service.testConnection(user, {
@@ -317,9 +321,9 @@ describe('ChannelsService.fetchUpstreamModels', () => {
 
   it('lists openai-compatible models with Bearer auth, deduped and sorted', async () => {
     const { service } = makeService({});
-    const spy = jest.spyOn(global, 'fetch').mockResolvedValue(
-      resp(200, { data: [{ id: 'gpt-b' }, { id: 'gpt-a' }, { id: 'gpt-a' }] }),
-    );
+    const spy = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(resp(200, { data: [{ id: 'gpt-b' }, { id: 'gpt-a' }, { id: 'gpt-a' }] }));
     const res = await service.fetchUpstreamModels(user, {
       provider: 'openai',
       baseUrl: 'https://x/v1',
@@ -336,9 +340,7 @@ describe('ChannelsService.fetchUpstreamModels', () => {
 
   it('reuses stored baseUrl and key when only channelId given', async () => {
     const { service } = makeService({});
-    const spy = jest.spyOn(global, 'fetch').mockResolvedValue(
-      resp(200, { data: [{ id: 'm1' }] }),
-    );
+    const spy = jest.spyOn(global, 'fetch').mockResolvedValue(resp(200, { data: [{ id: 'm1' }] }));
     const res = await service.fetchUpstreamModels(user, {
       provider: 'openai',
       channelId: 'c1',
@@ -391,9 +393,9 @@ describe('ChannelsService.fetchUpstreamModels', () => {
 
   it('surfaces upstream error message on non-2xx', async () => {
     const { service } = makeService({});
-    jest.spyOn(global, 'fetch').mockResolvedValue(
-      resp(401, null, '{"error":{"message":"Invalid or inactive API key"}}'),
-    );
+    jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(resp(401, null, '{"error":{"message":"Invalid or inactive API key"}}'));
     await expect(
       service.fetchUpstreamModels(user, {
         provider: 'openai',
@@ -558,11 +560,25 @@ describe('ChannelsService.availableModels（归属/共享范围透出）', () =>
     const { service, groups } = modelsService([
       {
         modelName: 'm1',
-        channel: ch({ id: 'c1', name: 'mine', ownerType: 'USER', ownerUserId: 'u1', provider: 'openai', shareMode: 'PRIVATE' }),
+        channel: ch({
+          id: 'c1',
+          name: 'mine',
+          ownerType: 'USER',
+          ownerUserId: 'u1',
+          provider: 'openai',
+          shareMode: 'PRIVATE',
+        }),
       },
       {
         modelName: 'm2',
-        channel: ch({ id: 'c2', name: 'shared', ownerType: 'USER', ownerUserId: 'u2', provider: 'openai', shareMode: 'PUBLIC' }),
+        channel: ch({
+          id: 'c2',
+          name: 'shared',
+          ownerType: 'USER',
+          ownerUserId: 'u2',
+          provider: 'openai',
+          shareMode: 'PUBLIC',
+        }),
       },
     ]);
 
@@ -701,7 +717,7 @@ describe('ChannelsService.update 共享用量重置（resetShareUsed / shareUnti
   });
 });
 
-describe('ChannelsService 分组绑定（非管理员可绑定 + 写前校验存在且启用）', () => {
+describe('ChannelsService 分组绑定（写前存在性校验 + 非管理员仅限本人分组）', () => {
   const baseDto = {
     name: 'mine',
     provider: 'openai',
@@ -712,12 +728,12 @@ describe('ChannelsService 分组绑定（非管理员可绑定 + 写前校验存
   const gEnabled = { id: 'g1', status: ModelGroupStatus.ENABLED };
   const gDisabled = { id: 'g1', status: ModelGroupStatus.DISABLED };
 
-  it('create：非管理员传 groups 也落库 connect，写前批量校验只查一次', async () => {
+  it('create：管理员可绑任意分组，写前批量校验只查一次', async () => {
     const { service, prisma, tx } = txService({
       modelGroups: [gEnabled, { id: 'g2', status: ModelGroupStatus.ENABLED }],
     });
 
-    await service.create(user, { ...baseDto, groups: ['g1', 'g2'] });
+    await service.create(admin, { ...baseDto, groups: ['g1', 'g2'] });
 
     expect(prisma.modelGroup.findMany).toHaveBeenCalledTimes(1);
     expect(prisma.modelGroup.findMany).toHaveBeenCalledWith(
@@ -725,6 +741,28 @@ describe('ChannelsService 分组绑定（非管理员可绑定 + 写前校验存
     );
     const data = tx.channel.create.mock.calls[0][0].data;
     expect(data.groups).toEqual({ connect: [{ id: 'g1' }, { id: 'g2' }] });
+  });
+
+  it('create：非管理员仅可绑本人分组（默认 g1）→ 落库 connect', async () => {
+    const { service, tx } = txService({ modelGroups: [gEnabled] });
+
+    await service.create(user, { ...baseDto, groups: ['g1'] });
+
+    const data = tx.channel.create.mock.calls[0][0].data;
+    expect(data.groups).toEqual({ connect: [{ id: 'g1' }] });
+  });
+
+  it('create：非管理员绑他人分组 → Forbidden，事务不启动', async () => {
+    const { service, prisma, tx } = txService({
+      modelGroups: [gEnabled, { id: 'g2', status: ModelGroupStatus.ENABLED }],
+    });
+
+    const act = () => service.create(user, { ...baseDto, groups: ['g2'] });
+    await expect(act()).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(act()).rejects.toThrow('非管理员仅可绑定本人所在分组: g2');
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.channel.create).not.toHaveBeenCalled();
   });
 
   it('create：分组不存在 → BadRequest，事务与渠道写全部不发生', async () => {
@@ -763,7 +801,7 @@ describe('ChannelsService 分组绑定（非管理员可绑定 + 写前校验存
     expect(prisma.channel.update).not.toHaveBeenCalled();
   });
 
-  it('update：有效分组 → 写前校验一次并写入 set 绑定', async () => {
+  it('update：非管理员改绑本人分组 → 写前校验一次并写入 set', async () => {
     const { service, prisma, tx } = txService({ modelGroups: [gEnabled] });
 
     await service.update(user, 'c1', { groups: ['g1'] });
@@ -771,6 +809,32 @@ describe('ChannelsService 分组绑定（非管理员可绑定 + 写前校验存
     expect(prisma.modelGroup.findMany).toHaveBeenCalledTimes(1);
     const data = tx.channel.update.mock.calls[0][0].data;
     expect(data.groups).toEqual({ set: [{ id: 'g1' }] });
+  });
+
+  it('update：非管理员引入他人分组 → Forbidden，事务不启动', async () => {
+    const { service, prisma, tx } = txService({
+      modelGroups: [gEnabled, { id: 'g2', status: ModelGroupStatus.ENABLED }],
+    });
+
+    await expect(service.update(user, 'c1', { groups: ['g2'] })).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.channel.update).not.toHaveBeenCalled();
+  });
+
+  it('update：历史外组绑定原样回传（与现值一致）→ 放行且不查本人生效分组', async () => {
+    const { service, groups, tx } = txService({
+      channel: { groups: [{ id: 'gx' }] },
+      modelGroups: [{ id: 'gx', status: ModelGroupStatus.ENABLED }],
+    });
+
+    await service.update(user, 'c1', { groups: ['gx'] });
+
+    expect(groups.effectiveGroup).not.toHaveBeenCalled();
+    const data = tx.channel.update.mock.calls[0][0].data;
+    expect(data.groups).toEqual({ set: [{ id: 'gx' }] });
   });
 
   it('update：groups 未传 → 不改绑定也不触发校验', async () => {

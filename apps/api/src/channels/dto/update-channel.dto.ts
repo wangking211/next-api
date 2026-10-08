@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsBoolean,
@@ -45,7 +46,10 @@ export class UpdateChannelDto {
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
+  // 数量与单项长度双重封顶：防超大数组/超长字符串撑爆内存与模型行 upsert
+  @ArrayMaxSize(1000)
   @IsString({ each: true })
+  @MaxLength(256, { each: true })
   models?: string[];
 
   @IsOptional()
@@ -76,13 +80,18 @@ export class UpdateChannelDto {
 
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(1000)
   @ValidateNested({ each: true })
   @Type(() => ChannelModelPriceDto)
   modelPrices?: ChannelModelPriceDto[];
 
-  /** 渠道分组 id 列表（属主或管理员可设置）；空数组 = 转为公共渠道 */
+  /**
+   * 渠道分组 id 列表：管理员可绑任意分组；非管理员仅限本人所在分组
+   * （同分组共享，服务端 enforce）。空数组 = 解除全部绑定
+   */
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(100)
   @IsString({ each: true })
   @MaxLength(64, { each: true })
   groups?: string[];

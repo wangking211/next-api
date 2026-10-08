@@ -7,6 +7,9 @@ import { RoutingMetricsService, RouteMetrics } from './routing-metrics.service';
 import { GroupsService } from '../groups/groups.service';
 import { TtlCacheService } from '../common/ttl-cache.service';
 import { fnv1a } from './routing-score';
+import { lookup } from 'dns/promises';
+
+jest.mock('dns/promises', () => ({ lookup: jest.fn() }));
 
 function makeChannel(overrides: Record<string, unknown>) {
   return {
@@ -95,9 +98,7 @@ function makeService(
   const config = { get: (_k: string, d?: string) => d } as unknown as ConfigService;
   const groups = {
     channelVisibilityWhere: jest.fn((groupId: string | null) =>
-      groupId
-        ? { OR: [{ groups: { none: {} } }, { groups: { some: { id: groupId } } }] }
-        : null,
+      groupId ? { OR: [{ groups: { none: {} } }, { groups: { some: { id: groupId } } }] } : null,
     ),
     // 可见性统一由 GroupsService 给出：这里只回一个可断言的标记，
     // 「共享渠道 / 平台渠道」的具体条件由 groups.service.spec 覆盖
@@ -138,11 +139,43 @@ describe('ChannelResolverService', () => {
       channel: makeChannel({ id: 'platform', ownerType: ChannelOwnerType.PLATFORM, priority: 999 }),
     });
     const own = makeCM({
-      channel: makeChannel({ id: 'own', ownerType: ChannelOwnerType.USER, ownerUserId: 'u1', priority: 0 }),
+      channel: makeChannel({
+        id: 'own',
+        ownerType: ChannelOwnerType.USER,
+        ownerUserId: 'u1',
+        priority: 0,
+      }),
     });
     const { service } = makeService([platform, own]);
     const result = await service.resolve('u1', 'm');
     expect(ids(result)).toEqual(['own', 'platform']);
+  });
+
+  it('SSRF 请求时复验（DNS rebinding）：production 下解析到私网的渠道被剔除，公网保留', async () => {
+    const evil = makeCM({
+      channel: makeChannel({ id: 'evil', baseUrl: 'http://rebind.resolver-evil.example/v1' }),
+    });
+    const good = makeCM({
+      channel: makeChannel({ id: 'good', baseUrl: 'http://rebind.resolver-ok.example/v1' }),
+    });
+    const { service } = makeService([evil, good]);
+    const lookupMock = lookup as unknown as jest.Mock;
+    lookupMock.mockImplementation((host: string) =>
+      Promise.resolve(
+        host.includes('evil')
+          ? [{ address: '169.254.169.254', family: 4 }] // 云元数据地址
+          : [{ address: '93.184.216.34', family: 4 }],
+      ),
+    );
+
+    const saved = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production'; // 复验只在 production 生效
+    try {
+      const result = await service.resolve('u1', 'm');
+      expect(ids(result)).toEqual(['good']);
+    } finally {
+      process.env.NODE_ENV = saved;
+    }
   });
 
   it('orders by priority descending within the same tier', async () => {
@@ -220,14 +253,20 @@ describe('ChannelResolverService', () => {
     const one = makeService(
       [a, b],
       undefined,
-      new Map([['a', mm({ open: true })], ['b', mm()]]),
+      new Map([
+        ['a', mm({ open: true })],
+        ['b', mm()],
+      ]),
     );
     expect(ids(await one.service.resolve('u1', 'm'))).toEqual(['b']);
 
     const all = makeService(
       [a, b],
       undefined,
-      new Map([['a', mm({ open: true })], ['b', mm({ open: true })]]),
+      new Map([
+        ['a', mm({ open: true })],
+        ['b', mm({ open: true })],
+      ]),
     );
     expect(await all.service.resolve('u1', 'm')).toHaveLength(2); // 兜底放行
   });
@@ -356,9 +395,7 @@ describe('ChannelResolverService', () => {
 
     it('normalizes catalog hits to canonical names in one batch query', async () => {
       const { service, prisma } = makeService([]);
-      prisma.modelCatalog.findMany.mockResolvedValue([
-        { name: 'gpt-5.1', aliases: ['gpt-5'] },
-      ]);
+      prisma.modelCatalog.findMany.mockResolvedValue([{ name: 'gpt-5.1', aliases: ['gpt-5'] }]);
       const set = await service.allowedModelSet(['gpt-5', 'unknown-model']);
       expect(set).toEqual(new Set(['gpt-5.1', 'unknown-model']));
       const arg = prisma.modelCatalog.findMany.mock.calls[0][0];
@@ -411,9 +448,7 @@ describe('ChannelResolverService', () => {
         { name: 'claude-sonnet-4-5', aliases: ['sonnet'] },
       ]);
       // 白名单 [sonnet] 归一为 claude-sonnet-4-5，与请求规范名字面一致 → 0 次 findFirst
-      await expect(
-        service.isModelAllowed('claude-sonnet-4-5', ['sonnet']),
-      ).resolves.toBe(true);
+      await expect(service.isModelAllowed('claude-sonnet-4-5', ['sonnet'])).resolves.toBe(true);
       expect(prisma.modelCatalog.findFirst).not.toHaveBeenCalled();
     });
 
@@ -520,7 +555,12 @@ describe('ChannelResolverService catalog 快照缓存', () => {
   });
 
   it('目录里 enabled=false 的模型不路由、也不出现在可用模型列表', async () => {
-    const { service, prisma } = makeService([makeCM({})], undefined, undefined, new TtlCacheService());
+    const { service, prisma } = makeService(
+      [makeCM({})],
+      undefined,
+      undefined,
+      new TtlCacheService(),
+    );
     prisma.modelCatalog.findMany.mockResolvedValue([
       { ...ROW, name: 'm', aliases: [], enabled: false },
     ]);

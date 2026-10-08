@@ -131,6 +131,53 @@ export function upstreamAllowsPrivate(): boolean {
   return process.env.NODE_ENV !== 'production' || process.env.ALLOW_PRIVATE_UPSTREAM === 'true';
 }
 
+/** 请求时复验结果缓存（按 scheme://host，成功/失败都记），窗口内热路径零 DNS 开销 */
+const recheckCache = new Map<string, { at: number; err?: UnsafeUrlError }>();
+const RECHECK_TTL_MS = 60_000;
+const RECHECK_MAX_ENTRIES = 5_000;
+
+/**
+ * 出站请求前的 baseUrl 二次校验（防 DNS rebinding）。
+ *
+ * 保存/更新渠道时已校验过一次，但域名在保存后可能被改解析（注册过期抢注、
+ * 内网域名劫持）——请求时必须复验，否则网关会替攻击者访问内网/云元数据地址。
+ * 结果按 scheme://host 缓存 60s（失败也缓存）：复验窗口 = rebinding 暴露窗口，
+ * 而每次请求的实耗成本只在窗口边缘发生。upstreamAllowsPrivate() 时直接放行。
+ * 通过返回；失败抛 UnsafeUrlError（稳定 code 供日志/控制台识别）。
+ */
+export async function assertChannelUrlSafe(raw: string): Promise<void> {
+  if (upstreamAllowsPrivate()) return;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new UnsafeUrlError({ code: 'URL_UNSAFE_INVALID_URL', message: 'baseUrl 不是合法的 URL' });
+  }
+  const key = `${url.protocol}//${url.hostname.toLowerCase()}`;
+  const now = Date.now();
+  const hit = recheckCache.get(key);
+  if (hit && now - hit.at < RECHECK_TTL_MS) {
+    if (hit.err) throw hit.err;
+    return;
+  }
+  try {
+    await assertPublicHttpUrl(raw);
+    if (recheckCache.size >= RECHECK_MAX_ENTRIES) recheckCache.clear();
+    recheckCache.set(key, { at: now });
+  } catch (e) {
+    const err =
+      e instanceof UnsafeUrlError
+        ? e
+        : new UnsafeUrlError({
+            code: 'URL_UNSAFE_DNS_FAILED',
+            message: (e as Error)?.message ?? String(e),
+          });
+    if (recheckCache.size >= RECHECK_MAX_ENTRIES) recheckCache.clear();
+    recheckCache.set(key, { at: now, err });
+    throw err;
+  }
+}
+
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /**
