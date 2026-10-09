@@ -28,6 +28,7 @@ import {
   RedeemCodeStatus,
   RequestLogDetail,
   RequestLogRow,
+  RevenueSummary,
   UsageAnalytics,
   UsageDailyRow,
   UsageSummary,
@@ -381,6 +382,11 @@ export const billingApi = {
       params: { page, pageSize, type },
       signal,
     });
+    return data;
+  },
+  /** 「我的收益」汇总（/revenue 页）：累计、月度趋势、各渠道明细 */
+  async revenue(signal?: AbortSignal) {
+    const { data } = await api.get<RevenueSummary>('/billing/revenue', { signal });
     return data;
   },
   async redeem(code: string) {

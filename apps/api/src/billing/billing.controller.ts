@@ -21,6 +21,12 @@ export class BillingController {
     return this.billing.getBalance(user.id);
   }
 
+  /** 「我的收益」汇总：账本累计 + 近 12 月趋势 + 各渠道明细（页面 /revenue） */
+  @Get('revenue')
+  revenue(@CurrentUser() user: AuthUser) {
+    return this.billing.getRevenue(user.id);
+  }
+
   @Get('transactions')
   transactions(
     @CurrentUser() user: AuthUser,

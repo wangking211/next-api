@@ -44,5 +44,20 @@
   "billing.payModal.qrMissing": "未获取到支付二维码，请重试",
   "billing.payModal.payable": "应付",
   "billing.payModal.credited": "，到账",
-  "billing.payModal.hint": "请用微信或支付宝扫码支付，到账后自动刷新（每 3 秒检测）"
+  "billing.payModal.hint": "请用微信或支付宝扫码支付，到账后自动刷新（每 3 秒检测）",
+  "billing.revenue.total": "累计收益",
+  "billing.revenue.monthly": "本月收益",
+  "billing.revenue.channelsTitle": "各渠道收益",
+  "billing.revenue.channelCol": "渠道",
+  "billing.revenue.callsCol": "调用次数",
+  "billing.revenue.lastAtCol": "最近入账",
+  "billing.revenue.empty": "暂无收益：将自有渠道的「共享范围」设为公开或同分组，被他人调用后即可获得分成。",
+  "billing.revenue.trendTitle": "月度趋势",
+  "billing.revenue.monthCol": "月份",
+  "billing.revenue.withdraw": "提现",
+  "billing.revenue.withdrawRecords": "提现记录",
+  "billing.revenue.withdrawModalTitle": "申请提现",
+  "billing.revenue.withdrawAmountLabel": "提现积分（从余额冻结，等待管理员审批）",
+  "billing.revenue.withdrawSuccess": "提现申请已提交，等待管理员审批",
+  "billing.revenue.enterCredits": "请输入提现积分"
 }

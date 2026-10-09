@@ -44,5 +44,20 @@
   "billing.payModal.qrMissing": "Payment QR code not loaded, please retry",
   "billing.payModal.payable": "Amount due",
   "billing.payModal.credited": ", credited",
-  "billing.payModal.hint": "Scan with WeChat Pay or Alipay to pay; the status refreshes automatically once credited (checked every 3 seconds)"
+  "billing.payModal.hint": "Scan with WeChat Pay or Alipay to pay; the status refreshes automatically once credited (checked every 3 seconds)",
+  "billing.revenue.total": "Total revenue",
+  "billing.revenue.monthly": "This month",
+  "billing.revenue.channelsTitle": "Revenue by channel",
+  "billing.revenue.channelCol": "Channel",
+  "billing.revenue.callsCol": "Calls",
+  "billing.revenue.lastAtCol": "Last credited",
+  "billing.revenue.empty": "No revenue yet. Set a personal channel's visibility to Public or Group so calls from other users earn you a share.",
+  "billing.revenue.trendTitle": "Monthly trend",
+  "billing.revenue.monthCol": "Month",
+  "billing.revenue.withdraw": "Withdraw",
+  "billing.revenue.withdrawRecords": "Withdrawal records",
+  "billing.revenue.withdrawModalTitle": "Request withdrawal",
+  "billing.revenue.withdrawAmountLabel": "Withdraw credits (frozen from balance, pending admin approval)",
+  "billing.revenue.withdrawSuccess": "Withdrawal request submitted, pending admin approval",
+  "billing.revenue.enterCredits": "Please enter the amount in credits"
 }

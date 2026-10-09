@@ -51,12 +51,7 @@ export interface ModelGroup {
 }
 
 /** 智能路由策略（评分权重预设），null = 跟随全局默认 */
-export type RoutingStrategy =
-  | 'BALANCED'
-  | 'CHEAPEST'
-  | 'FASTEST'
-  | 'STABLE'
-  | 'QUALITY_FIRST';
+export type RoutingStrategy = 'BALANCED' | 'CHEAPEST' | 'FASTEST' | 'STABLE' | 'QUALITY_FIRST';
 
 export interface ApiKeyInfo {
   id: string;
@@ -338,13 +333,7 @@ export interface Paginated<T> {
 }
 
 export type BalanceTxType =
-  | 'RECHARGE'
-  | 'CONSUME'
-  | 'ADJUST'
-  | 'COMMISSION'
-  | 'TRANSFER'
-  | 'WITHDRAW'
-  | 'CHANNEL_REVENUE';
+  'RECHARGE' | 'CONSUME' | 'ADJUST' | 'COMMISSION' | 'TRANSFER' | 'WITHDRAW' | 'CHANNEL_REVENUE';
 
 export interface BalanceTransaction {
   id: string;
@@ -356,6 +345,27 @@ export interface BalanceTransaction {
   operatorId: string | null;
   requestLogId: string | null;
   createdAt: string;
+}
+
+/** 「我的收益」按渠道明细（revenue 为 USD 数值；calls/lastAt 来自产生分成的调用日志） */
+export interface RevenueChannel {
+  id: string;
+  name: string;
+  shareMode: 'PRIVATE' | 'GROUP' | 'PUBLIC';
+  status: string;
+  revenue: number;
+  calls: number;
+  lastAt: string | null;
+}
+
+/** GET /billing/revenue：账本累计 + 近 12 月趋势 + 各渠道明细 */
+export interface RevenueSummary {
+  /** 累计入账收益（USD，账本口径，含已删除渠道的历史） */
+  total: number;
+  /** 近 12 个自然月（UTC+8 归月），无入账的月份不出现 */
+  months: { month: string; revenue: number }[];
+  /** 当前各渠道累计收益（shareRevenue 列），按收益降序 */
+  channels: RevenueChannel[];
 }
 
 export type PaymentOrderStatus = 'PENDING' | 'PAID' | 'CLOSED' | 'FAILED';

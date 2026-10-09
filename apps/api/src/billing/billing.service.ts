@@ -1,6 +1,13 @@
 import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { BalanceTxType, ModelCatalog, Prisma, RedeemCodeStatus } from '@prisma/client';
+import {
+  BalanceTxType,
+  ChannelOwnerType,
+  ChannelShareMode,
+  ModelCatalog,
+  Prisma,
+  RedeemCodeStatus,
+} from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { TtlCacheService } from '../common/ttl-cache.service';
@@ -75,6 +82,80 @@ export class BillingService {
         message: 'User not found',
       });
     return { balance: Number(user.balance) };
+  }
+
+  /**
+   * 「我的收益」汇总：
+   * - total：账本口径（BalanceTransaction CHANNEL_REVENUE 累计），渠道删除后历史收益不丢
+   * - months：近 12 个自然月的入账趋势（UTC+8 归月，与每日限额同一日界口径）
+   * - channels：当前各渠道累计收益（Channel.shareRevenue 热路径同事务累加的 O(1) 列）
+   *   + 产生收益的调用次数与最近入账（RequestLog 走 (channelId, createdAt) 索引）
+   */
+  async getRevenue(userId: string) {
+    // 月份归并用 UTC+8：先平移 8 小时再取年月，窗口起点取 11 个月前月初的 UTC 时刻
+    const shifted = new Date(Date.now() + 8 * 3600_000);
+    const since = new Date(
+      Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth() - 11, 1) - 8 * 3600_000,
+    );
+    const [totalAgg, monthRows, channels] = await Promise.all([
+      this.prisma.balanceTransaction.aggregate({
+        where: { userId, type: BalanceTxType.CHANNEL_REVENUE },
+        _sum: { amount: true },
+      }),
+      this.prisma.$queryRaw<{ month: string; revenue: number }[]>`
+        SELECT to_char("createdAt" + interval '8 hours', 'YYYY-MM') AS month,
+               SUM(amount)::float AS revenue
+        FROM "BalanceTransaction"
+        WHERE "userId" = ${userId}
+          AND type = 'CHANNEL_REVENUE'
+          AND "createdAt" >= ${since}
+        GROUP BY 1
+        ORDER BY 1`,
+      this.prisma.channel.findMany({
+        where: {
+          ownerType: ChannelOwnerType.USER,
+          ownerUserId: userId,
+          // 有历史收益的渠道，或仍在共享（还没开张）的渠道；纯私有且零收益不占表格
+          OR: [{ shareRevenue: { gt: 0 } }, { shareMode: { not: ChannelShareMode.PRIVATE } }],
+        },
+        select: {
+          id: true,
+          name: true,
+          shareMode: true,
+          status: true,
+          shareRevenue: true,
+        },
+        orderBy: { shareRevenue: 'desc' },
+      }),
+    ]);
+
+    const ids = channels.map((c) => c.id);
+    const stats = ids.length
+      ? await this.prisma.requestLog.groupBy({
+          by: ['channelId'],
+          where: { channelId: { in: ids }, channelRevenue: { gt: 0 } },
+          _count: true,
+          _max: { createdAt: true },
+        })
+      : [];
+    const statMap = new Map(stats.map((s) => [s.channelId, s]));
+
+    return {
+      total: Number(totalAgg._sum.amount ?? 0),
+      months: monthRows.map((r) => ({ month: r.month, revenue: Number(r.revenue) })),
+      channels: channels.map((c) => {
+        const st = statMap.get(c.id);
+        return {
+          id: c.id,
+          name: c.name,
+          shareMode: c.shareMode,
+          status: c.status,
+          revenue: Number(c.shareRevenue),
+          calls: st?._count ?? 0,
+          lastAt: st?._max.createdAt ?? null,
+        };
+      }),
+    };
   }
 
   /**

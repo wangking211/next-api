@@ -16,6 +16,7 @@ import {
   BarChartOutlined,
   ApartmentOutlined,
   ClusterOutlined,
+  PayCircleOutlined,
 } from '@ant-design/icons';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -35,9 +36,22 @@ export default function AppLayout() {
   const isAdmin = user?.role === 'ADMIN';
 
   const selectedKey = useMemo(() => {
-    const match = ['/keys', '/channels', '/available-models', '/models', '/logs', '/usage-stats', '/billing', '/agent', '/users', '/groups', '/redeem-codes', '/audit-logs', '/withdrawals'].find((p) =>
-      location.pathname.startsWith(p),
-    );
+    const match = [
+      '/keys',
+      '/channels',
+      '/available-models',
+      '/models',
+      '/logs',
+      '/usage-stats',
+      '/billing',
+      '/revenue',
+      '/agent',
+      '/users',
+      '/groups',
+      '/redeem-codes',
+      '/audit-logs',
+      '/withdrawals',
+    ].find((p) => location.pathname.startsWith(p));
     return match ?? '/dashboard';
   }, [location.pathname]);
 
@@ -52,6 +66,7 @@ export default function AppLayout() {
       '/logs': t('layout.title.logs'),
       '/usage-stats': t('layout.title.usageStats'),
       '/billing': t('layout.title.billing'),
+      '/revenue': t('layout.title.revenue'),
       '/agent': t('layout.title.agent'),
       '/users': t('layout.title.users'),
       '/groups': t('layout.title.groups'),
@@ -80,6 +95,7 @@ export default function AppLayout() {
     { key: '/logs', icon: <FileTextOutlined />, label: t('layout.menu.logs') },
     { key: '/usage-stats', icon: <BarChartOutlined />, label: t('layout.menu.usageStats') },
     { key: '/billing', icon: <WalletOutlined />, label: t('layout.menu.billing') },
+    { key: '/revenue', icon: <PayCircleOutlined />, label: t('layout.menu.revenue') },
     ...(user?.role === 'AGENT' || user?.role === 'ADMIN'
       ? [{ key: '/agent', icon: <ApartmentOutlined />, label: t('layout.menu.agent') }]
       : []),
