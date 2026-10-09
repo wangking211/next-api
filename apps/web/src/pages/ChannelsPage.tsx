@@ -3,20 +3,15 @@ import {
   App,
   Button,
   Card,
-  DatePicker,
-  Divider,
   Form,
   Input,
   InputNumber,
   Modal,
-  Popconfirm,
-  Radio,
   Select,
   Space,
   Table,
   Typography,
 } from 'antd';
-import dayjs from 'dayjs';
 import { PlusOutlined } from '@ant-design/icons';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -32,6 +27,7 @@ import { PricingTable } from './channels/PricingTable';
 import { TestResults } from './channels/TestResults';
 import { ChannelFilterForm } from './channels/ChannelFilterForm';
 import { buildChannelColumns } from './channels/ChannelTableColumns';
+import { ShareSettingsModal } from './channels/ShareSettingsModal';
 
 export default function ChannelsPage() {
   const { t } = useTranslation();
@@ -53,18 +49,13 @@ export default function ChannelsPage() {
   const [modalTest, setModalTest] = useState<ChannelTestResult | null>(null);
   const [pricing, setPricing] = useState<Record<string, PriceRow>>({});
   const [priceChannel, setPriceChannel] = useState<ChannelInfo | null>(null);
+  const [sharePick, setSharePick] = useState<ChannelInfo | null>(null);
   const [testPick, setTestPick] = useState<ChannelInfo | null>(null);
   const [pickModels, setPickModels] = useState<string[]>([]);
   const [fetchingModels, setFetchingModels] = useState(false);
-  const selectedModels: string[] = Form.useWatch('models', form) ?? [];
   const ownerTypeValue = Form.useWatch('ownerType', form);
-  const shareModeValue = Form.useWatch('shareMode', form) ?? 'PRIVATE';
-  // 表单里只有管理员能看到抽成字段；非管理员回退到该渠道已有的设置
-  const feePercentValue = Form.useWatch('shareFeeBps', form);
-  const effectiveFeePercent =
-    feePercentValue ?? (editing?.shareFeeBps != null ? editing.shareFeeBps / 100 : undefined);
-  // 渠道主实际到手比例（提示文案用）
-  const ownerSharePct = 100 - (effectiveFeePercent ?? 20);
+  // 共享字段已拆到 ShareSettingsModal；绑定分组的显示条件改读渠道现状（新建态恒 PRIVATE）
+  const shareModeValue = editing?.shareMode ?? 'PRIVATE';
 
   // 归属=我的（BYOK）：上游费用用户自付、平台不扣费；共享设置与同分组绑定仅对自有渠道有意义。
   // 定价表对所有渠道开放 —— 共享渠道的定价影响智能路由成本、共享额度（shareQuotaCostUsd）消耗与调用方计价
@@ -135,13 +126,6 @@ export default function ChannelsPage() {
   const saveMut = useMutation({
     mutationFn: async (values: any) => {
       const payload = { ...values };
-      if (payload.shareUntil instanceof dayjs) {
-        payload.shareUntil = payload.shareUntil.toISOString();
-      }
-      // 抽成在表单里是百分比，后端按基点存（1% = 100）
-      if (typeof payload.shareFeeBps === 'number') {
-        payload.shareFeeBps = Math.round(payload.shareFeeBps * 100);
-      }
       if (editing) {
         if (!payload.apiKey) delete payload.apiKey;
         return channelsApi.update(editing.id, payload);
@@ -163,7 +147,6 @@ export default function ChannelsPage() {
   const openCreate = () => {
     setEditing(null);
     setModalTest(null);
-    setPricing({});
     form.resetFields();
     form.setFieldValue('models', providerModelNames('openai'));
     setModalOpen(true);
@@ -184,25 +167,7 @@ export default function ChannelsPage() {
       upstreamGroup: r.upstreamGroup ?? undefined,
       dailyRequestLimit: r.dailyRequestLimit ?? undefined,
       dailyTokenLimit: r.dailyTokenLimit ?? undefined,
-      shareMode: r.shareMode ?? 'PRIVATE',
-      shareUrgency: r.shareUrgency ?? 'NORMAL',
-      shareQuotaCostUsd: r.shareQuotaCostUsd != null ? Number(r.shareQuotaCostUsd) : undefined,
-      shareQuotaRequests: r.shareQuotaRequests ?? undefined,
-      shareUntil: r.shareUntil ? dayjs(r.shareUntil) : undefined,
-      shareFeeBps: r.shareFeeBps != null ? r.shareFeeBps / 100 : undefined,
     });
-    const p: Record<string, PriceRow> = {};
-    for (const mp of r.modelPrices ?? []) {
-      p[mp.model] = {
-        costDiscount: mp.costDiscount ?? undefined,
-        priceDiscount: mp.priceDiscount ?? mp.discount ?? undefined,
-        qualityScore: mp.qualityScore ?? undefined,
-        upstreamModelName: mp.upstreamModelName ?? undefined,
-        costPerCall: mp.costPerCall ?? undefined,
-        pricePerCall: mp.pricePerCall ?? undefined,
-      };
-    }
-    setPricing(p);
     setModalOpen(true);
   };
 
@@ -269,15 +234,6 @@ export default function ChannelsPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['channels'] });
       message.success(t('channels.message.updated'));
-    },
-  });
-
-  // 重置共享用量（shareUsedRequests / shareUsedCostUsd 清零），与 updateMut 同套路：立即 PATCH
-  const resetShareMut = useMutation({
-    mutationFn: (id: string) => channelsApi.update(id, { resetShareUsed: true }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['channels'] });
-      message.success(t('channels.message.shareUsageReset'));
     },
   });
 
@@ -360,6 +316,7 @@ export default function ChannelsPage() {
             setPickModels(r.models);
           },
           onPricing: openPricing,
+          onShare: setSharePick,
           onEdit: openEdit,
           onToggle: (r) =>
             updateMut.mutate({
@@ -417,7 +374,6 @@ export default function ChannelsPage() {
               dailyTokenLimit: v.dailyTokenLimit ?? null,
               upstreamGroup: v.upstreamGroup || null,
               groups: v.groups ?? [],
-              modelPrices: buildModelPrices(v.models ?? []),
             })
           }
           requiredMark={false}
@@ -426,8 +382,6 @@ export default function ChannelsPage() {
             weight: 1,
             priority: 0,
             ownerType: 'USER',
-            shareMode: 'PRIVATE',
-            shareUrgency: 'NORMAL',
           }}
         >
           <Form.Item
@@ -546,19 +500,6 @@ export default function ChannelsPage() {
             </Space>
           </div>
 
-          {selectedModels.length > 0 && (
-            <div style={{ marginBottom: 12 }}>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {t('channels.form.pricingHint')}
-              </Typography.Text>
-              <PricingTable
-                models={selectedModels}
-                pricing={pricing}
-                setP={setP}
-                catalog={catalog}
-              />
-            </div>
-          )}
           <Space size={16} wrap>
             <Form.Item name="priority" label={t('channels.form.priority')}>
               <InputNumber min={0} />
@@ -589,105 +530,6 @@ export default function ChannelsPage() {
               />
             </Form.Item>
           </Space>
-
-          {/* 共享设置：只有自有渠道才有意义（平台渠道本来就是平台的） */}
-          {isByok && (
-            <div>
-              <Divider orientation="left" plain style={{ margin: '4px 0 12px' }}>
-                {t('channels.form.shareSection')}
-              </Divider>
-              <Space size={16} wrap>
-                <Form.Item
-                  name="shareMode"
-                  label={t('channels.form.shareMode')}
-                  tooltip={t('channels.form.shareModeTip')}
-                >
-                  <Radio.Group
-                    optionType="button"
-                    options={[
-                      { label: t('channels.share.private'), value: 'PRIVATE' },
-                      { label: t('channels.share.group'), value: 'GROUP' },
-                      { label: t('channels.share.public'), value: 'PUBLIC' },
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item
-                  name="shareUrgency"
-                  label={t('channels.form.shareUrgency')}
-                  tooltip={t('channels.form.shareUrgencyTip')}
-                >
-                  <Select
-                    style={{ width: 120 }}
-                    options={[
-                      { label: t('channels.share.normal'), value: 'NORMAL' },
-                      { label: t('channels.share.high'), value: 'HIGH' },
-                      { label: t('channels.share.flush'), value: 'FLUSH' },
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item
-                  name="shareQuotaCostUsd"
-                  label={t('channels.form.shareQuotaCost')}
-                  tooltip={t('channels.form.shareQuotaCostTip')}
-                >
-                  <InputNumber
-                    min={0}
-                    step={0.5}
-                    placeholder={t('channels.form.unlimited')}
-                    style={{ width: 150 }}
-                  />
-                </Form.Item>
-                <Form.Item
-                  name="shareQuotaRequests"
-                  label={t('channels.form.shareQuotaRequests')}
-                  tooltip={t('channels.form.shareQuotaRequestsTip')}
-                >
-                  <InputNumber
-                    min={0}
-                    placeholder={t('channels.form.unlimited')}
-                    style={{ width: 150 }}
-                  />
-                </Form.Item>
-                <Form.Item
-                  name="shareUntil"
-                  label={t('channels.form.shareUntil')}
-                  tooltip={t('channels.form.shareUntilTip')}
-                >
-                  <DatePicker showTime style={{ width: 210 }} />
-                </Form.Item>
-                {isAdmin && (
-                  <Form.Item
-                    name="shareFeeBps"
-                    label={t('channels.form.shareFee')}
-                    tooltip={t('channels.form.shareFeeTip')}
-                  >
-                    <InputNumber
-                      min={0}
-                      max={100}
-                      step={1}
-                      placeholder={t('channels.form.shareFeeDefault')}
-                      style={{ width: 150 }}
-                    />
-                  </Form.Item>
-                )}
-                {editing && (
-                  <Popconfirm
-                    title={t('channels.share.resetUsageConfirm')}
-                    okText={t('channels.share.resetUsageConfirmOk')}
-                    cancelText={t('channels.share.resetUsageConfirmCancel')}
-                    onConfirm={() => resetShareMut.mutate(editing.id)}
-                  >
-                    <Button loading={resetShareMut.isPending}>
-                      {t('channels.share.resetUsage')}
-                    </Button>
-                  </Popconfirm>
-                )}
-              </Space>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {t('channels.form.shareHint', { pct: ownerSharePct })}
-              </Typography.Text>
-            </div>
-          )}
         </Form>
 
         {modalTest && (
@@ -782,6 +624,12 @@ export default function ChannelsPage() {
           />
         )}
       </Modal>
+
+      <ShareSettingsModal
+        channel={sharePick}
+        isAdmin={isAdmin}
+        onClose={() => setSharePick(null)}
+      />
     </Card>
   );
 }

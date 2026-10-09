@@ -8,6 +8,7 @@ export type ChannelColumnDeps = {
   testingId: string | null;
   onTest: (r: ChannelInfo) => void;
   onPricing: (r: ChannelInfo) => void;
+  onShare: (r: ChannelInfo) => void;
   onEdit: (r: ChannelInfo) => void;
   onToggle: (r: ChannelInfo) => void;
   onRemove: (id: string) => void;
@@ -17,6 +18,7 @@ export function buildChannelColumns({
   testingId,
   onTest,
   onPricing,
+  onShare,
   onEdit,
   onToggle,
   onRemove,
@@ -41,7 +43,10 @@ export function buildChannelColumns({
       dataIndex: 'shareMode',
       width: 160,
       render: (_: unknown, r: ChannelInfo) => {
-        if (!r.shareMode || r.shareMode === 'PRIVATE') {
+        // 平台渠道不参与共享，只读；自有渠道整列可点，打开共享设置弹窗
+        const editable = r.ownerType === 'USER';
+        const isPrivate = !r.shareMode || r.shareMode === 'PRIVATE';
+        if (isPrivate && !editable) {
           return <Typography.Text type="secondary">-</Typography.Text>;
         }
         const used = Number(r.shareUsedCostUsd ?? 0);
@@ -63,12 +68,32 @@ export function buildChannelColumns({
             : null,
           until ? t('channels.share.until', { until: formatDateTime(until) }) : null,
         ].filter(Boolean);
-        const label = t(
-          r.shareMode === 'PUBLIC' ? 'channels.share.public' : 'channels.share.group',
-        );
+        const label = isPrivate
+          ? t('channels.share.private')
+          : t(r.shareMode === 'PUBLIC' ? 'channels.share.public' : 'channels.share.group');
         return (
-          <Tooltip title={tips.length ? tips.join(' · ') : undefined}>
-            <Tag color={exhausted ? 'default' : r.shareMode === 'PUBLIC' ? 'purple' : 'geekblue'}>
+          <Tooltip
+            title={
+              tips.length
+                ? tips.join(' · ')
+                : editable
+                  ? t('channels.form.shareSection')
+                  : undefined
+            }
+          >
+            <Tag
+              color={
+                isPrivate
+                  ? 'default'
+                  : exhausted
+                    ? 'default'
+                    : r.shareMode === 'PUBLIC'
+                      ? 'purple'
+                      : 'geekblue'
+              }
+              style={editable ? { cursor: 'pointer' } : undefined}
+              onClick={editable ? () => onShare(r) : undefined}
+            >
               {label}
               {exhausted ? ` · ${t('channels.share.exhausted')}` : ''}
             </Tag>
