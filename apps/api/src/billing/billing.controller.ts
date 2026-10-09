@@ -21,10 +21,13 @@ export class BillingController {
     return this.billing.getBalance(user.id);
   }
 
-  /** 「我的收益」汇总：账本累计 + 近 12 月趋势 + 各渠道明细（页面 /revenue） */
+  /**
+   * 「我的收益」汇总：账本累计 + 月度趋势 + 各渠道明细（页面 /revenue）。
+   * from/to（ISO，RangePicker 本地日界）可选，给定任一即按区间查历史收益。
+   */
   @Get('revenue')
-  revenue(@CurrentUser() user: AuthUser) {
-    return this.billing.getRevenue(user.id);
+  revenue(@CurrentUser() user: AuthUser, @Query('from') from?: string, @Query('to') to?: string) {
+    return this.billing.getRevenue(user.id, { from: from || undefined, to: to || undefined });
   }
 
   @Get('transactions')

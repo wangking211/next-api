@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Col,
+  DatePicker,
   Form,
   InputNumber,
   Modal,
@@ -14,7 +15,7 @@ import {
   Tag,
   Typography,
 } from 'antd';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { billingApi, withdrawalsApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
@@ -35,6 +36,25 @@ function last12Months(): string[] {
   return out;
 }
 
+/** 区间内的逐月标签（UTC+8 归月，与后端一致），升序，供区间模式补零趋势行 */
+function monthsBetween(fromIso: string, toIso: string): string[] {
+  const s = new Date(new Date(fromIso).getTime() + 8 * 3600_000);
+  const e = new Date(new Date(toIso).getTime() + 8 * 3600_000);
+  const out: string[] = [];
+  let y = s.getUTCFullYear();
+  let m = s.getUTCMonth();
+  const ey = e.getUTCFullYear();
+  const em = e.getUTCMonth();
+  while (y < ey || (y === ey && m <= em)) {
+    out.push(`${y}-${String(m + 1).padStart(2, '0')}`);
+    if (++m > 11) {
+      m = 0;
+      y += 1;
+    }
+  }
+  return out;
+}
+
 /** 我的收益：累计/本月/余额统计卡 + 各渠道明细 + 月度趋势 + 提现 */
 export default function RevenuePage() {
   const { message } = App.useApp();
@@ -42,6 +62,8 @@ export default function RevenuePage() {
   const qc = useQueryClient();
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [withdrawForm] = Form.useForm();
+  // 查询区间（RangePicker 的本地日界 ISO）：null = 缺省口径（累计/近 12 月/渠道累计列）
+  const [range, setRange] = useState<[string, string] | null>(null);
 
   const {
     data: summary,
@@ -49,8 +71,9 @@ export default function RevenuePage() {
     isError,
     refetch,
   } = useQuery({
-    queryKey: ['revenue', 'summary'],
-    queryFn: ({ signal }) => billingApi.revenue(signal),
+    queryKey: ['revenue', 'summary', range],
+    queryFn: ({ signal }) => billingApi.revenue(signal, range),
+    placeholderData: keepPreviousData,
   });
   const {
     data: balance,
@@ -83,10 +106,9 @@ export default function RevenuePage() {
     onError: (e) => message.error(errorMessage(e)),
   });
 
-  const months = last12Months();
+  const months = range ? monthsBetween(range[0], range[1]) : last12Months();
   const revenueByMonth = new Map((summary?.months ?? []).map((m) => [m.month, m.revenue]));
   const trendRows = months.map((month) => ({ month, revenue: revenueByMonth.get(month) ?? 0 }));
-  const monthRevenue = revenueByMonth.get(months[months.length - 1]) ?? 0;
 
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -94,18 +116,39 @@ export default function RevenuePage() {
       <QueryError show={balErr} onRetry={balRefetch} />
       <QueryError show={wErr} onRetry={wRefetch} />
 
+      <Row justify="end">
+        <Space>
+          <Text type="secondary">{t('billing.revenue.rangeLabel')}</Text>
+          <DatePicker.RangePicker
+            onChange={(dates) => {
+              if (!dates || !dates[0] || !dates[1]) {
+                setRange(null);
+                return;
+              }
+              setRange([
+                dates[0].startOf('day').toISOString(),
+                dates[1].endOf('day').toISOString(),
+              ]);
+            }}
+          />
+        </Space>
+      </Row>
+
       <Row gutter={[16, 16]}>
         <Col xs={24} md={8}>
           <Card loading={isLoading}>
             <Statistic
-              title={t('billing.revenue.total')}
+              title={range ? t('billing.revenue.rangeTotal') : t('billing.revenue.total')}
               value={formatCredits(summary?.total ?? 0)}
             />
           </Card>
         </Col>
         <Col xs={24} md={8}>
           <Card loading={isLoading}>
-            <Statistic title={t('billing.revenue.monthly')} value={formatCredits(monthRevenue)} />
+            <Statistic
+              title={t('billing.revenue.monthly')}
+              value={formatCredits(summary?.thisMonth ?? 0)}
+            />
           </Card>
         </Col>
         <Col xs={24} md={8}>
@@ -131,7 +174,13 @@ export default function RevenuePage() {
           loading={isLoading}
           dataSource={summary?.channels ?? []}
           pagination={false}
-          locale={{ emptyText: <Text type="secondary">{t('billing.revenue.empty')}</Text> }}
+          locale={{
+            emptyText: (
+              <Text type="secondary">
+                {range ? t('billing.revenue.emptyRange') : t('billing.revenue.empty')}
+              </Text>
+            ),
+          }}
           columns={[
             { title: t('billing.revenue.channelCol'), dataIndex: 'name' },
             {

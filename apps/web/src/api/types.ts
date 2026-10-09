@@ -358,13 +358,15 @@ export interface RevenueChannel {
   lastAt: string | null;
 }
 
-/** GET /billing/revenue：账本累计 + 近 12 月趋势 + 各渠道明细 */
+/** GET /billing/revenue：账本累计 + 月度趋势 + 各渠道明细（可选 from/to 按区间查历史收益） */
 export interface RevenueSummary {
-  /** 累计入账收益（USD，账本口径，含已删除渠道的历史） */
+  /** 累计入账收益（USD，账本口径，含已删除渠道的历史）；带区间时为区间内累计 */
   total: number;
-  /** 近 12 个自然月（UTC+8 归月），无入账的月份不出现 */
+  /** 当前自然月（UTC+8）入账，固定口径，不随查询区间变化 */
+  thisMonth: number;
+  /** 自然月入账（UTC+8 归月），无入账的月份不出现；缺省近 12 月，带区间为所选起止内 */
   months: { month: string; revenue: number }[];
-  /** 当前各渠道累计收益（shareRevenue 列），按收益降序 */
+  /** 各渠道收益：缺省 = shareRevenue 累计列按收益降序；区间 = 区间内日志分成合计 */
   channels: RevenueChannel[];
 }
 

@@ -384,9 +384,12 @@ export const billingApi = {
     });
     return data;
   },
-  /** 「我的收益」汇总（/revenue 页）：累计、月度趋势、各渠道明细 */
-  async revenue(signal?: AbortSignal) {
-    const { data } = await api.get<RevenueSummary>('/billing/revenue', { signal });
+  /** 「我的收益」汇总（/revenue 页）：累计、月度趋势、各渠道明细；range = [from, to] ISO 日界，null 为缺省口径 */
+  async revenue(signal?: AbortSignal, range?: [string, string] | null) {
+    const { data } = await api.get<RevenueSummary>('/billing/revenue', {
+      params: { from: range?.[0], to: range?.[1] },
+      signal,
+    });
     return data;
   },
   async redeem(code: string) {

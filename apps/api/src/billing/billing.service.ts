@@ -46,6 +46,9 @@ const CATALOG_PRICE_SELECT = {
   perCallPrice: true,
 } as const;
 
+/** 收益趋势 SQL 的缺省上界哨兵（远未来）：缺省/仅 from 时固定参数位，语义上等价于无上界 */
+const RANGE_END = new Date('2999-12-31T23:59:59.999Z');
+
 @Injectable()
 export class BillingService {
   private readonly catalogTtl: number;
@@ -86,20 +89,59 @@ export class BillingService {
 
   /**
    * 「我的收益」汇总：
-   * - total：账本口径（BalanceTransaction CHANNEL_REVENUE 累计），渠道删除后历史收益不丢
-   * - months：近 12 个自然月的入账趋势（UTC+8 归月，与每日限额同一日界口径）
-   * - channels：当前各渠道累计收益（Channel.shareRevenue 热路径同事务累加的 O(1) 列）
-   *   + 产生收益的调用次数与最近入账（RequestLog 走 (channelId, createdAt) 索引）
+   * - total：账本口径（BalanceTransaction CHANNEL_REVENUE 累计），渠道删除后历史收益不丢；
+   *   给定 range（from/to 任一）时仅统计区间内，缺省为全历史
+   * - thisMonth：当前自然月（UTC+8）入账，固定口径，不随查询区间变化
+   * - months：入账趋势（UTC+8 归月）；缺省近 12 个自然月，区间模式按所选起止
+   * - channels：缺省 = 各渠道累计收益（Channel.shareRevenue 热路径 O(1) 列）；
+   *   区间模式 = 按 RequestLog 分成聚合（走 (channelId, createdAt) 索引），
+   *   只列区间内有收益的渠道并按区间收益降序
+   *
+   * range 来自控制台 RangePicker 的本地日界 ISO（startOf/endOf day）：
+   * from → gte、to → lte 闭区间，与用量统计（usage.analytics）同一约定。
    */
-  async getRevenue(userId: string) {
+  async getRevenue(userId: string, range?: { from?: string; to?: string }) {
+    const ranged = !!(range?.from || range?.to);
+    const from = range?.from ? this.parseRangeDate(range.from, 'from') : undefined;
+    const to = range?.to ? this.parseRangeDate(range.to, 'to') : undefined;
+    if (from && to && from.getTime() > to.getTime()) {
+      throw new BadRequestException({
+        code: 'INVALID_RANGE',
+        message: '"from" must not be after "to"',
+      });
+    }
+
     // 月份归并用 UTC+8：先平移 8 小时再取年月，窗口起点取 11 个月前月初的 UTC 时刻
     const shifted = new Date(Date.now() + 8 * 3600_000);
     const since = new Date(
       Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth() - 11, 1) - 8 * 3600_000,
     );
-    const [totalAgg, monthRows, channels] = await Promise.all([
+    // 本月起点 = 当前 UTC+8 自然月 1 日 00:00 对应的 UTC 时刻
+    const monthStart = new Date(
+      Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), 1) - 8 * 3600_000,
+    );
+    // 趋势 SQL 固定参数位：区间模式用起止，缺省用近 12 月起点 + 远未来上界哨兵（单条 SQL 两态复用）
+    const monthFrom = ranged ? (from ?? new Date(0)) : since;
+    const monthTo = ranged && to ? to : RANGE_END;
+
+    const [totalAgg, monthAgg, monthRows, channels] = await Promise.all([
       this.prisma.balanceTransaction.aggregate({
-        where: { userId, type: BalanceTxType.CHANNEL_REVENUE },
+        where: {
+          userId,
+          type: BalanceTxType.CHANNEL_REVENUE,
+          ...(ranged
+            ? {
+                createdAt: {
+                  ...(from ? { gte: from } : {}),
+                  ...(to ? { lte: to } : {}),
+                },
+              }
+            : {}),
+        },
+        _sum: { amount: true },
+      }),
+      this.prisma.balanceTransaction.aggregate({
+        where: { userId, type: BalanceTxType.CHANNEL_REVENUE, createdAt: { gte: monthStart } },
         _sum: { amount: true },
       }),
       this.prisma.$queryRaw<{ month: string; revenue: number }[]>`
@@ -108,15 +150,21 @@ export class BillingService {
         FROM "BalanceTransaction"
         WHERE "userId" = ${userId}
           AND type = 'CHANNEL_REVENUE'
-          AND "createdAt" >= ${since}
+          AND "createdAt" >= ${monthFrom}
+          AND "createdAt" <= ${monthTo}
         GROUP BY 1
         ORDER BY 1`,
       this.prisma.channel.findMany({
         where: {
           ownerType: ChannelOwnerType.USER,
           ownerUserId: userId,
-          // 有历史收益的渠道，或仍在共享（还没开张）的渠道；纯私有且零收益不占表格
-          OR: [{ shareRevenue: { gt: 0 } }, { shareMode: { not: ChannelShareMode.PRIVATE } }],
+          // 缺省模式：有历史收益的渠道，或仍在共享（还没开张）的渠道；纯私有且零收益不占表格。
+          // 区间模式：先取全部自有渠道，稍后按区间收益过滤（shareRevenue 列是全量累计，切不了区间）
+          ...(ranged
+            ? {}
+            : {
+                OR: [{ shareRevenue: { gt: 0 } }, { shareMode: { not: ChannelShareMode.PRIVATE } }],
+              }),
         },
         select: {
           id: true,
@@ -133,29 +181,57 @@ export class BillingService {
     const stats = ids.length
       ? await this.prisma.requestLog.groupBy({
           by: ['channelId'],
-          where: { channelId: { in: ids }, channelRevenue: { gt: 0 } },
+          where: {
+            channelId: { in: ids },
+            channelRevenue: { gt: 0 },
+            // 区间模式按日志时间过滤；缺省为全量累计
+            ...(ranged
+              ? {
+                  createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) },
+                }
+              : {}),
+          },
           _count: true,
+          _sum: { channelRevenue: true },
           _max: { createdAt: true },
         })
       : [];
     const statMap = new Map(stats.map((s) => [s.channelId, s]));
 
+    const rows = channels.map((c) => {
+      const st = statMap.get(c.id);
+      return {
+        id: c.id,
+        name: c.name,
+        shareMode: c.shareMode,
+        status: c.status,
+        // 缺省口径 = 渠道累计列；区间口径 = 区间内日志分成合计
+        revenue: ranged ? Number(st?._sum.channelRevenue ?? 0) : Number(c.shareRevenue),
+        calls: st?._count ?? 0,
+        lastAt: st?._max.createdAt ?? null,
+      };
+    });
+
     return {
       total: Number(totalAgg._sum.amount ?? 0),
+      thisMonth: Number(monthAgg._sum.amount ?? 0),
       months: monthRows.map((r) => ({ month: r.month, revenue: Number(r.revenue) })),
-      channels: channels.map((c) => {
-        const st = statMap.get(c.id);
-        return {
-          id: c.id,
-          name: c.name,
-          shareMode: c.shareMode,
-          status: c.status,
-          revenue: Number(c.shareRevenue),
-          calls: st?._count ?? 0,
-          lastAt: st?._max.createdAt ?? null,
-        };
-      }),
+      channels: ranged
+        ? rows.filter((r) => r.revenue > 0).sort((a, b) => b.revenue - a.revenue)
+        : rows,
     };
+  }
+
+  /** 收益区间日期解析：非 ISO 日期 → 400（console 接口，英文 message 与 USER_NOT_FOUND 同风格） */
+  private parseRangeDate(value: string, field: 'from' | 'to'): Date {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) {
+      throw new BadRequestException({
+        code: 'INVALID_RANGE',
+        message: `Invalid "${field}" date`,
+      });
+    }
+    return d;
   }
 
   /**
