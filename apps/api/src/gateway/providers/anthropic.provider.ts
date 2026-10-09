@@ -7,6 +7,7 @@ import {
   UpstreamError,
   UsageInfo,
 } from '../types';
+import { parseRetryAfterMs } from '../upstream-error.util';
 import { joinUrl, sseEvents, describeFetchError, combineSignals } from './stream.util';
 
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -46,9 +47,7 @@ export function buildAnthropicBody(req: ChatRequest): Record<string, any> {
   const messages: any[] = [];
   for (const m of body.messages ?? []) {
     if (m.role === 'system') {
-      systemParts.push(
-        typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-      );
+      systemParts.push(typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
       continue;
     }
     messages.push({
@@ -169,11 +168,7 @@ export class AnthropicProvider implements Provider {
         signal: combineSignals(timeoutMs, signal),
       });
     } catch (e: any) {
-      throw new UpstreamError(
-        `Upstream connection failed: ${describeFetchError(e)}`,
-        502,
-        true,
-      );
+      throw new UpstreamError(`Upstream connection failed: ${describeFetchError(e)}`, 502, true);
     }
   }
 
@@ -182,7 +177,14 @@ export class AnthropicProvider implements Provider {
     apiKey: string,
     req: ChatRequest,
   ): Promise<NonStreamResult> {
-    const res = await this.request(channel, apiKey, buildAnthropicBody(req), false, req.timeoutMs, req.signal);
+    const res = await this.request(
+      channel,
+      apiKey,
+      buildAnthropicBody(req),
+      false,
+      req.timeoutMs,
+      req.signal,
+    );
     const text = await res.text();
     let json: any;
     try {
@@ -192,7 +194,13 @@ export class AnthropicProvider implements Provider {
     }
     if (!res.ok) {
       const retryable = res.status >= 500 || res.status === 429;
-      throw new UpstreamError(`Upstream error ${res.status}`, res.status, retryable, json);
+      throw new UpstreamError(
+        `Upstream error ${res.status}`,
+        res.status,
+        retryable,
+        json,
+        parseRetryAfterMs(res),
+      );
     }
     const openai = toOpenAiResponse(json, req.model);
     return {
@@ -209,12 +217,15 @@ export class AnthropicProvider implements Provider {
     };
   }
 
-  async chatStream(
-    channel: Channel,
-    apiKey: string,
-    req: ChatRequest,
-  ): Promise<StreamResult> {
-    const res = await this.request(channel, apiKey, buildAnthropicBody(req), true, req.timeoutMs, req.signal);
+  async chatStream(channel: Channel, apiKey: string, req: ChatRequest): Promise<StreamResult> {
+    const res = await this.request(
+      channel,
+      apiKey,
+      buildAnthropicBody(req),
+      true,
+      req.timeoutMs,
+      req.signal,
+    );
     if (!res.ok) {
       const text = await res.text();
       let json: any;
@@ -224,7 +235,13 @@ export class AnthropicProvider implements Provider {
         json = { error: { message: text, type: 'upstream_error' } };
       }
       const retryable = res.status >= 500 || res.status === 429;
-      throw new UpstreamError(`Upstream error ${res.status}`, res.status, retryable, json);
+      throw new UpstreamError(
+        `Upstream error ${res.status}`,
+        res.status,
+        retryable,
+        json,
+        parseRetryAfterMs(res),
+      );
     }
     if (!res.body) {
       throw new UpstreamError('Upstream returned empty stream', 502, true);

@@ -56,3 +56,27 @@ export function isModelAccessDenied(e: UpstreamError): boolean {
   return MODEL_ACCESS_RE.test(upstreamErrorSignal(e));
 }
 
+/**
+ * 上游 Retry-After 头 → 毫秒（RFC 9110：delay-seconds 或 HTTP-date 两种形式）。
+ * 既接受响应对象（从 headers 读 retry-after，兼容无 headers 的测试 mock），
+ * 也接受裸头字符串。缺失 / 非法 / 已过期 / 非正值 → undefined（调用方回退自身退避）。
+ */
+export function parseRetryAfterMs(
+  input: string | null | undefined | { headers?: { get(name: string): string | null } },
+): number | undefined {
+  const raw =
+    typeof input === 'string' || input == null ? input : input.headers?.get('retry-after');
+  if (!raw) return undefined;
+  const v = String(raw).trim();
+  if (!v) return undefined;
+  // delay-seconds（允许小数，向上取整到毫秒）
+  if (/^\d+(\.\d+)?$/.test(v)) {
+    const sec = Number(v);
+    return Number.isFinite(sec) && sec > 0 ? Math.ceil(sec * 1000) : undefined;
+  }
+  // HTTP-date：取与当前时刻的剩余差值，已过期视为未提供
+  const at = Date.parse(v);
+  if (Number.isNaN(at)) return undefined;
+  const ms = at - Date.now();
+  return ms > 0 ? ms : undefined;
+}

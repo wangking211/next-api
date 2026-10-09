@@ -7,6 +7,7 @@ import {
   UpstreamError,
   UsageInfo,
 } from '../types';
+import { parseRetryAfterMs } from '../upstream-error.util';
 import { joinUrl, sseEvents, describeFetchError, combineSignals } from './stream.util';
 
 function toGeminiParts(content: any): any[] {
@@ -196,7 +197,13 @@ export class GeminiProvider implements Provider {
     }
     if (!res.ok) {
       const retryable = res.status >= 500 || res.status === 429;
-      throw new UpstreamError(`Upstream error ${res.status}`, res.status, retryable, json);
+      throw new UpstreamError(
+        `Upstream error ${res.status}`,
+        res.status,
+        retryable,
+        json,
+        parseRetryAfterMs(res),
+      );
     }
     const openai = toOpenAiResponse(json, req.model);
     return {
@@ -231,7 +238,13 @@ export class GeminiProvider implements Provider {
         json = { error: { message: text, type: 'upstream_error' } };
       }
       const retryable = res.status >= 500 || res.status === 429;
-      throw new UpstreamError(`Upstream error ${res.status}`, res.status, retryable, json);
+      throw new UpstreamError(
+        `Upstream error ${res.status}`,
+        res.status,
+        retryable,
+        json,
+        parseRetryAfterMs(res),
+      );
     }
     if (!res.body) {
       throw new UpstreamError('Upstream returned empty stream', 502, true);

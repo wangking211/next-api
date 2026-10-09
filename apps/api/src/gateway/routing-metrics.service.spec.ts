@@ -119,10 +119,7 @@ describe('RoutingMetricsService', () => {
 
   it('opens the circuit once consecutive failures reach the threshold', async () => {
     const r = makeRedis();
-    const svc = new RoutingMetricsService(
-      r as any,
-      cfg({ CHANNEL_MODEL_FAILURE_THRESHOLD: '3' }),
-    );
+    const svc = new RoutingMetricsService(r as any, cfg({ CHANNEL_MODEL_FAILURE_THRESHOLD: '3' }));
     r.queue.push([[null, 3]]);
     await svc.record('ch1', 'm', 'error', { latencyMs: 900, status: 503 });
     const hset = find(
@@ -173,6 +170,73 @@ describe('RoutingMetricsService', () => {
       (a) => String(a[0]).startsWith('route:c:') && a[1] === 'cdexp',
     );
     expect(Number(hset!.args[2])).toBeLessThanOrEqual(before + 600000 + 50);
+  });
+
+  it('rate limited: waits out upstream Retry-After when it exceeds backoff', async () => {
+    const r = makeRedis();
+    const svc = new RoutingMetricsService(
+      r as any,
+      cfg({ CHANNEL_RATE_LIMIT_BASE_MS: '30000', CHANNEL_MODEL_COOLDOWN_MAX_MS: '600000' }),
+    );
+    r.queue.push([[null, 1]]); // 退避 30s < 上游要求 120s → 听上游的
+    const before = Date.now();
+    await svc.record('ch1', 'm', 'rate_limited', {
+      latencyMs: 50,
+      status: 429,
+      retryAfterMs: 120_000,
+    });
+    const hset = find(
+      r.calls,
+      'hset',
+      (a) => String(a[0]).startsWith('route:c:') && a[1] === 'cdexp',
+    );
+    expect(hset).toBeDefined();
+    expect(Number(hset!.args[2])).toBeGreaterThanOrEqual(before + 120_000);
+    expect(Number(hset!.args[2])).toBeLessThanOrEqual(Date.now() + 120_000);
+  });
+
+  it('rate limited: keeps exponential backoff when Retry-After is shorter', async () => {
+    const r = makeRedis();
+    const svc = new RoutingMetricsService(
+      r as any,
+      cfg({ CHANNEL_RATE_LIMIT_BASE_MS: '30000', CHANNEL_MODEL_COOLDOWN_MAX_MS: '600000' }),
+    );
+    r.queue.push([[null, 3]]); // 退避 30s * 2^2 = 120s > 上游要求 10s → 保留退避
+    const before = Date.now();
+    await svc.record('ch1', 'm', 'rate_limited', {
+      latencyMs: 50,
+      status: 429,
+      retryAfterMs: 10_000,
+    });
+    const hset = find(
+      r.calls,
+      'hset',
+      (a) => String(a[0]).startsWith('route:c:') && a[1] === 'cdexp',
+    );
+    expect(Number(hset!.args[2])).toBeGreaterThanOrEqual(before + 119_000);
+    expect(Number(hset!.args[2])).toBeLessThanOrEqual(Date.now() + 120_000);
+  });
+
+  it('rate limited: clamps an absurd Retry-After to cooldownMaxMs', async () => {
+    const r = makeRedis();
+    const svc = new RoutingMetricsService(
+      r as any,
+      cfg({ CHANNEL_RATE_LIMIT_BASE_MS: '30000', CHANNEL_MODEL_COOLDOWN_MAX_MS: '600000' }),
+    );
+    r.queue.push([[null, 1]]);
+    const before = Date.now();
+    await svc.record('ch1', 'm', 'rate_limited', {
+      latencyMs: 50,
+      status: 429,
+      retryAfterMs: 3_600_000, // 上游说等 1 小时 → 仍封顶 10 分钟
+    });
+    const hset = find(
+      r.calls,
+      'hset',
+      (a) => String(a[0]).startsWith('route:c:') && a[1] === 'cdexp',
+    );
+    expect(Number(hset!.args[2])).toBeLessThanOrEqual(before + 600_000 + 100);
+    expect(Number(hset!.args[2])).toBeGreaterThanOrEqual(before + 599_000);
   });
 
   it('snapshot merges buckets, circuit and daily counters', async () => {
@@ -226,10 +290,7 @@ describe('RoutingMetricsService', () => {
 
   it('marks expired cooldown with remaining failures as half-open', async () => {
     const r = makeRedis();
-    const svc = new RoutingMetricsService(
-      r as any,
-      cfg({ CHANNEL_MODEL_FAILURE_THRESHOLD: '3' }),
-    );
+    const svc = new RoutingMetricsService(r as any, cfg({ CHANNEL_MODEL_FAILURE_THRESHOLD: '3' }));
     r.queue.push([
       [null, {}],
       [null, {}],
@@ -244,7 +305,12 @@ describe('RoutingMetricsService', () => {
   it('serves snapshots from the short-lived process cache', async () => {
     const r = makeRedis();
     const svc = new RoutingMetricsService(r as any, cfg());
-    r.queue.push([[null, {}], [null, {}], [null, {}], [null, {}]]);
+    r.queue.push([
+      [null, {}],
+      [null, {}],
+      [null, {}],
+      [null, {}],
+    ]);
     await svc.snapshot('m', ['ch1']);
     await svc.snapshot('m', ['ch1']);
     expect(r.multi).toHaveBeenCalledTimes(1);

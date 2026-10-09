@@ -90,16 +90,8 @@ export interface VideoContentResult {
 export interface Provider {
   readonly name: string;
   readonly aliases?: string[];
-  chatNonStream(
-    channel: Channel,
-    apiKey: string,
-    req: ChatRequest,
-  ): Promise<NonStreamResult>;
-  chatStream(
-    channel: Channel,
-    apiKey: string,
-    req: ChatRequest,
-  ): Promise<StreamResult>;
+  chatNonStream(channel: Channel, apiKey: string, req: ChatRequest): Promise<NonStreamResult>;
+  chatStream(channel: Channel, apiKey: string, req: ChatRequest): Promise<StreamResult>;
   /**
    * 可选：`POST /v1/embeddings` 向量化透传（OpenAI 兼容协议）。未实现该方法的服务商
    * 在 embeddings 调用中会被跳过（如 Anthropic / Gemini 暂无兼容端点），全部候选
@@ -115,27 +107,15 @@ export interface Provider {
    * 与 embeddings 同款降级语义：未实现的服务商在图片调用中被跳过，
    * 全部候选都不支持时网关返回 501 而不是把请求打到上游报错。
    */
-  imagesGenerate?(
-    channel: Channel,
-    apiKey: string,
-    req: ChatRequest,
-  ): Promise<NonStreamResult>;
+  imagesGenerate?(channel: Channel, apiKey: string, req: ChatRequest): Promise<NonStreamResult>;
   /**
    * 可选：`POST /v1/videos` 视频生成任务透传（OpenAI 兼容异步任务协议，如豆包 Seedance）。
    * 与 embeddings/images 同款降级语义：未实现的服务商在视频调用中被跳过，
    * 全部候选都不支持时网关返回 501。
    */
-  videosCreate?(
-    channel: Channel,
-    apiKey: string,
-    req: ChatRequest,
-  ): Promise<NonStreamResult>;
+  videosCreate?(channel: Channel, apiKey: string, req: ChatRequest): Promise<NonStreamResult>;
   /** 可选：`GET /v1/videos/{id}` 视频任务状态透传 */
-  videoStatus?(
-    channel: Channel,
-    apiKey: string,
-    req: VideoTaskRequest,
-  ): Promise<NonStreamResult>;
+  videoStatus?(channel: Channel, apiKey: string, req: VideoTaskRequest): Promise<NonStreamResult>;
   /** 可选：`GET /v1/videos/{id}/content` 视频内容透传（二进制流，不缓冲） */
   videoContent?(
     channel: Channel,
@@ -150,6 +130,8 @@ export class UpstreamError extends Error {
     readonly status: number,
     readonly retryable: boolean,
     readonly body?: any,
+    /** 上游 Retry-After（毫秒）：429 冷却按它退避（取 max(指数退避, 该值)，封顶 cooldownMaxMs） */
+    readonly retryAfterMs?: number,
   ) {
     super(message);
   }

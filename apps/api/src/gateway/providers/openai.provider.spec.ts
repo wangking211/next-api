@@ -117,6 +117,30 @@ describe('OpenAiCompatibleProvider', () => {
     ).rejects.toMatchObject({ status: 400, retryable: false });
   });
 
+  it('carries upstream Retry-After into UpstreamError (non-stream + stream)', async () => {
+    const provider = new OpenAiCompatibleProvider();
+    const r429 = (header: string) => {
+      const r: any = {
+        ok: false,
+        status: 429,
+        text: async () => JSON.stringify({ error: { message: 'rate limited' } }),
+        headers: { get: (k: string) => (k.toLowerCase() === 'retry-after' ? header : null) },
+        clone: () => r,
+      };
+      return r;
+    };
+
+    jest.spyOn(global, 'fetch').mockResolvedValue(r429('120'));
+    await expect(
+      provider.chatNonStream(channel, 'sk-test', { model: 'm', body: {} }),
+    ).rejects.toMatchObject({ status: 429, retryAfterMs: 120_000 });
+
+    jest.spyOn(global, 'fetch').mockResolvedValue(r429('30'));
+    await expect(
+      provider.chatStream(channel, 'sk-test', { model: 'm', body: {} }),
+    ).rejects.toMatchObject({ status: 429, retryAfterMs: 30_000 });
+  });
+
   it('maps fetch failures to retryable 502 connection errors', async () => {
     jest.spyOn(global, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'));
     const provider = new OpenAiCompatibleProvider();

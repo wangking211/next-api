@@ -118,6 +118,7 @@ export class ExecSupportService {
           `Model "${model}" does not support: ${missing.join(', ')}. ` +
             `Declared capabilities: ${declared.join(', ')}.`,
           'invalid_request_error',
+          'capability_not_supported',
         ),
       );
     return false;
@@ -163,6 +164,8 @@ export class ExecSupportService {
         latencyMs,
         status: e.status,
         errorMessage: signal,
+        // 上游明确要求的等待时长：冷却取 max(指数退避, 该值)（routing-metrics 内封顶）
+        retryAfterMs: e.retryAfterMs,
       });
     } else if (transient) {
       await this.health.recordFailure(ctx.channel.id, e.message);

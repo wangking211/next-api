@@ -12,6 +12,8 @@ export interface RouteRecordArgs {
   totalTokens?: number;
   status?: number;
   errorMessage?: string | null;
+  /** 上游 Retry-After（毫秒）：rate_limited 冷却取 max(指数退避, 该值)，封顶 cooldownMaxMs */
+  retryAfterMs?: number;
 }
 
 /** (渠道, 模型) 维度的滑窗指标快照 */
@@ -69,8 +71,7 @@ const WINDOW_FIELDS = [
 const REFUSAL_RE = /(content[_\s-]?filter|content_policy|safety|refusal|refused)/i;
 
 function num(v: unknown, d = 0): number {
-  const n =
-    typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : Number.NaN;
+  const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : Number.NaN;
   return Number.isFinite(n) ? n : d;
 }
 
@@ -116,10 +117,8 @@ export class RoutingMetricsService {
     this.windowMs = Number(config.get<string>('ROUTING_METRICS_WINDOW_MS', '600000')) || 600000;
     this.snapshotTtlMs = Number(config.get<string>('ROUTING_METRICS_TTL_MS', '5000')) || 5000;
     this.retryMs = Number(config.get<string>('ROUTING_METRICS_RETRY_MS', '10000')) || 10000;
-    this.modelThreshold =
-      Number(config.get<string>('CHANNEL_MODEL_FAILURE_THRESHOLD', '3')) || 3;
-    this.cooldownMs =
-      Number(config.get<string>('CHANNEL_MODEL_COOLDOWN_MS', '60000')) || 60000;
+    this.modelThreshold = Number(config.get<string>('CHANNEL_MODEL_FAILURE_THRESHOLD', '3')) || 3;
+    this.cooldownMs = Number(config.get<string>('CHANNEL_MODEL_COOLDOWN_MS', '60000')) || 60000;
     this.cooldownMaxMs = Math.max(
       Number(config.get<string>('CHANNEL_MODEL_COOLDOWN_MAX_MS', '600000')) || 600000,
       this.cooldownMs,
@@ -127,8 +126,7 @@ export class RoutingMetricsService {
     this.rateLimitBaseMs =
       Number(config.get<string>('CHANNEL_RATE_LIMIT_BASE_MS', '30000')) || 30000;
     this.dayOffsetMs =
-      (Number(config.get<string>('CHANNEL_LIMIT_DAY_OFFSET_HOURS', '8')) || 8) *
-      3_600_000;
+      (Number(config.get<string>('CHANNEL_LIMIT_DAY_OFFSET_HOURS', '8')) || 8) * 3_600_000;
     this.winTtlMs = 2 * this.windowMs + 10_000;
   }
 
@@ -148,15 +146,14 @@ export class RoutingMetricsService {
   /** 日 key TTL = 到当日结束 + 10 分钟宽限 */
   private dayTtl(now: number): number {
     const endOfDay =
-      (Math.floor((now + this.dayOffsetMs) / 86_400_000) + 1) * 86_400_000 -
-      this.dayOffsetMs;
+      (Math.floor((now + this.dayOffsetMs) / 86_400_000) + 1) * 86_400_000 - this.dayOffsetMs;
     return endOfDay - now + 600_000;
   }
 
   /**
    * 记录一次上游调用结果（永不抛错；失败时进入退避，避免放大故障）。
    * - ok：成功计数 + 有效/无效回复 + 关闭熔断
-   * - rate_limited：429 计数，立即冷却并按连续次数指数退避（封顶 cooldownMaxMs）
+   * - rate_limited：429 计数，立即冷却 = max(指数退避, 上游 Retry-After) 并封顶 cooldownMaxMs
    * - error：失败计数，连续失败达阈值 → 冷却 cooldownMs
    */
   async record(
@@ -229,10 +226,11 @@ export class RoutingMetricsService {
         c.pexpire(cKey, this.circTtlMs);
         const res = await c.exec();
         const n = num(res?.[0]?.[1], 1);
-        const ttl = Math.min(
-          this.rateLimitBaseMs * 2 ** Math.max(0, n - 1),
-          this.cooldownMaxMs,
-        );
+        // 冷却 = max(指数退避, 上游 Retry-After)，再封顶 cooldownMaxMs：
+        // 上游明确说等更久就听上游的（避免撞墙），但不能无限放大单渠道出局时长
+        const backoff = this.rateLimitBaseMs * 2 ** Math.max(0, n - 1);
+        const asked = Math.max(0, Math.round(args.retryAfterMs ?? 0));
+        const ttl = Math.min(Math.max(backoff, asked), this.cooldownMaxMs);
         cdexp = now + ttl;
       } else {
         const c = this.redis.client.multi();
@@ -256,9 +254,7 @@ export class RoutingMetricsService {
       await m.exec();
     } catch (e) {
       this.brokenUntil = Date.now() + this.retryMs;
-      this.logger.warn(
-        `路由指标写入失败（退避 ${this.retryMs}ms）: ${(e as Error)?.message}`,
-      );
+      this.logger.warn(`路由指标写入失败（退避 ${this.retryMs}ms）: ${(e as Error)?.message}`);
     }
   }
 
@@ -266,10 +262,7 @@ export class RoutingMetricsService {
    * 读取候选集指标快照（带进程内短 TTL 缓存，避免每请求打 Redis）。
    * Redis 故障 → 返回空 Map，评分自动退化为成本排序。
    */
-  async snapshot(
-    model: string,
-    channelIds: string[],
-  ): Promise<Map<string, RouteMetrics>> {
+  async snapshot(model: string, channelIds: string[]): Promise<Map<string, RouteMetrics>> {
     const out = new Map<string, RouteMetrics>();
     if (!channelIds.length) return out;
     const now = Date.now();

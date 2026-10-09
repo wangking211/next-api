@@ -8,6 +8,7 @@ import {
   VideoContentResult,
   VideoTaskRequest,
 } from '../types';
+import { parseRetryAfterMs } from '../upstream-error.util';
 import { joinUrl, pipeRaw, describeFetchError, combineSignals } from './stream.util';
 
 /** 视频任务 id 只允许安全字符：防止路径穿越把请求打到上游的其它端点 */
@@ -164,6 +165,7 @@ export class OpenAiCompatibleProvider implements Provider {
         status,
         status >= 500 || status === 429,
         json,
+        parseRetryAfterMs(res),
       );
     }
     return {
@@ -230,7 +232,13 @@ export class OpenAiCompatibleProvider implements Provider {
     }
     if (!res.ok) {
       const retryable = res.status >= 500 || res.status === 429;
-      throw new UpstreamError(`Upstream error ${res.status}`, res.status, retryable, json);
+      throw new UpstreamError(
+        `Upstream error ${res.status}`,
+        res.status,
+        retryable,
+        json,
+        parseRetryAfterMs(res),
+      );
     }
     const bad = detectErrorPayload(json);
     if (bad) {
@@ -283,7 +291,13 @@ export class OpenAiCompatibleProvider implements Provider {
         json = { error: { message: text, type: 'upstream_error' } };
       }
       const retryable = res.status >= 500 || res.status === 429;
-      throw new UpstreamError(`Upstream error ${res.status}`, res.status, retryable, json);
+      throw new UpstreamError(
+        `Upstream error ${res.status}`,
+        res.status,
+        retryable,
+        json,
+        parseRetryAfterMs(res),
+      );
     }
 
     // 流式请求却回了 JSON：多半是「200 + 错误体」的中转；识别出来就转成上游故障，
