@@ -38,23 +38,34 @@ export class ChannelHealthService {
     }
   }
 
-  /** 调用失败：累计失败次数，达到阈值自动禁用并告警。 */
-  async recordFailure(channelId: string, message: string): Promise<void> {
+  /**
+   * 调用失败：累计失败次数，达到阈值自动禁用并告警。
+   *
+   * opts.count=false：模型级故障豁免（渠道其它模型仍在正常出量）——只写 lastError
+   * 现场供排障，不累计 failureCount、不触发自动禁用（该组合的冷却由路由层承担）。
+   */
+  async recordFailure(
+    channelId: string,
+    message: string,
+    opts: { count?: boolean } = {},
+  ): Promise<void> {
+    const count = opts.count !== false;
     // 上游文案常带渠道密钥 → 先脱敏，再落库与告警
     const msg = redactSecrets(message);
     // 标记当前写库步骤，catch 时能定位失败在哪一段（累计 vs 自动禁用）
-    let step = '失败计数累计';
+    let step = count ? '失败计数累计' : '失败现场记录(不计数)';
     try {
       const channel = await this.prisma.channel.update({
         where: { id: channelId },
         data: {
-          failureCount: { increment: 1 },
+          ...(count ? { failureCount: { increment: 1 } } : {}),
           lastErrorAt: new Date(),
           lastErrorMsg: msg.slice(0, 500),
         },
       });
 
       if (
+        count &&
         channel.failureCount >= this.threshold &&
         channel.status === ChannelStatus.ENABLED
       ) {

@@ -78,6 +78,8 @@ function makeService(
   decryptImpl?: (s: string) => string,
   metricsMap?: Map<string, RouteMetrics>,
   cache?: TtlCacheService,
+  /** 测试默认关闭首选权重抽签（排序断言需要确定性）；抽签用例按需覆盖 */
+  configVars: Record<string, string> = { ROUTING_WEIGHT_TAU: '0' },
 ) {
   const prisma = {
     channelModel: { findMany: jest.fn().mockResolvedValue(rows) },
@@ -95,7 +97,9 @@ function makeService(
     snapshot: jest.fn().mockResolvedValue(metricsMap ?? new Map<string, RouteMetrics>()),
     record: jest.fn(),
   };
-  const config = { get: (_k: string, d?: string) => d } as unknown as ConfigService;
+  const config = {
+    get: (k: string, d?: string) => (k in configVars ? configVars[k] : d),
+  } as unknown as ConfigService;
   const groups = {
     channelVisibilityWhere: jest.fn((groupId: string | null) =>
       groupId ? { OR: [{ groups: { none: {} } }, { groups: { some: { id: groupId } } }] } : null,
@@ -190,6 +194,25 @@ describe('ChannelResolverService', () => {
     const cheap = makeCM({ costInput: 1, channel: makeChannel({ id: 'cheap', priority: 0 }) });
     const { service } = makeService([expensive, cheap]);
     expect(ids(await service.resolve('u1', 'm'))).toEqual(['cheap', 'exp']);
+  });
+
+  it('同层首选按权重抽签：ROUTING_WEIGHT_TAU>0 时同层高权重候选被抽中置顶', async () => {
+    const poor = makeCM({ channel: makeChannel({ id: 'poor', weight: 1, priority: 5 }) });
+    const heavy = makeCM({ channel: makeChannel({ id: 'heavy', weight: 100, priority: 5 }) });
+    const { service } = makeService([poor, heavy], undefined, undefined, undefined, {
+      ROUTING_WEIGHT_TAU: '0.1',
+    });
+    // 随机数全部等值 → gumbel 项相同 → 抽签值由 分数/τ + ln(权重) 决定，
+    // heavy 的 ln(100)≈4.6 稳压噪声项 → 确定性中签（统计行为在 routing-score.spec 覆盖）
+    const spy = jest.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      const result = await service.resolve('u1', 'm');
+      expect(ids(result)[0]).toBe('heavy');
+      // 其余候选保持分数序（poor 单独垫底）
+      expect(ids(result)).toEqual(['heavy', 'poor']);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('skips channels that fail to decrypt', async () => {

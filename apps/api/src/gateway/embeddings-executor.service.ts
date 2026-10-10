@@ -126,6 +126,10 @@ export class EmbeddingsExecutorService {
     const closeTracker = trackClientClose(res, () => upstreamAbort.abort());
 
     for (let i = 0; i < channels.length; i++) {
+      // 整请求 deadline：跨故障转移共享总预算，耗尽即 504
+      if (this.support.deadlineLeft(startedAt) <= 0) {
+        return this.support.respondDeadline(res, err);
+      }
       const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
       // 模型映射：对外规范名 → 上游真实名
       const upstreamModel = upstreamModelName ?? model;
@@ -150,7 +154,8 @@ export class EmbeddingsExecutorService {
           model: upstreamModel,
           body: upstreamBody,
           signal: upstreamAbort.signal,
-          // timeoutMs 未传 → 默认 120s 上游总超时
+          // 单次尝试超时：默认 120s，且不超过整请求剩余预算
+          timeoutMs: this.support.attemptTimeoutMs(startedAt),
         });
         // 上游未回 usage 时按 input 兜底估算；embeddings 无输出 token
         const usage = result.usage ?? {

@@ -1,4 +1,5 @@
-import { parseRetryAfterMs } from './upstream-error.util';
+import { classifyUpstreamFailure, parseRetryAfterMs } from './upstream-error.util';
+import { UpstreamError } from './types';
 
 describe('parseRetryAfterMs（上游 Retry-After → 毫秒）', () => {
   it('delay-seconds：整数与小数都向上取整', () => {
@@ -33,5 +34,69 @@ describe('parseRetryAfterMs（上游 Retry-After → 毫秒）', () => {
     // 无该头 / 无 headers（老 mock）都不应抛错
     expect(parseRetryAfterMs({ headers: { get: () => null } })).toBeUndefined();
     expect(parseRetryAfterMs({})).toBeUndefined();
+  });
+});
+
+describe('classifyUpstreamFailure（统一分类口径：故障转移与流式中断共用）', () => {
+  const ue = (status: number, retryable: boolean, message?: string) =>
+    new UpstreamError(
+      `Upstream error ${status}`,
+      status,
+      retryable,
+      message ? { error: { message } } : undefined,
+    );
+
+  it('429 → limited（冷却退避，不计渠道失败）', () => {
+    const c = classifyUpstreamFailure(ue(429, true, 'rate limit exceeded, try later'));
+    expect(c.limited).toBe(true);
+    expect(c.transient).toBe(false);
+    expect(c.refusal).toBe(false);
+  });
+
+  it('5xx 可重试 → transient（计渠道失败）', () => {
+    const c = classifyUpstreamFailure(ue(502, true));
+    expect(c.transient).toBe(true);
+    expect(c.limited).toBe(false);
+    expect(c.status).toBe(502);
+  });
+
+  it('400 拒答文案 → refusal（不计失败、不熔断）', () => {
+    const c = classifyUpstreamFailure(ue(400, false, 'content_policy violation'));
+    expect(c.refusal).toBe(true);
+    expect(c.transient).toBe(false);
+  });
+
+  it('5xx + 拒答文案 → 文案特征压过可重试状态码（不再累计渠道失败）', () => {
+    const c = classifyUpstreamFailure(ue(503, true, 'response blocked by content filter'));
+    expect(c.refusal).toBe(true);
+    expect(c.transient).toBe(false);
+    expect(c.limited).toBe(false);
+  });
+
+  it('401 → authFault；403 无权访问模型 → modelDenied（拒答不抢判定）', () => {
+    expect(classifyUpstreamFailure(ue(401, false, 'invalid api key')).authFault).toBe(true);
+    const denied = classifyUpstreamFailure(ue(403, false, 'no access to model gpt-x'));
+    expect(denied.modelDenied).toBe(true);
+    expect(denied.refusal).toBe(false);
+    expect(denied.transient).toBe(false);
+  });
+
+  it('普通 Error（网络中断/解码失败）→ transient，signal 取 message', () => {
+    const c = classifyUpstreamFailure(new Error('socket hang up'));
+    expect(c.transient).toBe(true);
+    expect(c.limited).toBe(false);
+    expect(c.signal).toBe('socket hang up');
+    expect(c.status).toBeUndefined();
+  });
+
+  it('客户端 4xx 无任何特征 → 全 false（不触健康度，防恶意请求禁用渠道）', () => {
+    const c = classifyUpstreamFailure(ue(400, false, 'messages[0].content is required'));
+    expect(c).toMatchObject({
+      limited: false,
+      transient: false,
+      authFault: false,
+      modelDenied: false,
+      refusal: false,
+    });
   });
 });

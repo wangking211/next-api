@@ -33,6 +33,7 @@ describe('pipeStream client-closed handling', () => {
     const usage = { record: jest.fn() };
     const health = { recordSuccess: jest.fn(), recordFailure: jest.fn() };
     const metrics = { record: jest.fn() };
+    const support = { recordOutcomes: jest.fn(async () => undefined) };
     const config = { get: (_k: string, d?: string) => d };
     const executor = new ChatExecutorService(
       {} as unknown as ChannelResolverService,
@@ -42,7 +43,7 @@ describe('pipeStream client-closed handling', () => {
       health as unknown as ChannelHealthService,
       metrics as unknown as RoutingMetricsService,
       {} as unknown as GroupsService,
-      {} as unknown as ExecSupportService,
+      support as unknown as ExecSupportService,
       config as unknown as ConfigService,
     );
 
@@ -69,7 +70,7 @@ describe('pipeStream client-closed handling', () => {
       failureCount: 0,
     } as unknown as Channel;
 
-    return { executor, usage, health, metrics, res: res as unknown as Response, channel };
+    return { executor, usage, health, metrics, support, res: res as unknown as Response, channel };
   }
 
   function metaOf(channel: Channel, isClientClosed: () => boolean) {
@@ -193,5 +194,40 @@ describe('pipeStream client-closed handling', () => {
     expect(usage.record).toHaveBeenCalledWith(
       expect.objectContaining({ status: 200, errorMessage: null }),
     );
+  });
+
+  it('流中断错误走统一口径记录（support.recordOutcomes），不再直写 error 计数', async () => {
+    const { executor, usage, health, metrics, support, res, channel } = setup();
+    const result: StreamResult = {
+      status: 200,
+      chunks: (async function* () {
+        yield 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n';
+        throw new Error('upstream stream died');
+      })(),
+    };
+
+    await executor['pipeStream'](
+      res,
+      result,
+      metaOf(channel, () => false),
+    );
+
+    expect(usage.record).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 500, errorMessage: 'upstream stream died' }),
+    );
+    // 分类与健康度落地交给共享口径（429 中途断流不计失败、拒答只降质量分、含模型级豁免）
+    expect(support.recordOutcomes).toHaveBeenCalledTimes(1);
+    expect(support.recordOutcomes).toHaveBeenCalledWith(
+      channel,
+      'm1',
+      expect.objectContaining({ transient: true, signal: 'upstream stream died' }),
+      expect.objectContaining({
+        latencyMs: expect.any(Number),
+        totalTokens: expect.any(Number),
+      }),
+    );
+    // 执行器不再直写 health/metrics（成功路径除外）
+    expect(health.recordFailure).not.toHaveBeenCalled();
+    expect(metrics.record).not.toHaveBeenCalled();
   });
 });

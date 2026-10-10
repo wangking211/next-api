@@ -12,7 +12,7 @@ function makeRedis() {
     fail: boolean;
     calls: Cmd[];
     queue: any[][];
-    client: { multi: jest.Mock };
+    client: { multi: jest.Mock; hgetall: jest.Mock };
     multi: jest.Mock;
   } = {
     fail: false,
@@ -36,7 +36,7 @@ function makeRedis() {
     return chain;
   };
   state.multi = jest.fn(() => makeChain());
-  state.client = { multi: state.multi };
+  state.client = { multi: state.multi, hgetall: jest.fn(async () => ({})) };
   return state;
 }
 
@@ -83,6 +83,46 @@ describe('RoutingMetricsService', () => {
         (a) => String(a[0]).startsWith('route:c:') && a[1] === 'cf' && a[2] === 0,
       ),
     ).toBeDefined();
+  });
+
+  it('success 同步更新渠道级成功标记（模型 → 时刻，供模型级故障豁免查询）', async () => {
+    const r = makeRedis();
+    const svc = new RoutingMetricsService(r as any, cfg());
+    await svc.record('ch1', 'm', 'ok', {
+      latencyMs: 100,
+      completionTokens: 5,
+      totalTokens: 8,
+      status: 200,
+    });
+    const hset = find(r.calls, 'hset', (a) => a[0] === 'route:ok:ch1' && a[1] === 'm');
+    expect(hset).toBeDefined();
+    expect(Number(hset!.args[2])).toBeGreaterThan(0);
+    expect(find(r.calls, 'pexpire', (a) => a[0] === 'route:ok:ch1')).toBeDefined();
+  });
+
+  it('hasRecentSuccessOutside：仅当其它模型窗口期内成功才 true', async () => {
+    const r = makeRedis();
+    const svc = new RoutingMetricsService(r as any, cfg());
+    const now = Date.now();
+    // 其它模型 1s 前成功 → true
+    r.client.hgetall.mockResolvedValue({ m2: String(now - 1000), m: String(now - 500) });
+    await expect(svc.hasRecentSuccessOutside('ch1', 'm')).resolves.toBe(true);
+    // 只有本模型的成功记录 → false
+    r.client.hgetall.mockResolvedValue({ m: String(now - 500) });
+    await expect(svc.hasRecentSuccessOutside('ch1', 'm')).resolves.toBe(false);
+    // 成功记录旧于窗口 → false
+    r.client.hgetall.mockResolvedValue({ m2: String(now - 999_999) });
+    await expect(svc.hasRecentSuccessOutside('ch1', 'm')).resolves.toBe(false);
+    // 无标记 → false
+    r.client.hgetall.mockResolvedValue({});
+    await expect(svc.hasRecentSuccessOutside('ch1', 'm')).resolves.toBe(false);
+  });
+
+  it('hasRecentSuccessOutside：Redis 故障 → false（保守按渠道级失败计数）', async () => {
+    const r = makeRedis();
+    const svc = new RoutingMetricsService(r as any, cfg());
+    r.client.hgetall.mockRejectedValue(new Error('connection refused'));
+    await expect(svc.hasRecentSuccessOutside('ch1', 'm')).resolves.toBe(false);
   });
 
   it('counts empty-output successes as invalid replies', async () => {

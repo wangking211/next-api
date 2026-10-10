@@ -40,6 +40,7 @@ function makeSupport(billing: BillingService) {
     billing,
     {} as unknown as ChannelHealthService,
     {} as unknown as RoutingMetricsService,
+    { get: (_k: string, d?: string) => d } as unknown as ConfigService,
   );
 }
 
@@ -148,9 +149,7 @@ describe('ExecSupportService.shareContext（共享分成上下文，行为特征
     it('覆盖为负钳制：-5 → 0', () => {
       const support = makeSupport(makeBilling());
       const channel = makeChannel({ shareFeeBps: -5 });
-      expect(share(support, channel, 'caller-1')).toEqual(
-        expect.objectContaining({ feeBps: 0 }),
-      );
+      expect(share(support, channel, 'caller-1')).toEqual(expect.objectContaining({ feeBps: 0 }));
     });
 
     it('非整数覆盖向下取整：1500.9 → 1500', () => {

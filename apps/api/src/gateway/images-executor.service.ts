@@ -98,6 +98,10 @@ export class ImagesExecutorService {
     const closeTracker = trackClientClose(res, () => upstreamAbort.abort());
 
     for (let i = 0; i < channels.length; i++) {
+      // 整请求 deadline：跨故障转移共享总预算，耗尽即 504
+      if (this.support.deadlineLeft(startedAt) <= 0) {
+        return this.support.respondDeadline(res, err);
+      }
       const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
       // 模型映射：对外规范名 → 上游真实名。
       // n 必须用截断后的值写回：否则客户端传 n=100 时预授权/落账按 10 张算、
@@ -125,6 +129,8 @@ export class ImagesExecutorService {
           model: upstreamModel,
           body: upstreamBody,
           signal: upstreamAbort.signal,
+          // 单次尝试超时：默认 120s，且不超过整请求剩余预算
+          timeoutMs: this.support.attemptTimeoutMs(startedAt),
         });
         const perCall = pricePerCall > 0;
         const usage = result.usage ?? {

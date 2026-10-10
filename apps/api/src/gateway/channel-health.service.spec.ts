@@ -13,7 +13,11 @@ function makeService(threshold = 3, webhook?: string) {
   };
   const config = {
     get: (k: string, d?: string) =>
-      k === 'CHANNEL_FAILURE_THRESHOLD' ? String(threshold) : k === 'ALERT_WEBHOOK_URL' ? webhook : d,
+      k === 'CHANNEL_FAILURE_THRESHOLD'
+        ? String(threshold)
+        : k === 'ALERT_WEBHOOK_URL'
+          ? webhook
+          : d,
   } as unknown as ConfigService;
   const service = new ChannelHealthService(prisma as unknown as PrismaService, config);
   return { service, prisma };
@@ -31,10 +35,37 @@ describe('ChannelHealthService', () => {
 
   it('does not disable below threshold', async () => {
     const { service, prisma } = makeService(3);
-    prisma.channel.update.mockResolvedValue({ id: 'c1', failureCount: 2, status: ChannelStatus.ENABLED });
+    prisma.channel.update.mockResolvedValue({
+      id: 'c1',
+      failureCount: 2,
+      status: ChannelStatus.ENABLED,
+    });
     await service.recordFailure('c1', 'boom');
     // 第二次 update（禁用）不应发生
     expect(prisma.channel.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('count:false 只记失败现场，不累计计数也不触发禁用（模型级故障豁免）', async () => {
+    const { service, prisma } = makeService(3);
+    // 假设行上已有 5 次失败（≥阈值）——不计数时既不该递增也不该禁用
+    prisma.channel.update.mockResolvedValue({
+      id: 'c1',
+      failureCount: 5,
+      status: ChannelStatus.ENABLED,
+    });
+    await service.recordFailure('c1', 'model-scoped boom', { count: false });
+    expect(prisma.channel.update).toHaveBeenCalledTimes(1);
+    expect(prisma.channel.update).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: expect.not.objectContaining({ failureCount: expect.anything() }),
+    });
+    expect(prisma.channel.update).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: expect.objectContaining({
+        lastErrorAt: expect.any(Date),
+        lastErrorMsg: 'model-scoped boom',
+      }),
+    });
   });
 
   it('auto-disables at threshold', async () => {
@@ -111,7 +142,8 @@ describe('ChannelHealthService', () => {
       errorSpy.mockRestore();
     });
 
-    const loggedCalls = () => [...warnSpy.mock.calls, ...errorSpy.mock.calls].map((c) => String(c[0]));
+    const loggedCalls = () =>
+      [...warnSpy.mock.calls, ...errorSpy.mock.calls].map((c) => String(c[0]));
 
     it('recordSuccess: 清零写库失败时记录 warn（含 channelId 与错误信息）且不抛出', async () => {
       const { service, prisma } = makeService();

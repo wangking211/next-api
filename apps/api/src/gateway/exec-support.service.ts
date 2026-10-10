@@ -4,11 +4,14 @@
  * - 余额与倍率预读：balanceGuards（同请求多候选共享缓存，避免重复查库）
  * - 能力校验：checkCapabilities（目录声明 capabilities 时，请求所需能力必须被覆盖）
  * - 会话粘性键：buildStickyKey（显式 session id 优先，否则 用户+prompt 前缀，保住上游 prompt cache）
- * - 上游失败统一处理：handleUpstreamFailure（错误分类 → 健康度/路由指标 → 可转移返回 continue）
+ * - 上游失败统一处理：classifyUpstreamFailure（纯分类）→ recordOutcomes（健康度/路由指标，
+ *   含模型级故障豁免与拒答不计失败）→ handleUpstreamFailure（可转移返回 continue）
+ * - 整请求 deadline：deadlineLeft / attemptTimeoutMs / respondDeadline（跨故障转移共享总预算）
  * 共享分成口径的行为特征化见 gateway.share-context.spec.ts。
  */
 import { Injectable } from '@nestjs/common';
 import type { Response } from 'express';
+import { ConfigService } from '@nestjs/config';
 import { Channel, ChannelOwnerType, ChannelShareMode } from '@prisma/client';
 import { BillingService } from '../billing/billing.service';
 import type { ChannelPricing } from '../billing/pricing.util';
@@ -20,23 +23,29 @@ import { RoutingMetricsService } from './routing-metrics.service';
 import { detectRequiredCapabilities } from './capabilities';
 import { settleInBackground } from './settle.util';
 import type { GatewayRequest, UpstreamError } from './types';
+import { DEFAULT_UPSTREAM_TIMEOUT_MS } from './providers/stream.util';
 import {
   upstreamErrorMessage,
-  upstreamErrorSignal,
-  isModelAccessDenied,
-  isRateLimited,
-  isRefusal,
+  classifyUpstreamFailure,
+  type FailureClass,
 } from './upstream-error.util';
 
 @Injectable()
 export class ExecSupportService {
+  /** 整请求 deadline：跨故障转移共享的总预算（毫秒）；<=0 表示关闭 */
+  readonly deadlineMs: number;
+
   constructor(
     private readonly resolver: ChannelResolverService,
     private readonly usage: UsageService,
     private readonly billing: BillingService,
     private readonly health: ChannelHealthService,
     private readonly metrics: RoutingMetricsService,
-  ) {}
+    config: ConfigService,
+  ) {
+    const d = Number(config.get<string>('GATEWAY_DEADLINE_MS', '300000'));
+    this.deadlineMs = Number.isFinite(d) && d > 0 ? d : 0;
+  }
 
   /**
    * 该渠道是否是「他人上架的共享渠道」——决定收费与分成口径。
@@ -125,7 +134,70 @@ export class ExecSupportService {
   }
 
   /**
-   * 上游失败统一处理（chat 与 embeddings 共用）：错误分类 → 记录健康度/路由指标 →
+   * 按分类写健康度与路由指标——handleUpstreamFailure 与流式中断（响应头已发出、
+   * 无法故障转移）两条路径共用同一口径：
+   * - limited → 记 429 现场（不计失败）+ (渠道,模型) 冷却（含 Retry-After 退避）
+   * - transient → 渠道失败计数 + (渠道,模型) 熔断；模型级故障豁免只记现场不计数
+   * - modelDenied → 只冷却该 (渠道,模型) 组合
+   * - authFault → 记路由指标（连带熔断）；refusal → 只降质量分，不计失败、不熔断
+   */
+  async recordOutcomes(
+    channel: Channel,
+    model: string,
+    cls: FailureClass,
+    args: {
+      latencyMs: number;
+      errorMessage: string;
+      /** 显式状态码；缺省用分类里的上游状态 */
+      status?: number;
+      completionTokens?: number;
+      totalTokens?: number;
+    },
+  ): Promise<void> {
+    const status = args.status ?? cls.status;
+    const metric = {
+      latencyMs: args.latencyMs,
+      status,
+      errorMessage: args.errorMessage,
+      ...(args.completionTokens !== undefined ? { completionTokens: args.completionTokens } : {}),
+      ...(args.totalTokens !== undefined ? { totalTokens: args.totalTokens } : {}),
+    };
+    if (cls.limited) {
+      await this.health.recordRateLimited(channel.id, args.errorMessage);
+      await this.metrics.record(channel.id, model, 'rate_limited', {
+        ...metric,
+        retryAfterMs: cls.retryAfterMs,
+      });
+      return;
+    }
+    if (cls.transient) {
+      const scoped = await this.isModelScopedFailure(channel, model);
+      await this.health.recordFailure(channel.id, args.errorMessage, { count: !scoped });
+      await this.metrics.record(channel.id, model, 'error', metric);
+      return;
+    }
+    if (cls.modelDenied) {
+      await this.metrics.record(channel.id, model, 'model_denied', metric);
+      return;
+    }
+    if (cls.authFault || cls.refusal) {
+      await this.metrics.record(channel.id, model, cls.authFault ? 'error' : 'refused', metric);
+    }
+  }
+
+  /**
+   * 模型级故障豁免：渠道配置了其它模型且它们在窗口期内成功过 → 当前失败只该冷却
+   * (渠道,模型)，不该累计渠道 failureCount（否则一条坏模型会连坐禁用整条渠道）。
+   * 单模型渠道（或未配置模型列表）：模型故障 ≡ 渠道故障，维持原计数。
+   */
+  private async isModelScopedFailure(channel: Channel, model: string): Promise<boolean> {
+    const others = (channel.models ?? []).filter((m) => m !== model);
+    if (!others.length) return false;
+    return this.metrics.hasRecentSuccessOutside(channel.id, model);
+  }
+
+  /**
+   * 上游失败统一处理（chat 与 embeddings/images/video 共用）：分类 → 记录健康度/路由指标 →
    * 可故障转移则返回 'continue'（调用方试下一家），否则落用量日志并写出错误响应。
    */
   async handleUpstreamFailure(
@@ -149,47 +221,22 @@ export class ExecSupportService {
     },
   ): Promise<'continue' | 'responded'> {
     const latencyMs = Date.now() - ctx.attemptStart;
-    const signal = upstreamErrorSignal(e) || e.message;
     // 错误分类（客户端 4xx 不计健康度，防止被恶意请求自动禁用渠道）：
-    //  限流/超限 → 冷却退避且不累计失败；5xx/连接故障 → 健康度失败计数；
-    //  上游鉴权失败(401) → 只降路由质量分；拒答/内容过滤 → 只降质量分
-    const limited = isRateLimited(e);
-    const transient = e.retryable && !limited;
-    const authFault = !limited && e.status === 401;
-    const modelDenied = !limited && !authFault && isModelAccessDenied(e);
-    const refusal = !limited && !transient && !authFault && !modelDenied && isRefusal(e);
-    if (limited) {
-      await this.health.recordRateLimited(ctx.channel.id, signal);
-      await this.metrics.record(ctx.channel.id, ctx.model, 'rate_limited', {
-        latencyMs,
-        status: e.status,
-        errorMessage: signal,
-        // 上游明确要求的等待时长：冷却取 max(指数退避, 该值)（routing-metrics 内封顶）
-        retryAfterMs: e.retryAfterMs,
-      });
-    } else if (transient) {
-      await this.health.recordFailure(ctx.channel.id, e.message);
-      await this.metrics.record(ctx.channel.id, ctx.model, 'error', {
-        latencyMs,
-        status: e.status,
-        errorMessage: signal,
-      });
-    } else if (modelDenied) {
-      // 无权访问该模型：只记 (渠道×模型) 指标并触发该组合的冷却，不计渠道健康度
-      await this.metrics.record(ctx.channel.id, ctx.model, 'model_denied', {
-        latencyMs,
-        status: e.status,
-        errorMessage: signal,
-      });
-    } else if (authFault || refusal) {
-      await this.metrics.record(ctx.channel.id, ctx.model, authFault ? 'error' : 'refused', {
-        latencyMs,
-        status: e.status,
-        errorMessage: signal,
-      });
+    //  限流/超限 → 冷却退避且不累计失败；5xx/连接故障 → 健康度失败计数（模型级故障豁免）；
+    //  上游鉴权失败(401) → 只降路由质量分；拒答/内容过滤 → 只降质量分，且换下一家再试
+    const cls = classifyUpstreamFailure(e);
+    await this.recordOutcomes(ctx.channel, ctx.model, cls, {
+      latencyMs,
+      errorMessage: cls.signal,
+    });
+    // 故障转移：上游故障、限流/超限、鉴权失效、无权访问该模型、拒答都换下一家试
+    //（拒答换供应商常有不同审核宽严，换一家可能正常出量；全部候选才返回错误）
+    if (
+      (cls.transient || cls.limited || cls.authFault || cls.modelDenied || cls.refusal) &&
+      ctx.hasMore
+    ) {
+      return 'continue';
     }
-    // 故障转移：上游故障、限流/超限、鉴权失效、无权访问该模型都要换下一家试
-    if ((transient || limited || authFault || modelDenied) && ctx.hasMore) return 'continue';
     // 错误响应同样不该等落库：落账转后台结算（allSettled 兜底，不产生未处理拒绝）
     settleInBackground([
       this.usage.record({
@@ -213,7 +260,7 @@ export class ExecSupportService {
         multiplierSource: ctx.multiplierSource,
       }),
     ]);
-    if (modelDenied) {
+    if (cls.modelDenied) {
       // 所有候选上游都无该模型权限：返回明确的 model_not_found，而非透传上游 403 文案
       ctx.res
         .status(404)
@@ -229,6 +276,37 @@ export class ExecSupportService {
     }
     ctx.res.status(e.status || 502).json(ctx.errorBody(upstreamErrorMessage(e), 'upstream_error'));
     return 'responded';
+  }
+
+  /**
+   * 整请求剩余预算（毫秒）：所有候选尝试共享的总时长上限。
+   * deadline 关闭（GATEWAY_DEADLINE_MS<=0）→ Infinity。流式响应头发出后由空闲超时接管，
+   * 不再受此限（避免砍掉正常进行中的长流）。
+   */
+  deadlineLeft(startedAt: number): number {
+    if (!this.deadlineMs) return Number.POSITIVE_INFINITY;
+    return Math.max(0, this.deadlineMs - (Date.now() - startedAt));
+  }
+
+  /** 单次尝试的上游超时：默认 120s，且不超过整请求剩余预算（故障转移越多，单次窗口越紧） */
+  attemptTimeoutMs(startedAt: number): number {
+    return Math.min(DEFAULT_UPSTREAM_TIMEOUT_MS, this.deadlineLeft(startedAt));
+  }
+
+  /** 预算耗尽 → 504（错误体形态由调用方按 openai/anthropic 协议提供） */
+  respondDeadline(
+    res: Response,
+    err: (message: string, type?: string, code?: string | null) => any,
+  ): void {
+    res
+      .status(504)
+      .json(
+        err(
+          `Request deadline exceeded: total gateway budget of ${this.deadlineMs}ms spent across attempts.`,
+          'upstream_error',
+          'gateway_timeout',
+        ),
+      );
   }
 
   /**

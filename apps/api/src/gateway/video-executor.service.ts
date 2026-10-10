@@ -118,6 +118,10 @@ export class VideoExecutorService {
     const closeTracker = trackClientClose(res, () => upstreamAbort.abort());
 
     for (let i = 0; i < channels.length; i++) {
+      // 整请求 deadline：跨故障转移共享总预算，耗尽即 504
+      if (this.support.deadlineLeft(startedAt) <= 0) {
+        return this.support.respondDeadline(res, err);
+      }
       const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
       const upstreamModel = upstreamModelName ?? model;
       const upstreamBody = upstreamModel === model ? body : { ...body, model: upstreamModel };
@@ -142,6 +146,8 @@ export class VideoExecutorService {
           model: upstreamModel,
           body: upstreamBody,
           signal: upstreamAbort.signal,
+          // 单次尝试超时：默认 120s，且不超过整请求剩余预算
+          timeoutMs: this.support.attemptTimeoutMs(startedAt),
         });
         const usage = result.usage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
         const perCall = pricePerCall > 0;

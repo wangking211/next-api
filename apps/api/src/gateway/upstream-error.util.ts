@@ -1,6 +1,6 @@
 /** 上游错误提取与分类（纯函数）：消息脱敏 + 限流/拒答/模型无权访问特征判定（执行内核与各执行器共用） */
 import { redactSecrets } from '../common/redact.util';
-import type { UpstreamError } from './types';
+import { UpstreamError } from './types';
 
 /** 仅提取上游错误消息，避免把上游原始错误体（可能含内部细节）原样透传给客户端 */
 export function upstreamErrorMessage(e: UpstreamError): string {
@@ -54,6 +54,55 @@ const MODEL_ACCESS_RE =
 export function isModelAccessDenied(e: UpstreamError): boolean {
   if (e.status !== 403 && e.status !== 404) return false;
   return MODEL_ACCESS_RE.test(upstreamErrorSignal(e));
+}
+
+/** 上游失败分类结果（handleUpstreamFailure 与流式中断记录共用一套口径） */
+export interface FailureClass {
+  /** 限流/超限：冷却退避，不累计渠道失败 */
+  limited: boolean;
+  /** 可重试故障（5xx / 网络中断）：累计渠道失败与 (渠道,模型) 熔断 */
+  transient: boolean;
+  /** 上游鉴权失效（401）：只降路由质量指标 */
+  authFault: boolean;
+  /** 无权访问该模型（403/404 特征）：只冷却该 (渠道,模型) 组合 */
+  modelDenied: boolean;
+  /** 拒答/内容过滤：只降质量分；文案特征优先于状态码（5xx+拒答文案不计渠道失败） */
+  refusal: boolean;
+  /** 可判定错误文本：UpstreamError 取 message+code+type，普通 Error 取 message */
+  signal: string;
+  /** 上游状态码；非 UpstreamError 为 undefined */
+  status?: number;
+  /** 上游 Retry-After（毫秒），仅限流路径有意义 */
+  retryAfterMs?: number;
+}
+
+/**
+ * 上游失败分类（纯函数，无 IO）：一次判定供故障转移、健康度与路由指标共用。
+ * 优先级：限流 > 鉴权失效 > 模型无权 > 拒答 > 可重试故障——
+ * 拒答文案特征压过状态码，防止「503 + content_policy 文案」被当成普通故障
+ * 累计 failureCount 打死渠道（拒答只降质量分，且可转移到下一家上游再试）。
+ */
+export function classifyUpstreamFailure(e: unknown): FailureClass {
+  const ue = e instanceof UpstreamError ? e : null;
+  const status = ue?.status;
+  const signal =
+    (ue && upstreamErrorSignal(ue)) || String((e as Error)?.message ?? '') || 'upstream error';
+  const limited = ue ? isRateLimited(ue) : false;
+  const authFault = !!ue && !limited && status === 401;
+  const modelDenied = !!ue && !limited && !authFault && isModelAccessDenied(ue);
+  const refusal = !limited && !authFault && !modelDenied && !!ue && isRefusal(ue);
+  // 普通 Error（网络中断/解码失败）与未命中任何特征的 UpstreamError 按可重试故障处理
+  const transient = !limited && !refusal && (!ue || ue.retryable);
+  return {
+    limited,
+    transient,
+    authFault,
+    modelDenied,
+    refusal,
+    signal,
+    status,
+    retryAfterMs: ue?.retryAfterMs,
+  };
 }
 
 /**

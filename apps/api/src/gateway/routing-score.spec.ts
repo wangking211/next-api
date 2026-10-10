@@ -4,6 +4,7 @@ import {
   applySticky,
   fnv1a,
   scoreCandidates,
+  weightedFirstPick,
 } from './routing-score';
 import type { RouteMetrics } from './routing-metrics.service';
 
@@ -90,9 +91,7 @@ describe('scoreCandidates', () => {
       ],
       'STABLE',
     );
-    expect(s.get('healthy')!.terms.stability).toBeGreaterThan(
-      s.get('sick')!.terms.stability,
-    );
+    expect(s.get('healthy')!.terms.stability).toBeGreaterThan(s.get('sick')!.terms.stability);
     expect(s.get('healthy')!.score).toBeGreaterThan(s.get('sick')!.score);
   });
 
@@ -169,8 +168,7 @@ describe('fnv1a', () => {
 
 describe('applySticky', () => {
   const mk = (id: string, tier = 1, priority = 0) => ({ id, tier, priority });
-  const scores = (...pairs: [string, number][]) =>
-    new Map(pairs.map(([id, s]) => [id, sc(s)]));
+  const scores = (...pairs: [string, number][]) => new Map(pairs.map(([id, s]) => [id, sc(s)]));
   const keyWithIdx = (mod: number, idx: number) => {
     for (let i = 0; i < 500; i++) {
       const k = `k${i}`;
@@ -206,5 +204,80 @@ describe('applySticky', () => {
 
   it('returns null for fewer than two candidates', () => {
     expect(applySticky([mk('a')], scores(['a', 1]), 'any', 0.8)).toBeNull();
+  });
+});
+
+describe('weightedFirstPick（同层首选权重抽签，P ∝ weight·exp(score/τ)）', () => {
+  const c = (id: string, weight = 1, tier = 1, priority = 0) => ({ id, tier, priority, weight });
+
+  it('tau<=0 / 单候选 / 同层仅一个候选 → 不动（返回 null）', () => {
+    const scores = new Map([
+      ['a', sc(1)],
+      ['b', sc(1)],
+    ]);
+    const two = [c('a'), c('b')];
+    expect(weightedFirstPick(two, scores, 0)).toBeNull();
+    expect(weightedFirstPick(two, scores, -1)).toBeNull();
+    expect(weightedFirstPick([c('a')], new Map([['a', sc(1)]]), 0.1)).toBeNull();
+    const split = [c('a', 1, 1, 10), c('b', 1, 1, 0)]; // 异 priority → 各自单候选层
+    expect(weightedFirstPick(split, scores, 0.1)).toBeNull();
+    expect(split[0].id).toBe('a');
+  });
+
+  it('等 gumbel 时高分守首位；极端抽签可把同层低分者抽中，其余相对顺序不变', () => {
+    const scores = new Map([
+      ['a', sc(0.9)],
+      ['b', sc(0.6)],
+      ['c', sc(0.2)],
+    ]);
+    const even = jest.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      const ranked1 = [c('a'), c('b'), c('c')];
+      expect(weightedFirstPick(ranked1, scores, 0.1)).toBeNull();
+      expect(ranked1.map((x) => x.id)).toEqual(['a', 'b', 'c']);
+    } finally {
+      even.mockRestore();
+    }
+    const spy = jest.spyOn(Math, 'random');
+    spy.mockReturnValueOnce(0.01).mockReturnValueOnce(0.99999).mockReturnValueOnce(0.01);
+    try {
+      const ranked2 = [c('a'), c('b'), c('c')];
+      const hit = weightedFirstPick(ranked2, scores, 0.1);
+      expect(hit?.id).toBe('b');
+      expect(ranked2.map((x) => x.id)).toEqual(['b', 'a', 'c']);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('大权重压过中等分差：100:1 且等 gumbel → 低分高权重者中签', () => {
+    const spy = jest.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      const ranked = [c('poor', 1), c('heavy', 100)];
+      const scores = new Map([
+        ['poor', sc(0.6)],
+        ['heavy', sc(0.4)],
+      ]);
+      const hit = weightedFirstPick(ranked, scores, 0.1);
+      expect(hit?.id).toBe('heavy');
+      expect(ranked.map((x) => x.id)).toEqual(['heavy', 'poor']);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('同分时按权重比例分布：9:1 → 轻方仅少数中签（Gumbel-max 精确比例）', () => {
+    const scores = new Map([
+      ['heavy', sc(0.5)],
+      ['light', sc(0.5)],
+    ]);
+    let lightWins = 0;
+    for (let i = 0; i < 200; i++) {
+      const ranked = [c('heavy', 9), c('light', 1)];
+      if (weightedFirstPick(ranked, scores, 0.1)) lightWins++;
+    }
+    // 期望 light ≈ 10%（二项分布 n=200, p=0.1：μ=20, σ≈4.2）→ 取宽界限防抖
+    expect(lightWins).toBeGreaterThan(3);
+    expect(lightWins).toBeLessThan(50);
   });
 });

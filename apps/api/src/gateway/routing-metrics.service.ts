@@ -138,6 +138,11 @@ export class RoutingMetricsService {
     return `route:c:${channelId}:${model}`;
   }
 
+  /** 渠道级近期成功标记：字段 = 模型名，值 = 最近一次成功时间戳（判断渠道是否仍活着） */
+  private okKey(channelId: string): string {
+    return `route:ok:${channelId}`;
+  }
+
   /** 每日限额计数 key（按自然日滚动，跨天自动失效） */
   private dayKey(channelId: string, now: number): string {
     return `route:d:${channelId}:${Math.floor((now + this.dayOffsetMs) / 86_400_000)}`;
@@ -200,6 +205,9 @@ export class RoutingMetricsService {
         addDaily(m);
         m.pexpire(cKey, this.circTtlMs);
         m.hset(cKey, 'cf', 0, 'cdexp', 0, 'r429', 0);
+        // 渠道级成功标记（模型 → 时刻）：故障时据此判断是否模型级故障（见 hasRecentSuccessOutside）
+        m.hset(this.okKey(channelId), model, now);
+        m.pexpire(this.okKey(channelId), this.winTtlMs);
         await m.exec();
         return;
       }
@@ -255,6 +263,34 @@ export class RoutingMetricsService {
     } catch (e) {
       this.brokenUntil = Date.now() + this.retryMs;
       this.logger.warn(`路由指标写入失败（退避 ${this.retryMs}ms）: ${(e as Error)?.message}`);
+    }
+  }
+
+  /**
+   * 渠道的**其它**模型近期是否有过成功——用于区分「模型级故障」与「渠道级故障」。
+   * true = 渠道仍活着（别的模型在正常出量），当前失败只该冷却 (渠道,模型)，不该累计
+   * 渠道 failureCount（否则一条坏模型会把整条渠道连坐禁用）。
+   * Redis 故障/退避期 → false：保守按渠道级失败计数，维持旧的自我保护行为。
+   */
+  async hasRecentSuccessOutside(channelId: string, model: string): Promise<boolean> {
+    if (Date.now() < this.brokenUntil) return false;
+    try {
+      const h = (await this.redis.client.hgetall(this.okKey(channelId))) as Record<
+        string,
+        string
+      > | null;
+      if (!h) return false;
+      const cutoff = Date.now() - this.windowMs;
+      for (const [m, v] of Object.entries(h)) {
+        if (m !== model && Number(v) >= cutoff) return true;
+      }
+      return false;
+    } catch (e) {
+      this.brokenUntil = Date.now() + this.retryMs;
+      this.logger.warn(
+        `渠道成功标记读取失败（退避 ${this.retryMs}ms，故障按渠道级计数）: ${(e as Error)?.message}`,
+      );
+      return false;
     }
   }
 

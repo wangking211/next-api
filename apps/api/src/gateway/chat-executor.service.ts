@@ -17,7 +17,7 @@ import { flattenMessages, extractAssistantText } from '../usage/content.util';
 import { ChannelHealthService } from './channel-health.service';
 import { RoutingMetricsService } from './routing-metrics.service';
 import { ProviderRegistry } from './providers/provider.registry';
-import { upstreamErrorMessage } from './upstream-error.util';
+import { classifyUpstreamFailure, upstreamErrorMessage } from './upstream-error.util';
 import { ChannelResolverService } from './channel-resolver.service';
 import { GroupsService } from '../groups/groups.service';
 import { ExecSupportService } from './exec-support.service';
@@ -127,6 +127,10 @@ export class ChatExecutorService {
     const closeTracker = trackClientClose(res, () => upstreamAbort.abort());
 
     for (let i = 0; i < channels.length; i++) {
+      // 整请求 deadline：跨故障转移共享总预算，耗尽即 504（流头已发出的长流不受此限）
+      if (this.support.deadlineLeft(startedAt) <= 0) {
+        return this.support.respondDeadline(res, err);
+      }
       const { channel, apiKey: upstreamKey, upstreamModelName, pricing } = channels[i];
       // 模型映射：对外规范名 → 上游真实名（渠道×模型未配置则用规范名）
       const upstreamModel = upstreamModelName ?? model;
@@ -178,6 +182,8 @@ export class ChatExecutorService {
           model: upstreamModel,
           body: upstreamBody,
           signal: upstreamAbort.signal,
+          // 单次尝试超时：默认 120s，但不超过整请求剩余预算（留给后续候选转移的时间）
+          timeoutMs: this.support.attemptTimeoutMs(startedAt),
         });
         const usage = result.usage ?? this.estimateUsage(body, result.json);
         // TPM 回填：结算在 guard 的 finish 监听里按 实际−预估 校正
@@ -322,6 +328,7 @@ export class ChatExecutorService {
       for (const ev of translator.begin()) res.write(ev);
     }
     let errorMessage: string | null = null;
+    let streamError: unknown = null;
     let idleTimer: NodeJS.Timeout | null = null;
     const idleMs = meta.idleMs ?? 0;
     const clearIdle = () => {
@@ -350,6 +357,7 @@ export class ChatExecutorService {
         }
       }
     } catch (e: any) {
+      streamError = e;
       errorMessage = e?.message ?? 'stream interrupted';
     } finally {
       clearIdle();
@@ -395,15 +403,20 @@ export class ChatExecutorService {
     // 客户端主动断开不计入渠道健康度
     if (!clientClosed) {
       const latencyMs = Date.now() - meta.attemptStart;
-      if (errorMessage) {
+      if (streamError) {
+        // 响应头已发出、无法故障转移，但健康度/路由指标口径与故障转移路径一致：
+        // 中途 429 → rate_limited 不计失败；拒答 → refused 只降质量分；其余计失败（含模型级豁免）
         tasks.push(
-          this.health.recordFailure(meta.channel.id, errorMessage),
-          this.metrics.record(meta.channel.id, meta.model, 'error', {
-            latencyMs,
-            status: 500,
-            totalTokens: usage.totalTokens,
-            errorMessage,
-          }),
+          this.support.recordOutcomes(
+            meta.channel,
+            meta.model,
+            classifyUpstreamFailure(streamError),
+            {
+              latencyMs,
+              errorMessage: errorMessage ?? 'stream interrupted',
+              totalTokens: usage.totalTokens,
+            },
+          ),
         );
       } else {
         tasks.push(

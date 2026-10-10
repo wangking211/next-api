@@ -19,7 +19,7 @@ export interface ScoreWeights {
   stability: number;
   /** 质量：L1 人工分 + L2 被动信号 */
   quality: number;
-  /** 分流噪声：让 weight 真正生效（灰度/按比例分流） */
+  /** 分流噪声：同层候选打散（tie-break 随机化）；按比例分流由 weightedFirstPick 承担 */
   noise: number;
 }
 
@@ -76,9 +76,7 @@ function normalize(
   values: (number | null | undefined)[],
   opts: { higherBetter: boolean; unknown?: 'worst' | 'neutral' },
 ): number[] {
-  const finite = values.filter(
-    (v): v is number => typeof v === 'number' && Number.isFinite(v),
-  );
+  const finite = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
   if (!finite.length) return values.map(() => NEUTRAL);
   const min = Math.min(...finite);
   const max = Math.max(...finite);
@@ -100,8 +98,7 @@ export function scoreCandidates(
 ): Map<string, Scored> {
   const out = new Map<string, Scored>();
   if (!inputs.length) return out;
-  const weights =
-    (strategy && STRATEGY_WEIGHTS[strategy]) || STRATEGY_WEIGHTS[DEFAULT_STRATEGY];
+  const weights = (strategy && STRATEGY_WEIGHTS[strategy]) || STRATEGY_WEIGHTS[DEFAULT_STRATEGY];
 
   // 1) 价格（越便宜越好；未知成本 → 最差）
   const prices = normalize(
@@ -124,9 +121,7 @@ export function scoreCandidates(
   const latScore = normalize(avgLat, { higherBetter: false });
   const slowScore = normalize(slowRatio, { higherBetter: false });
   const tpsScore = normalize(tps, { higherBetter: true });
-  const speeds = inputs.map(
-    (_, k) => 0.6 * latScore[k] + 0.2 * slowScore[k] + 0.2 * tpsScore[k],
-  );
+  const speeds = inputs.map((_, k) => 0.6 * latScore[k] + 0.2 * slowScore[k] + 0.2 * tpsScore[k]);
 
   // 3) 稳定性：滑窗成功率拉普拉斯平滑（无数据恰好 = 0.5）
   const stabilities = inputs.map((i) => {
@@ -137,13 +132,14 @@ export function scoreCandidates(
 
   // 4) 质量 = L1 人工分 × 0.5 + L2 被动信号 × 0.5
   //    L2 = 有效回复率 0.6 + 平均输出长度偏离 0.4（空回复/拒答拉低有效率）
-  const qualityScores = normalize(inputs.map((i) => i.qualityScore), {
-    higherBetter: true,
-  });
+  const qualityScores = normalize(
+    inputs.map((i) => i.qualityScore),
+    {
+      higherBetter: true,
+    },
+  );
   const avgOut = normalize(
-    inputs.map((i) =>
-      i.metrics && i.metrics.outN > 0 ? i.metrics.outSum / i.metrics.outN : null,
-    ),
+    inputs.map((i) => (i.metrics && i.metrics.outN > 0 ? i.metrics.outSum / i.metrics.outN : null)),
     { higherBetter: true },
   );
   const quals = inputs.map((i, k) => {
@@ -157,9 +153,7 @@ export function scoreCandidates(
   });
 
   // 5) 分流噪声：指数竞速 gumbel = -ln(U)/weight（越小越好），weight 越大越占优
-  const gumbels = inputs.map(
-    (i) => -Math.log(Math.random() || 1e-9) / Math.max(i.weight, 1),
-  );
+  const gumbels = inputs.map((i) => -Math.log(Math.random() || 1e-9) / Math.max(i.weight, 1));
   const noises = normalize(gumbels, { higherBetter: false });
 
   for (let k = 0; k < inputs.length; k++) {
@@ -190,6 +184,47 @@ export function fnv1a(str: string): number {
     h = Math.imul(h, 0x01000193);
   }
   return h >>> 0;
+}
+
+/**
+ * 同层首选按权重抽签：P ∝ weight · exp(score/τ)（Gumbel-max 等价实现）。
+ *
+ * 让渠道 `weight`（UI 的「权重（同级负载）」）真正决定首个候选的流量分布——
+ * 同分时严格按权重比例分流（权重 100:1 ≈ 99% : 1%）；分数差仍可压过权重
+ * （τ 越小越偏向高分，ROUTING_WEIGHT_TAU≤0 关闭抽签、回退纯分数排序）。
+ * 只在与榜首同 (tier, priority) 的层内抽，抽中者前置（其余顺序不变 = 故障转移按分数）。
+ * 返回被前置的候选（未发生移动返回 null）。
+ */
+export function weightedFirstPick<
+  T extends { id: string; tier: number; priority: number; weight: number },
+>(ranked: T[], scores: Map<string, Scored>, tau: number): T | null {
+  if (!(tau > 0) || ranked.length < 2) return null;
+  let end = 1;
+  while (
+    end < ranked.length &&
+    ranked[end].tier === ranked[0].tier &&
+    ranked[end].priority === ranked[0].priority
+  ) {
+    end++;
+  }
+  if (end < 2) return null; // 同层仅一个候选，无处可抽
+  let bestIdx = 0;
+  let bestVal = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < end; i++) {
+    const score = scores.get(ranked[i].id)?.score ?? 0;
+    const u = Math.random(); // [0,1)：u=0 → g=-∞（自然落选）；u→1 → g→+∞
+    const g = -Math.log(-Math.log(u));
+    const val = score / tau + Math.log(Math.max(ranked[i].weight, 1)) + g;
+    if (val > bestVal) {
+      bestVal = val;
+      bestIdx = i;
+    }
+  }
+  if (bestIdx === 0) return null;
+  const pick = ranked[bestIdx];
+  for (let i = bestIdx; i > 0; i--) ranked[i] = ranked[i - 1];
+  ranked[0] = pick;
+  return pick;
 }
 
 /**

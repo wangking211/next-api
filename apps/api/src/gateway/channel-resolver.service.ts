@@ -21,7 +21,13 @@ import {
   deriveChannelPricing,
 } from '../billing/pricing.util';
 import { shareExhausted, shareUrgencyBonus } from './channel-share.util';
-import { DEFAULT_STRATEGY, applySticky, isRoutingStrategy, scoreCandidates } from './routing-score';
+import {
+  DEFAULT_STRATEGY,
+  applySticky,
+  isRoutingStrategy,
+  scoreCandidates,
+  weightedFirstPick,
+} from './routing-score';
 
 export interface RouteOptions {
   /** Key 级路由策略；缺省回退 ROUTING_STRATEGY 环境变量 */
@@ -48,6 +54,8 @@ export class ChannelResolverService {
   private readonly defaultStrategy: RoutingStrategy;
   private readonly stickyEnabled: boolean;
   private readonly stickyRatio: number;
+  /** 同层首选权重抽签温度（≤0 = 关闭，回退纯分数排序） */
+  private readonly pickTau: number;
   private readonly autoReenableMs: number;
   private readonly failureThreshold: number;
   private readonly debug: boolean;
@@ -67,6 +75,8 @@ export class ChannelResolverService {
     this.stickyEnabled = config.get<string>('ROUTING_STICKY', 'true') !== 'false';
     const r = Number(config.get<string>('ROUTING_STICKY_RATIO', '0.8'));
     this.stickyRatio = Number.isFinite(r) && r > 0 && r <= 1 ? r : 0.8;
+    const t = Number(config.get<string>('ROUTING_WEIGHT_TAU', '0.1'));
+    this.pickTau = Number.isFinite(t) && t > 0 ? t : 0;
     this.autoReenableMs =
       Number(config.get<string>('CHANNEL_AUTO_REENABLE_MS', '900000')) || 900000;
     this.failureThreshold = Number(config.get<string>('CHANNEL_FAILURE_THRESHOLD', '5')) || 5;
@@ -122,7 +132,9 @@ export class ChannelResolverService {
    *
    * 排序 = 硬分层 + 评分：tier（BYOK 优先）→ priority（人工指定）→ 五维评分降序。
    * 评分维度：价格 / 速度·性能 / 稳定性 / 质量（L1 人工分 + L2 被动信号）/ 分流噪声；
-   * 无指标时各维度中性回退，整体退化为「成本升序 + 加权随机」，与旧排序兼容。
+   * 同层首选再按权重抽签（P ∝ weight·exp(score/τ)，ROUTING_WEIGHT_TAU 控制，≤0 关闭），
+   * 让「权重（同级负载）」真正决定流量分布；无指标时各维度中性回退，整体退化为
+   * 「成本升序 + 加权抽签」，与旧排序兼容。
    */
   async resolve(
     userId: string,
@@ -241,6 +253,9 @@ export class ChannelResolverService {
         (scores.get(b.id)?.score ?? 0) - (scores.get(a.id)?.score ?? 0),
     );
 
+    // 同层首选按权重抽签（在粘性之前：粘性是保缓存的最后覆盖者）
+    const pickHit = this.pickTau > 0 ? weightedFirstPick(ranked, scores, this.pickTau) : null;
+
     const stickyHit =
       this.stickyEnabled && opts.stickyKey
         ? applySticky(ranked, scores, opts.stickyKey, this.stickyRatio)
@@ -256,6 +271,7 @@ export class ChannelResolverService {
               return `${c.id}${flag}(${(scores.get(c.id)?.score ?? 0).toFixed(3)})`;
             })
             .join(' > ') +
+          (pickHit ? ` | pick=${pickHit.id}` : '') +
           (stickyHit ? ` | sticky=${stickyHit.id}` : ''),
       );
     }

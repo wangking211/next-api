@@ -111,6 +111,7 @@ function setup() {
     billing as unknown as BillingService,
     health as unknown as ChannelHealthService,
     metrics as unknown as RoutingMetricsService,
+    config as unknown as ConfigService,
   );
   const executor = new ChatExecutorService(
     resolver as unknown as ChannelResolverService,

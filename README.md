@@ -4,13 +4,13 @@
 
 ## 技术栈
 
-| 层 | 选型 |
-| --- | --- |
-| 后端 | NestJS 10 + Prisma 6 + TypeScript |
-| 前端 | React 18 + Vite + Ant Design + TanStack Query |
-| 数据库 | PostgreSQL 16 |
-| 缓存/限流 | Redis 7 |
-| 包管理 | pnpm workspace (monorepo) |
+| 层        | 选型                                          |
+| --------- | --------------------------------------------- |
+| 后端      | NestJS 10 + Prisma 6 + TypeScript             |
+| 前端      | React 18 + Vite + Ant Design + TanStack Query |
+| 数据库    | PostgreSQL 16                                 |
+| 缓存/限流 | Redis 7                                       |
+| 包管理    | pnpm workspace (monorepo)                     |
 
 ## 目录结构
 
@@ -73,71 +73,71 @@ pnpm cleanup             # 执行清理
 - [x] **P9** Gemini 适配器：Google AI 原生协议双向转换（含流式与图片），同时支持 `\r\n` SSE 分隔
 - [x] **P10** 渠道异常与操作审计：连续失败阈值自动禁用 + 告警 webhook、全局审计拦截器、管理员审计查询
 - [x] **P11** 官网首页与登录页：公开落地页（Hero/数据条/特性/四步上手/模型定价表）、分栏品牌登录页、设计令牌与 SEO 元数据、登录后 `?redirect=` 回跳、404 页面
-- [x] **P12** 智能路由（评分制）：五维评分（价格/速度/稳定性/质量/分流噪声）+ 策略权重、模型级熔断冷却与半开恢复、429/配额特征识别与指数退避、渠道每日限额排除、会话粘性、L1 质量分与 L2 被动信号（详见「智能路由」章节）
+- [x] **P12** 智能路由（评分制）：五维评分（价格/速度/稳定性/质量/分流噪声）+ 策略权重、同层首选按权重抽签、模型级熔断冷却与半开恢复、429/配额特征识别与指数退避、渠道每日限额排除、会话粘性、拒答可故障转移、整请求 deadline、L1 质量分与 L2 被动信号（详见「智能路由」章节）
 - [x] **P13** 在线充值：JAIPay 聚合微信/支付宝（PC 扫码 / 手机收银台）、实时汇率折算（可固定覆盖 + 缓存/兜底）、下单与订单轮询、回调 MD5 验签 + 幂等入账、金额核对、充值订单列表
 
 ## API 一览（当前）
 
-| 方法 | 路径 | 说明 | 权限 |
-| --- | --- | --- | --- |
-| GET | `/api/health` | 健康检查（DB/Redis） | 公开 |
-| GET | `/api/config` | 公共配置（积分汇率等） | 公开 |
-| GET | `/api/public/models` | 落地页模型定价表（启用中的模型目录 + provider 列表，价格 `$ / 1M tokens`） | 公开 |
-| GET | `/api/public/stats` | 落地页数据条（模型数 / 提供商数 / 启用渠道数 / 协议覆盖） | 公开 |
-| POST | `/api/auth/register` | 注册 | 公开 |
-| POST | `/api/auth/login` | 登录 | 公开 |
-| GET | `/api/auth/me` | 当前用户 | 登录 |
-| GET/POST | `/api/keys` | 列出/创建平台 key | 登录 |
-| PATCH/DELETE | `/api/keys/:id` | 更新/删除 key | 登录 |
-| GET | `/api/channels` | 渠道列表（分页+过滤：`name/provider/status/ownerType/model`） | 登录（管理员可见全部/按归属过滤） |
-| GET | `/api/channels/available-models` | 当前用户可用模型（按渠道分组） | 登录 |
-| POST | `/api/channels` | 创建渠道 | 登录（PLATFORM 仅管理员） |
-| POST | `/api/channels/:id/test` | 渠道连通性测试（传 `models` 批量，缺省测试该渠道全部模型） | 属主或管理员 |
-| POST | `/api/channels/test-connection` | 测试未保存的渠道配置（新增/编辑弹窗用，支持 `models` 批量） | 登录 |
-| POST | `/api/channels/fetch-models` | 拉取上游可用模型列表（OpenAI/Anthropic/Gemini 协议 `/models`，Base URL 漏填 `/v1` 自动回退；仅传 `channelId` 时复用已存配置） | 登录 |
-| PATCH/DELETE | `/api/channels/:id` | 更新/删除渠道 | 属主或管理员 |
-| GET | `/api/models` | 模型目录 | 登录 |
-| POST/PATCH/DELETE | `/api/models[/:id]` | 模型维护 | 管理员 |
-| GET | `/api/usage/summary` | 用量汇总（`?days=&scope=all`） | 登录 |
-| GET | `/api/usage/daily` | 按天用量 | 登录 |
-| GET | `/api/usage/analytics` | 使用分析（按模型/渠道/用户聚合） | 登录 |
-| GET | `/api/usage/logs` | 调用明细（分页+过滤：`model/status/stream/userId/channelId/q/from/to`） | 登录 |
-| GET | `/api/usage/logs/:id` | 调用详情（含输入/输出内容） | 登录 |
-| GET | `/api/billing/me` | 账户余额 | 登录 |
-| GET | `/api/billing/transactions` | 账单明细（分页） | 登录 |
-| POST | `/api/billing/redeem` | 兑换码充值 | 登录 |
-| POST | `/api/billing/pay/orders` | 创建在线充值订单（微信/支付宝，返回二维码内容/收银台链接） | 登录 |
-| GET | `/api/billing/pay/orders` | 我的充值订单（`?limit=`，最近 N 笔） | 登录 |
-| GET | `/api/billing/pay/orders/:id` | 单笔充值订单状态（前端轮询） | 登录（属主/管理员） |
-| GET | `/api/pay/jai/notify` | JAIPay 支付异步通知（GET Query，MD5 验签 + 幂等入账，返回 200） | 公开 |
-| GET | `/api/withdrawals` | 我的提现申请列表 | 登录 |
-| POST | `/api/withdrawals` | 发起提现（冻结余额，条件更新防并发超额） | 登录 |
-| GET | `/api/admin/withdrawals` | 提现申请列表（`?status=PENDING/APPROVED/REJECTED`） | 管理员 |
-| PATCH | `/api/admin/withdrawals/:id` | 审批提现（`{action:APPROVE\|REJECT}`；驳回原路退回余额，原子领取防重复退款） | 管理员 |
-| GET | `/api/agent/overview` | 代理总览（成员数/返点，管理员可传 `agentId`） | 代理/管理员 |
-| GET | `/api/agent/members` | 名下成员列表 | 代理/管理员 |
-| POST | `/api/agent/members` | 创建名下成员 | 代理/管理员 |
-| POST | `/api/agent/members/:id/recharge` | 用代理余额给成员充值 | 代理/管理员 |
-| GET | `/api/admin/users` | 用户列表（`?q=&role=&status=&groupId=&agentId=&balanceMin=&balanceMax=&createdFrom=&createdTo=&hasKeys=&hasChannels=&sortBy=createdAt\|balance\|username\|lastActiveAt&sortOrder=`；`lastActiveAt` 为物化列，`nulls:last`） | 管理员 |
-| GET | `/api/admin/users/export` | 按当前筛选导出用户 CSV（≤1 万行，含最后活跃时间） | 管理员 |
-| POST | `/api/admin/users/:id/recharge` | 充值 | 管理员 |
-| POST | `/api/admin/users/:id/adjust` | 余额调整（可负） | 管理员 |
-| GET | `/api/admin/users/:id/transactions` | 用户余额流水（分页，详情抽屉用） | 管理员 |
-| GET | `/api/admin/users/:id/keys` | 该用户的全部 Key（先校验用户存在；详情抽屉用） | 管理员 |
-| POST | `/api/admin/redeem-codes` | 批量生成兑换码 | 管理员 |
-| GET | `/api/admin/redeem-codes` | 兑换码列表（`?status=&batchId=`） | 管理员 |
-| PATCH | `/api/admin/redeem-codes/:id/disable` | 作废兑换码 | 管理员 |
-| GET | `/api/admin/audit-logs` | 操作审计（`?action=&actorId=`） | 管理员 |
+| 方法              | 路径                                  | 说明                                                                                                                                                                                                                        | 权限                              |
+| ----------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| GET               | `/api/health`                         | 健康检查（DB/Redis）                                                                                                                                                                                                        | 公开                              |
+| GET               | `/api/config`                         | 公共配置（积分汇率等）                                                                                                                                                                                                      | 公开                              |
+| GET               | `/api/public/models`                  | 落地页模型定价表（启用中的模型目录 + provider 列表，价格 `$ / 1M tokens`）                                                                                                                                                  | 公开                              |
+| GET               | `/api/public/stats`                   | 落地页数据条（模型数 / 提供商数 / 启用渠道数 / 协议覆盖）                                                                                                                                                                   | 公开                              |
+| POST              | `/api/auth/register`                  | 注册                                                                                                                                                                                                                        | 公开                              |
+| POST              | `/api/auth/login`                     | 登录                                                                                                                                                                                                                        | 公开                              |
+| GET               | `/api/auth/me`                        | 当前用户                                                                                                                                                                                                                    | 登录                              |
+| GET/POST          | `/api/keys`                           | 列出/创建平台 key                                                                                                                                                                                                           | 登录                              |
+| PATCH/DELETE      | `/api/keys/:id`                       | 更新/删除 key                                                                                                                                                                                                               | 登录                              |
+| GET               | `/api/channels`                       | 渠道列表（分页+过滤：`name/provider/status/ownerType/model`）                                                                                                                                                               | 登录（管理员可见全部/按归属过滤） |
+| GET               | `/api/channels/available-models`      | 当前用户可用模型（按渠道分组）                                                                                                                                                                                              | 登录                              |
+| POST              | `/api/channels`                       | 创建渠道                                                                                                                                                                                                                    | 登录（PLATFORM 仅管理员）         |
+| POST              | `/api/channels/:id/test`              | 渠道连通性测试（传 `models` 批量，缺省测试该渠道全部模型）                                                                                                                                                                  | 属主或管理员                      |
+| POST              | `/api/channels/test-connection`       | 测试未保存的渠道配置（新增/编辑弹窗用，支持 `models` 批量）                                                                                                                                                                 | 登录                              |
+| POST              | `/api/channels/fetch-models`          | 拉取上游可用模型列表（OpenAI/Anthropic/Gemini 协议 `/models`，Base URL 漏填 `/v1` 自动回退；仅传 `channelId` 时复用已存配置）                                                                                               | 登录                              |
+| PATCH/DELETE      | `/api/channels/:id`                   | 更新/删除渠道                                                                                                                                                                                                               | 属主或管理员                      |
+| GET               | `/api/models`                         | 模型目录                                                                                                                                                                                                                    | 登录                              |
+| POST/PATCH/DELETE | `/api/models[/:id]`                   | 模型维护                                                                                                                                                                                                                    | 管理员                            |
+| GET               | `/api/usage/summary`                  | 用量汇总（`?days=&scope=all`）                                                                                                                                                                                              | 登录                              |
+| GET               | `/api/usage/daily`                    | 按天用量                                                                                                                                                                                                                    | 登录                              |
+| GET               | `/api/usage/analytics`                | 使用分析（按模型/渠道/用户聚合）                                                                                                                                                                                            | 登录                              |
+| GET               | `/api/usage/logs`                     | 调用明细（分页+过滤：`model/status/stream/userId/channelId/q/from/to`）                                                                                                                                                     | 登录                              |
+| GET               | `/api/usage/logs/:id`                 | 调用详情（含输入/输出内容）                                                                                                                                                                                                 | 登录                              |
+| GET               | `/api/billing/me`                     | 账户余额                                                                                                                                                                                                                    | 登录                              |
+| GET               | `/api/billing/transactions`           | 账单明细（分页）                                                                                                                                                                                                            | 登录                              |
+| POST              | `/api/billing/redeem`                 | 兑换码充值                                                                                                                                                                                                                  | 登录                              |
+| POST              | `/api/billing/pay/orders`             | 创建在线充值订单（微信/支付宝，返回二维码内容/收银台链接）                                                                                                                                                                  | 登录                              |
+| GET               | `/api/billing/pay/orders`             | 我的充值订单（`?limit=`，最近 N 笔）                                                                                                                                                                                        | 登录                              |
+| GET               | `/api/billing/pay/orders/:id`         | 单笔充值订单状态（前端轮询）                                                                                                                                                                                                | 登录（属主/管理员）               |
+| GET               | `/api/pay/jai/notify`                 | JAIPay 支付异步通知（GET Query，MD5 验签 + 幂等入账，返回 200）                                                                                                                                                             | 公开                              |
+| GET               | `/api/withdrawals`                    | 我的提现申请列表                                                                                                                                                                                                            | 登录                              |
+| POST              | `/api/withdrawals`                    | 发起提现（冻结余额，条件更新防并发超额）                                                                                                                                                                                    | 登录                              |
+| GET               | `/api/admin/withdrawals`              | 提现申请列表（`?status=PENDING/APPROVED/REJECTED`）                                                                                                                                                                         | 管理员                            |
+| PATCH             | `/api/admin/withdrawals/:id`          | 审批提现（`{action:APPROVE\|REJECT}`；驳回原路退回余额，原子领取防重复退款）                                                                                                                                                | 管理员                            |
+| GET               | `/api/agent/overview`                 | 代理总览（成员数/返点，管理员可传 `agentId`）                                                                                                                                                                               | 代理/管理员                       |
+| GET               | `/api/agent/members`                  | 名下成员列表                                                                                                                                                                                                                | 代理/管理员                       |
+| POST              | `/api/agent/members`                  | 创建名下成员                                                                                                                                                                                                                | 代理/管理员                       |
+| POST              | `/api/agent/members/:id/recharge`     | 用代理余额给成员充值                                                                                                                                                                                                        | 代理/管理员                       |
+| GET               | `/api/admin/users`                    | 用户列表（`?q=&role=&status=&groupId=&agentId=&balanceMin=&balanceMax=&createdFrom=&createdTo=&hasKeys=&hasChannels=&sortBy=createdAt\|balance\|username\|lastActiveAt&sortOrder=`；`lastActiveAt` 为物化列，`nulls:last`） | 管理员                            |
+| GET               | `/api/admin/users/export`             | 按当前筛选导出用户 CSV（≤1 万行，含最后活跃时间）                                                                                                                                                                           | 管理员                            |
+| POST              | `/api/admin/users/:id/recharge`       | 充值                                                                                                                                                                                                                        | 管理员                            |
+| POST              | `/api/admin/users/:id/adjust`         | 余额调整（可负）                                                                                                                                                                                                            | 管理员                            |
+| GET               | `/api/admin/users/:id/transactions`   | 用户余额流水（分页，详情抽屉用）                                                                                                                                                                                            | 管理员                            |
+| GET               | `/api/admin/users/:id/keys`           | 该用户的全部 Key（先校验用户存在；详情抽屉用）                                                                                                                                                                              | 管理员                            |
+| POST              | `/api/admin/redeem-codes`             | 批量生成兑换码                                                                                                                                                                                                              | 管理员                            |
+| GET               | `/api/admin/redeem-codes`             | 兑换码列表（`?status=&batchId=`）                                                                                                                                                                                           | 管理员                            |
+| PATCH             | `/api/admin/redeem-codes/:id/disable` | 作废兑换码                                                                                                                                                                                                                  | 管理员                            |
+| GET               | `/api/admin/audit-logs`               | 操作审计（`?action=&actorId=`）                                                                                                                                                                                             | 管理员                            |
 
 ### OpenAI 兼容网关（用平台 key 调用，base_url = `http://host/v1`）
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/v1/models` | 列出当前 key 可用模型 |
-| POST | `/v1/chat/completions` | 对话补全（支持 `stream: true`） |
-| POST | `/v1/embeddings` | 向量化（`input` 为 string / string[] / token id 数组，按输入 token 计费） |
-| POST | `/v1/messages` | Anthropic 兼容对话（双向格式转换与 SSE 翻译） |
-| POST | `/v1/images/generations` | OpenAI 兼容图片生成（按次计费，支持故障转移） |
+| 方法 | 路径                     | 说明                                                                      |
+| ---- | ------------------------ | ------------------------------------------------------------------------- |
+| GET  | `/v1/models`             | 列出当前 key 可用模型                                                     |
+| POST | `/v1/chat/completions`   | 对话补全（支持 `stream: true`）                                           |
+| POST | `/v1/embeddings`         | 向量化（`input` 为 string / string[] / token id 数组，按输入 token 计费） |
+| POST | `/v1/messages`           | Anthropic 兼容对话（双向格式转换与 SSE 翻译）                             |
+| POST | `/v1/images/generations` | OpenAI 兼容图片生成（按次计费，支持故障转移）                             |
 
 鉴权：`Authorization: Bearer sk-...` 或 `x-api-key: sk-...`。
 
@@ -181,14 +181,14 @@ curl http://localhost:3000/v1/embeddings \
 
 **在线充值（JAIPay）**：
 
-| 变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `JAIPAY_MCH_NO` / `JAIPAY_APP_ID` / `JAIPAY_APP_SECRET` | — | 商户号/应用 ID/应用密钥（JAIPay 管理端获取）；**三项齐全才开通在线支付**，否则前端只显示兑换码充值 |
-| `JAIPAY_BASE_URL` | `https://pay.zxixing.com` | 网关地址 |
-| `JAIPAY_NOTIFY_URL` / `JAIPAY_RETURN_URL` | `https://xiaopuyun.com/api/pay/jai/notify` / `…/billing` | 异步通知与同步跳转地址 |
-| `PAY_CNY_PER_USD` | 留空 | 充值汇率（1 美元 = N 元）：**留空自动获取实时汇率**，填写数字则固定（覆盖实时值） |
-| `PAY_RATE_API_URL` / `PAY_RATE_TTL_MS` / `PAY_RATE_TIMEOUT_MS` | `https://open.er-api.com/v6/latest/USD` / `21600000` / `5000` | 实时汇率接口（任意返回 JSON `rates.CNY` 的地址，可换 Frankfurter/ECB）/ 成功缓存时长 / 超时 |
-| `CREDITS_PER_USD` | `100` | 1 美元 = N 积分；`充值积分 = 元 ÷ 汇率 × CREDITS_PER_USD` |
+| 变量                                                           | 默认                                                          | 说明                                                                                               |
+| -------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `JAIPAY_MCH_NO` / `JAIPAY_APP_ID` / `JAIPAY_APP_SECRET`        | —                                                             | 商户号/应用 ID/应用密钥（JAIPay 管理端获取）；**三项齐全才开通在线支付**，否则前端只显示兑换码充值 |
+| `JAIPAY_BASE_URL`                                              | `https://pay.zxixing.com`                                     | 网关地址                                                                                           |
+| `JAIPAY_NOTIFY_URL` / `JAIPAY_RETURN_URL`                      | `https://xiaopuyun.com/api/pay/jai/notify` / `…/billing`      | 异步通知与同步跳转地址                                                                             |
+| `PAY_CNY_PER_USD`                                              | 留空                                                          | 充值汇率（1 美元 = N 元）：**留空自动获取实时汇率**，填写数字则固定（覆盖实时值）                  |
+| `PAY_RATE_API_URL` / `PAY_RATE_TTL_MS` / `PAY_RATE_TIMEOUT_MS` | `https://open.er-api.com/v6/latest/USD` / `21600000` / `5000` | 实时汇率接口（任意返回 JSON `rates.CNY` 的地址，可换 Frankfurter/ECB）/ 成功缓存时长 / 超时        |
+| `CREDITS_PER_USD`                                              | `100`                                                         | 1 美元 = N 积分；`充值积分 = 元 ÷ 汇率 × CREDITS_PER_USD`                                          |
 
 > 汇率取值优先级：`PAY_CNY_PER_USD` 固定值 → Redis 缓存 → 实时接口 → **上次已知值**（接口故障时兜底）；全部失败时下单接口明确报错、前端提示稍后重试，不会用错误汇率成交。汇率结果同时通过 `/api/config`（`payRate` / `creditsPerCny`）暴露给前端展示。
 > 入账口径：订单金额（分）→ `creditUsd = 元 ÷ 汇率`（USD 额度，随订单落库，回调不再依赖当时汇率）；回调校验**金额必须存在且一致**，状态机 `PENDING/FAILED → PAID` 只入账一次，并写 `BalanceTransaction(RECHARGE)` 流水。
@@ -292,12 +292,12 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 
 打开 **Settings → Secrets and variables → Actions → New repository secret**，逐个添加：
 
-| Secret | 必填 | 值 |
-| --- | --- | --- |
-| `DEPLOY_HOST` | 是 | 服务器地址，如 `170.106.82.224` |
-| `DEPLOY_SSH_KEY` | 是 | 上一步私钥的**全文**，含 `-----BEGIN/END OPENSSH PRIVATE KEY-----`（用 `cat ~/.ssh/aigw_deploy` 取） |
-| `DEPLOY_USER` | 否 | SSH 用户，默认 `root` |
-| `DEPLOY_PATH` | 否 | 仓库目录，默认 `/opt/AiProject` |
+| Secret           | 必填 | 值                                                                                                   |
+| ---------------- | ---- | ---------------------------------------------------------------------------------------------------- |
+| `DEPLOY_HOST`    | 是   | 服务器地址，如 `170.106.82.224`                                                                      |
+| `DEPLOY_SSH_KEY` | 是   | 上一步私钥的**全文**，含 `-----BEGIN/END OPENSSH PRIVATE KEY-----`（用 `cat ~/.ssh/aigw_deploy` 取） |
+| `DEPLOY_USER`    | 否   | SSH 用户，默认 `root`                                                                                |
+| `DEPLOY_PATH`    | 否   | 仓库目录，默认 `/opt/AiProject`                                                                      |
 
 #### 3. 触发部署与验证
 
@@ -307,10 +307,10 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 
 ## 计费口径（BYOK 与平台渠道）
 
-| 场景 | 扣余额 | 日志 / 统计 | Key 费用额度 `costLimit` |
-| --- | --- | --- | --- |
-| 平台渠道（`Channel.ownerType=PLATFORM`） | ✅ 渠道售价 × 用户倍率 | 计入「费用（实扣）」 | 累计 |
-| 用户自有 BYOK 渠道（`USER`） | ❌ 上游费用由用户自己付 | 只记折算金额，界面标注「未计费 / BYOK 折算」 | 不累计 |
+| 场景                                     | 扣余额                  | 日志 / 统计                                  | Key 费用额度 `costLimit` |
+| ---------------------------------------- | ----------------------- | -------------------------------------------- | ------------------------ |
+| 平台渠道（`Channel.ownerType=PLATFORM`） | ✅ 渠道售价 × 用户倍率  | 计入「费用（实扣）」                         | 累计                     |
+| 用户自有 BYOK 渠道（`USER`）             | ❌ 上游费用由用户自己付 | 只记折算金额，界面标注「未计费 / BYOK 折算」 | 不累计                   |
 
 - 口径字段：`RequestLog.chargeable`（该次是否实扣）、`UsageDaily.billedCost`（按日实扣）、`RequestLog.cost`（折算总额，供用量与毛利分析）。三者由迁移 `20260928090000_chargeable_billed_cost` 按渠道归属回填历史数据（含 `ApiKey.costUsed`）。
 - 展示：总览与使用统计的「费用（实扣）」与余额扣款同口径，`BYOK 折算` 单列显示；调用日志对未计费行显示 `未计费` 标签；CSV 导出含「折算费用 / 实际扣费」两列。
@@ -327,24 +327,25 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 1. **硬分层（不参与评分）**：`tier`（用户 BYOK 优先于平台渠道）→ `priority`（渠道/模型人工指定，越大越优先）；
 2. **层内评分**：`score = Σ 权重 × 归一化维度`，各维 min-max 归一化到 [0,1]，无数据回退 0.5（中性）。
    全无指标时退化为「成本升序 + 分流噪声」，与旧的 `cost asc` 排序兼容。
+3. **同层首选权重抽签**：排序后、粘性前，与榜首同 `(tier, priority)` 的候选按 `P ∝ weight · exp(score/τ)` 抽签决定首个请求落谁（Gumbel-max 等价实现，`ROUTING_WEIGHT_TAU` 控制分数与权重的博弈，≤0 关闭回退纯分数序）——同分时严格按权重比例分流（100:1 ≈ 99%:1%），其余候选顺序不变（故障转移仍按分数降序）。
 
-| 维度 | 含义 | 计算 |
-| --- | --- | --- |
-| price 价格 | 越便宜越优 | 路由成本 = 绝对成本 > 官方价 × 上游折扣；未知成本排末位 |
-| speed 速度 | 低时延 | 0.6×平均时延 + 0.2×慢请求(≥3s)占比 + 0.2×吞吐(tokens/s) |
-| stability 稳定性 | 滑窗成功率 | 拉普拉斯平滑 `(ok+1)/(ok+fail+2)`，无数据恰为 0.5 |
-| quality 质量 | L1 人工分 + L2 被动信号 | `0.5×qualityScore + 0.5×(0.6×有效回复率 + 0.4×平均输出长度)` |
-| noise 分流噪声 | 让渠道 `weight` 真正生效 | gumbel 竞速 `-ln(U)/weight`，权重越大越占优 |
+| 维度             | 含义                         | 计算                                                                  |
+| ---------------- | ---------------------------- | --------------------------------------------------------------------- |
+| price 价格       | 越便宜越优                   | 路由成本 = 绝对成本 > 官方价 × 上游折扣；未知成本排末位               |
+| speed 速度       | 低时延                       | 0.6×平均时延 + 0.2×慢请求(≥3s)占比 + 0.2×吞吐(tokens/s)               |
+| stability 稳定性 | 滑窗成功率                   | 拉普拉斯平滑 `(ok+1)/(ok+fail+2)`，无数据恰为 0.5                     |
+| quality 质量     | L1 人工分 + L2 被动信号      | `0.5×qualityScore + 0.5×(0.6×有效回复率 + 0.4×平均输出长度)`          |
+| noise 分流噪声   | 同层打散（tie-break 随机化） | gumbel 竞速 `-ln(U)/weight`，权重越大越占优；按比例分流由首选抽签承担 |
 
 **策略权重（Σ=1）**，Key 级 `ApiKey.routingStrategy` 优先，缺省用 `ROUTING_STRATEGY`：
 
-| 策略 | price | speed | stability | quality | noise |
-| --- | --- | --- | --- | --- | --- |
-| `BALANCED` 均衡（默认） | .30 | .20 | .25 | .20 | .05 |
-| `CHEAPEST` 最省 | .65 | .05 | .15 | .10 | .05 |
-| `FASTEST` 最快 | .10 | .55 | .25 | .05 | .05 |
-| `STABLE` 最稳 | .10 | .15 | .60 | .10 | .05 |
-| `QUALITY_FIRST` 质量优先 | .10 | .10 | .20 | .55 | .05 |
+| 策略                     | price | speed | stability | quality | noise |
+| ------------------------ | ----- | ----- | --------- | ------- | ----- |
+| `BALANCED` 均衡（默认）  | .30   | .20   | .25       | .20     | .05   |
+| `CHEAPEST` 最省          | .65   | .05   | .15       | .10     | .05   |
+| `FASTEST` 最快           | .10   | .55   | .25       | .05     | .05   |
+| `STABLE` 最稳            | .10   | .15   | .60       | .10     | .05   |
+| `QUALITY_FIRST` 质量优先 | .10   | .10   | .20       | .55     | .05   |
 
 - **设置入口**：控制台「密钥」创建弹窗可选路由策略（留空 = 全局默认）；渠道「逐模型定价」表可填 **质量分** `qualityScore`（0~2，1=正常：官方直连 1.0、可用中转 0.85、疑似降智 0.6）。
 - **故障熔断（模型级）**：Redis 记录 (渠道,模型) 连续失败数 `cf`，达 `CHANNEL_MODEL_FAILURE_THRESHOLD` 进入冷却 `CHANNEL_MODEL_COOLDOWN_MS`（开放期剔除候选，全部冷却则兜底放行）；冷却过期且失败未清 → **半开**（评分 ×0.1 仅作兜底探测），成功即复位。
@@ -352,21 +353,24 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 - **每日限额**：渠道可配 `每日调用限额` / `每日 Token 限额`（渠道编辑表单，留空不限；自然日按 UTC+8，可用 `CHANNEL_LIMIT_DAY_OFFSET_HOURS` 调整）。Redis 按 `route:d:<渠道>:<自然日>` 计数，评分前剔除已超限渠道；全部超限时兜底放行。
 - **半开恢复（渠道级）**：`autoDisabled` 渠道满 `CHANNEL_AUTO_REENABLE_MS` 冷却后懒式恢复（`failureCount` 置阈值-1，下一次失败即再禁用），无需定时任务。
 - **会话粘性**：请求头 `x-session-id`（缺省用 `userId + 前 2 条 messages 前缀`）映射到与榜首同 `(tier, priority)` 组内候选，且 `score(偏好) ≥ ROUTING_STICKY_RATIO × score(榜首)` 才前置 —— 保住上游 prompt cache 但不为缓存死抱劣质渠道；`ROUTING_STICKY=false` 关闭。
-- **错误分类**（`gateway.controller.ts`）：5xx/连接失败 → 计渠道失败数 + 指标；限流/超限 → 冷却不计失败；上游 401 → 只降路由分；拒答/内容过滤 → 只降质量分（不伤稳定性、不熔断）；其余客户端 4xx 不做任何渠道判罚。
+- **整请求 deadline**：`GATEWAY_DEADLINE_MS`（默认 5min）为跨故障转移共享的总预算——耗尽即 504 `gateway_timeout`，单次尝试超时钳制在剩余预算内（默认仍 120s 封顶）；流式响应头发出后由空闲超时接管，不受此限（不砍正常进行中的长流）。
+- **错误分类**（`gateway.exec-support`）：5xx/连接失败 → 计渠道失败数 + 指标（**模型级故障豁免**：渠道其它模型窗口期内成功过 → 只记现场不计数，防一条坏模型连坐禁用整条渠道）；限流/超限 → 冷却不计失败（含上游 Retry-After 透传退避）；上游 401 → 只降路由分；拒答/内容过滤 → 只降质量分且**故障转移到下一家**（不同供应商审核宽严不同，换一家可能正常出量；拒答文案特征压过状态码，5xx+拒答文案不计渠道失败）；其余客户端 4xx 不做任何渠道判罚。流式中途断流走同一套分类口径（中途 429 不再误计渠道失败）。
 - **观测**：`ROUTING_DEBUG=true` 时每次路由打印候选打分与标记（`!` 冷却、`#` 超限、`~` 半开）；控制台「使用统计 → 按渠道」含请求数/错误数/平均延迟/费用，「调用日志」支持按渠道过滤与 CSV 导出。
 
 ### 相关环境变量
 
-| 变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `ROUTING_STRATEGY` | `BALANCED` | 全局默认路由策略 |
-| `ROUTING_STICKY` / `ROUTING_STICKY_RATIO` | `true` / `0.8` | 会话粘性开关 / 前置得分比阈值 |
-| `ROUTING_METRICS_WINDOW_MS` / `TTL_MS` / `RETRY_MS` | `600000` / `5000` / `10000` | 指标滑窗 / 快照缓存 / Redis 故障退避 |
-| `ROUTING_DEBUG` | — | 打印评分日志 |
-| `CHANNEL_MODEL_FAILURE_THRESHOLD` / `COOLDOWN_MS` / `COOLDOWN_MAX_MS` | `3` / `60000` / `600000` | 模型级熔断阈值与冷却（上限用于 429 退避封顶） |
-| `CHANNEL_RATE_LIMIT_BASE_MS` | `30000` | 429 首次冷却时长（指数退避基数） |
-| `CHANNEL_FAILURE_THRESHOLD` / `CHANNEL_AUTO_REENABLE_MS` | `5` / `900000` | 渠道级失败禁用阈值 / 自动禁用冷却 |
-| `CHANNEL_LIMIT_DAY_OFFSET_HOURS` | `8` | 每日限额的自然日分界（UTC+8） |
+| 变量                                                                  | 默认                        | 说明                                                         |
+| --------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------ |
+| `ROUTING_STRATEGY`                                                    | `BALANCED`                  | 全局默认路由策略                                             |
+| `ROUTING_STICKY` / `ROUTING_STICKY_RATIO`                             | `true` / `0.8`              | 会话粘性开关 / 前置得分比阈值                                |
+| `ROUTING_WEIGHT_TAU`                                                  | `0.1`                       | 同层首选权重抽签温度（分数÷τ 与 ln(weight) 的博弈；≤0 关闭） |
+| `GATEWAY_DEADLINE_MS`                                                 | `300000`                    | 整请求跨故障转移总预算（≤0 关闭；耗尽返回 504）              |
+| `ROUTING_METRICS_WINDOW_MS` / `TTL_MS` / `RETRY_MS`                   | `600000` / `5000` / `10000` | 指标滑窗 / 快照缓存 / Redis 故障退避                         |
+| `ROUTING_DEBUG`                                                       | —                           | 打印评分日志                                                 |
+| `CHANNEL_MODEL_FAILURE_THRESHOLD` / `COOLDOWN_MS` / `COOLDOWN_MAX_MS` | `3` / `60000` / `600000`    | 模型级熔断阈值与冷却（上限用于 429 退避封顶）                |
+| `CHANNEL_RATE_LIMIT_BASE_MS`                                          | `30000`                     | 429 首次冷却时长（指数退避基数）                             |
+| `CHANNEL_FAILURE_THRESHOLD` / `CHANNEL_AUTO_REENABLE_MS`              | `5` / `900000`              | 渠道级失败禁用阈值 / 自动禁用冷却                            |
+| `CHANNEL_LIMIT_DAY_OFFSET_HOURS`                                      | `8`                         | 每日限额的自然日分界（UTC+8）                                |
 
 ## 模型分组与产地（分组隔离 / 分组倍率 / 模型映射）
 
@@ -385,14 +389,14 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 
 ### 相关接口
 
-| 方法与路径 | 权限 | 说明 |
-| --- | --- | --- |
-| `GET /api/groups` | 登录 | 分组列表（含可见模型与绑定数量） |
-| `POST /api/groups` | ADMIN | 创建分组 |
-| `PATCH /api/groups/:id` | ADMIN | 更新分组（`models` 传数组=替换，传 `[]`=不限制） |
-| `PUT /api/groups/:id/models` | ADMIN | 替换分组的可见模型集合 |
-| `DELETE /api/groups/:id` | ADMIN | 删除分组（默认分组不可删） |
-| `POST /api/models/classify-origins` | ADMIN | 按模型名一键归类厂商/产地 |
+| 方法与路径                          | 权限  | 说明                                             |
+| ----------------------------------- | ----- | ------------------------------------------------ |
+| `GET /api/groups`                   | 登录  | 分组列表（含可见模型与绑定数量）                 |
+| `POST /api/groups`                  | ADMIN | 创建分组                                         |
+| `PATCH /api/groups/:id`             | ADMIN | 更新分组（`models` 传数组=替换，传 `[]`=不限制） |
+| `PUT /api/groups/:id/models`        | ADMIN | 替换分组的可见模型集合                           |
+| `DELETE /api/groups/:id`            | ADMIN | 删除分组（默认分组不可删）                       |
+| `POST /api/models/classify-origins` | ADMIN | 按模型名一键归类厂商/产地                        |
 
 ## 观测（Prometheus 指标 / 请求关联 / 看门狗告警）
 
