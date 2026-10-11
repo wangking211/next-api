@@ -17,6 +17,8 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
+import { Optional } from '@nestjs/common';
+import { RoutingMetricsService, RouteMetrics } from '../gateway/routing-metrics.service';
 import { AuthUser } from '../common/interfaces/auth.interface';
 import { ProviderRegistry } from '../gateway/providers/provider.registry';
 import { Provider, UpstreamError } from '../gateway/types';
@@ -118,6 +120,8 @@ export class ChannelsService {
     private readonly crypto: CryptoService,
     private readonly providers: ProviderRegistry,
     private readonly groups: GroupsService,
+    // L2 信号（滑窗有效回复率/拒答率）；测试手工构造时未传 → 接口降级为无信号
+    @Optional() private readonly routeMetrics?: RoutingMetricsService,
   ) {}
 
   private async assertSafeBaseUrl(baseUrl: string): Promise<void> {
@@ -404,6 +408,37 @@ export class ChannelsService {
       });
     }
     return channel;
+  }
+
+  /**
+   * L2 信号（滑窗被动指标）：按模型返回有效回复率/拒答率，供渠道定价表
+   * 人工校准 qualityScore——只展示、不自动覆盖人工分。
+   * Redis 故障时 snapshot 返回空 Map → 信号为 null（前端显示「—」）。
+   */
+  async routeSignals(user: AuthUser, id: string) {
+    const channel = await this.findAccessible(user, id);
+    if (!this.routeMetrics) return { windowMs: 0, models: [] as unknown[] };
+    const snap = this.routeMetrics;
+    const models = channel.models ?? [];
+    const rows = await Promise.all(
+      models.map(async (model) => {
+        const map = await snap.snapshot(model, [id]);
+        const m: RouteMetrics | undefined = map.get(id);
+        const samples = m ? m.valid + m.inval + m.refuse : 0;
+        return {
+          model,
+          samples,
+          valid: m?.valid ?? 0,
+          inval: m?.inval ?? 0,
+          refuse: m?.refuse ?? 0,
+          /** 有效回复率 = 有效 / 质量分母（2xx 空输出与拒答均计入分母）；无样本为 null */
+          validRate: samples > 0 ? m!.valid / samples : null,
+          /** 拒答率 = 拒答 / 质量分母；无样本为 null */
+          refuseRate: samples > 0 ? m!.refuse / samples : null,
+        };
+      }),
+    );
+    return { windowMs: snap.windowMs, models: rows };
   }
 
   /**

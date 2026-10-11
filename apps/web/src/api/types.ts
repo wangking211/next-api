@@ -99,6 +99,26 @@ export interface ChannelModelPrice {
   qualityScore: number | null;
 }
 
+/** GET /api/channels/:id/route-signals —— L2 被动信号（滑窗），供人工校准 qualityScore */
+export interface RouteSignalRow {
+  model: string;
+  /** 质量滑窗内样本数（有效 + 无效 + 拒答） */
+  samples: number;
+  valid: number;
+  inval: number;
+  refuse: number;
+  /** 有效回复率；无样本为 null */
+  validRate: number | null;
+  /** 拒答率；无样本为 null */
+  refuseRate: number | null;
+}
+
+export interface RouteSignalsResult {
+  /** 信号滑窗长度（毫秒） */
+  windowMs: number;
+  models: RouteSignalRow[];
+}
+
 export interface ChannelInfo {
   id: string;
   ownerType: 'PLATFORM' | 'USER';
@@ -299,6 +319,10 @@ export interface UsageAnalytics {
     errors: number;
     /** 平均耗时(ms) */
     avgLatency: number;
+    /** 渠道已配绝对成本的模型数 / 总模型数 */
+    costCoverage: { configured: number; total: number };
+    /** true = 该渠道存在未配绝对成本的模型，上游成本含官方价×折扣估算成分 */
+    costEstimated: boolean;
   }[];
   byUser: {
     userId: string;

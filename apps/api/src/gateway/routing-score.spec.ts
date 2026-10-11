@@ -205,6 +205,88 @@ describe('applySticky', () => {
   it('returns null for fewer than two candidates', () => {
     expect(applySticky([mk('a')], scores(['a', 1]), 'any', 0.8)).toBeNull();
   });
+
+  // 时间窗轮换：同一粘性键跨窗（rotateMs 分桶换哈希）强制重选路
+  it('rotates the sticky target across time windows', () => {
+    const s = scores(['a', 1], ['b', 1], ['c', 1]);
+    // 找一个键：桶 0 映射到 idx 1、桶 1 映射到 idx 2（确定性哈希）
+    let key = '';
+    for (let i = 0; i < 5000 && !key; i++) {
+      const k = `rot${i}`;
+      if (fnv1a(`${k}#0`) % 3 === 1 && fnv1a(`${k}#1`) % 3 === 2) key = k;
+    }
+    expect(key).not.toBe('');
+    const w0 = applySticky([mk('a'), mk('b'), mk('c')], s, key, 0.8, {
+      rotateMs: 60_000,
+      now: 30_000,
+    });
+    const w1 = applySticky([mk('a'), mk('b'), mk('c')], s, key, 0.8, {
+      rotateMs: 60_000,
+      now: 90_000,
+    });
+    expect(w0?.id).toBe('b');
+    expect(w1?.id).toBe('c');
+  });
+
+  it('stays sticky within the same time window', () => {
+    const s = scores(['a', 1], ['b', 1], ['c', 1]);
+    const hits = [30_000, 45_000, 59_000].map(
+      (now) =>
+        applySticky([mk('a'), mk('b'), mk('c')], s, 'same-key', 0.8, { rotateMs: 60_000, now })?.id,
+    );
+    expect(new Set(hits).size).toBe(1);
+  });
+
+  // 负载占比门：流量份额超权重份额 × 安全系数 → 放弃粘性
+  it('abandons sticky when the target load share exceeds weight share x gate', () => {
+    const ranked = [mk('a'), mk('b'), mk('c')];
+    const s = scores(['a', 1], ['b', 1], ['c', 1]);
+    const key = keyWithIdx(3, 1); // 偏好 b（ranked[1]）
+    const loads = new Map([
+      ['a', 20],
+      ['b', 100], // b 权重份额 1/3，流量份额 100/140 ≈ 0.71 > 0.33×2 ≈ 0.67
+      ['c', 20],
+    ]);
+    const weights = new Map([
+      ['a', 1],
+      ['b', 1],
+      ['c', 1],
+    ]);
+    const hit = applySticky(ranked, s, key, 0.8, { loads, weights, loadGate: 2 });
+    expect(hit).toBeNull();
+    expect(ranked[0].id).toBe('a');
+  });
+
+  it('keeps sticky when load share is within the gate', () => {
+    const s = scores(['a', 1], ['b', 1], ['c', 1]);
+    const key = keyWithIdx(3, 1); // 偏好 b
+    const loads = new Map([
+      ['a', 50],
+      ['b', 55], // 份额 55/155 ≈ 0.35 < 0.33×2 ≈ 0.67
+      ['c', 50],
+    ]);
+    const weights = new Map([
+      ['a', 1],
+      ['b', 1],
+      ['c', 1],
+    ]);
+    expect(
+      applySticky([mk('a'), mk('b'), mk('c')], s, key, 0.8, { loads, weights, loadGate: 2 })?.id,
+    ).toBe('b');
+  });
+
+  it('skips the load gate when sample size is too small', () => {
+    const s = scores(['a', 1], ['b', 1], ['c', 1]);
+    const key = keyWithIdx(3, 1);
+    const loads = new Map([
+      ['a', 1],
+      ['b', 9], // 份额 0.9 远超门槛，但总量 10 < 最小样本 → 不启用门
+      ['c', 0],
+    ]);
+    expect(applySticky([mk('a'), mk('b'), mk('c')], s, key, 0.8, { loads, loadGate: 2 })?.id).toBe(
+      'b',
+    );
+  });
 });
 
 describe('weightedFirstPick（同层首选权重抽签，P ∝ weight·exp(score/τ)）', () => {

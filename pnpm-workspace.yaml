@@ -1,11 +1,16 @@
 packages:
-  - "apps/*"
-  - "packages/*"
+  - 'apps/*'
+  - 'packages/*'
 
 allowBuilds:
-  "@nestjs/core": true
-  "@prisma/client": true
-  "@prisma/engines": true
+  '@nestjs/core': true
+  '@prisma/client': true
+  '@prisma/engines': true
   '@scarf/scarf': false
   esbuild: true
   prisma: true
+
+# 安全覆盖：multer <2.3.0 / lodash <4.18.0 有审计告警（间接依赖），强制提升到安全版本
+overrides:
+  multer: '^2.3.0'
+  lodash: '^4.18.0'

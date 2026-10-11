@@ -13,6 +13,7 @@ import { BootstrapService } from './auth/bootstrap.service';
 import { assertProdJwtSecret } from './auth/jwt-secret';
 import { requestIdMiddleware } from './common/request-id';
 import { MetricsService } from './observability/metrics.service';
+import { JsonLogger } from './common/json-logger.service';
 
 function assertProductionSecrets(config: ConfigService) {
   if (config.get<string>('NODE_ENV') !== 'production') return;
@@ -42,7 +43,13 @@ function parseTrustProxy(raw: string | undefined): boolean | number | string {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  // 生产：结构化 JSON 行日志（time/level/context/message），便于日志采集解析；
+  // 开发：保持 Nest 默认彩色控制台输出
+  const jsonLogger = process.env.NODE_ENV === 'production' ? new JsonLogger() : undefined;
+  const app = await NestFactory.create(AppModule, {
+    bodyParser: false,
+    ...(jsonLogger ? { logger: jsonLogger } : {}),
+  });
   const config = app.get(ConfigService);
 
   assertProductionSecrets(config);

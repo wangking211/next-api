@@ -227,9 +227,31 @@ export function weightedFirstPick<
   return pick;
 }
 
+/** 负载占比门最小样本：组内近期请求总量低于该值时份额噪声大，不启用门 */
+const LOAD_GATE_MIN_REQUESTS = 50;
+
+export interface StickyOpts {
+  /** 时间窗轮换（毫秒，>0 启用）：粘性键按 now/rotateMs 分桶换哈希 → 跨桶强制重选路 */
+  rotateMs?: number;
+  /** 当前时间（毫秒），缺省 Date.now()；仅测试注入用 */
+  now?: number;
+  /** 同层候选近期请求量（如当日 dayReq），id → 计数；缺省 = 不启用负载占比门 */
+  loads?: ReadonlyMap<string, number>;
+  /** 同层候选权重（缺省 1）：与评分输入同源的 weight */
+  weights?: ReadonlyMap<string, number>;
+  /** 负载占比门安全系数（>0 启用）：流量份额 > 权重份额 × 系数 → 放弃粘性 */
+  loadGate?: number;
+}
+
 /**
  * 会话粘性（保 prompt cache）：只在与榜首同 (tier, priority) 的组内旋转，
  * 且偏好候选得分 ≥ ratio × 榜首得分才前置——不为保缓存死抱劣质渠道。
+ *
+ * 两个热点防护（均为纯计算，无 IO）：
+ * - 时间窗轮换：stickyKey 按 rotateMs 分桶后换哈希，跨桶（超 N 分钟）强制重选路，
+ *   牺牲该时刻的部分 prompt cache 换「单会话不再永久钉死同一渠道」；
+ * - 负载占比门：偏好候选近期流量份额 > 权重份额 × 安全系数（且组内样本足够）时
+ *   放弃粘性，回落到按权重抽签的首选——防粘性把流量堆到已超载的低权重渠道。
  * 返回被前置的候选（未生效返回 null）。
  */
 export function applySticky<T extends { id: string; tier: number; priority: number }>(
@@ -237,6 +259,7 @@ export function applySticky<T extends { id: string; tier: number; priority: numb
   scores: Map<string, Scored>,
   stickyKey: string,
   ratio: number,
+  opts?: StickyOpts,
 ): T | null {
   if (ranked.length < 2) return null;
   const top = ranked[0];
@@ -249,12 +272,29 @@ export function applySticky<T extends { id: string; tier: number; priority: numb
     end++;
   }
   if (end < 2) return null; // 同层仅一个候选，无处可粘
-  const idx = fnv1a(stickyKey) % end;
+  const rotateMs = opts?.rotateMs ?? 0;
+  const rotating = rotateMs > 0;
+  const bucket = rotating ? Math.floor((opts?.now ?? Date.now()) / rotateMs) : 0;
+  const idx = fnv1a(rotating ? `${stickyKey}#${bucket}` : stickyKey) % end;
   if (idx === 0) return null;
   const pref = ranked[idx];
   const topScore = scores.get(top.id)?.score ?? 0;
   const prefScore = scores.get(pref.id)?.score ?? 0;
   if (prefScore < ratio * topScore) return null;
+  // 负载占比门：偏好候选流量份额显著超其权重份额（样本足够时）→ 放弃粘性
+  if (opts?.loadGate && opts.loadGate > 0 && opts.loads) {
+    let totalLoad = 0;
+    let totalWeight = 0;
+    for (let i = 0; i < end; i++) {
+      totalLoad += opts.loads.get(ranked[i].id) ?? 0;
+      totalWeight += Math.max(opts.weights?.get(ranked[i].id) ?? 1, 1);
+    }
+    if (totalLoad >= LOAD_GATE_MIN_REQUESTS && totalWeight > 0) {
+      const loadShare = (opts.loads.get(pref.id) ?? 0) / totalLoad;
+      const weightShare = Math.max(opts.weights?.get(pref.id) ?? 1, 1) / totalWeight;
+      if (loadShare > weightShare * opts.loadGate) return null;
+    }
+  }
   for (let i = idx; i > 0; i--) ranked[i] = ranked[i - 1];
   ranked[0] = pref;
   return pref;

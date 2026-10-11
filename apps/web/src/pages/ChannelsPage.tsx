@@ -102,6 +102,12 @@ export default function ChannelsPage() {
     queryKey: ['model-suggestions'],
     queryFn: ({ signal }) => modelsApi.suggestions(signal),
   });
+  // L2 被动信号（滑窗有效回复率/拒答率）：定价弹窗打开时拉取，供人工校准 qualityScore
+  const { data: routeSignals } = useQuery({
+    queryKey: ['channel-route-signals', priceChannel?.id],
+    queryFn: ({ signal }) => channelsApi.routeSignals(priceChannel!.id, signal),
+    enabled: !!priceChannel,
+  });
 
   const modelOptions = useMemo(() => {
     const map = new Map<string, { value: string; label: string }>();
@@ -597,7 +603,7 @@ export default function ChannelsPage() {
         title={t('channels.pricing.title', { name: priceChannel?.name ?? '' })}
         open={!!priceChannel}
         onCancel={() => setPriceChannel(null)}
-        width={720}
+        width={880}
         footer={[
           <Button key="cancel" onClick={() => setPriceChannel(null)}>
             {t('common.cancel')}
@@ -621,6 +627,7 @@ export default function ChannelsPage() {
             pricing={pricing}
             setP={setP}
             catalog={catalog}
+            signals={routeSignals?.models}
           />
         )}
       </Modal>

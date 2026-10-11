@@ -49,6 +49,31 @@ jobs:
       - name: Build
         run: pnpm build
 
+  security-audit:
+    name: Dependency audit (prod, npmjs registry)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Enable pnpm (corepack)
+        run: corepack enable
+      # pnpm audit 依赖锁文件，不需要安装依赖；必须走 npmjs registry（npmmirror 无 audit 端点）
+      - name: Audit production dependencies
+        run: |
+          set +e
+          pnpm audit --prod --registry=https://registry.npmjs.org --json > audit.json 2> audit.err
+          set -e
+          if [ -s audit.json ]; then
+            node scripts/audit-gate.mjs audit.json
+          else
+            echo "pnpm audit produced no JSON output (see audit.err); failing closed is avoided, but check:"
+            cat audit.err || true
+            exit 1
+          fi
+
   e2e:
     name: End-to-end tests
     runs-on: ubuntu-latest

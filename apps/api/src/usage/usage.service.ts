@@ -737,7 +737,7 @@ export class UsageService {
     const channelIds = byChannel.map((c) => c.channelId).filter(Boolean) as string[];
     const userIds = byUser.map((u) => u.userId).filter(Boolean) as string[];
     const apiKeyIds = byApiKey.map((k) => k.apiKeyId).filter(Boolean) as string[];
-    const [channels, users, apiKeys] = await Promise.all([
+    const [channels, users, apiKeys, costRows] = await Promise.all([
       channelIds.length
         ? this.prisma.channel.findMany({
             where: { id: { in: channelIds } },
@@ -756,10 +756,27 @@ export class UsageService {
             select: { id: true, name: true, keyPrefix: true },
           })
         : Promise.resolve([] as any[]),
+      // 成本口径：渠道 × 模型的绝对成本配置，用于标注「估算成本」渠道（未配的走官方价×折扣估算）
+      channelIds.length
+        ? this.prisma.channelModel.findMany({
+            where: { channelId: { in: channelIds } },
+            select: { channelId: true, costInput: true, costOutput: true, costPerCall: true },
+          })
+        : Promise.resolve([] as any[]),
     ]);
     const chMap = new Map(channels.map((c: any) => [c.id, c]));
     const uMap = new Map(users.map((u: any) => [u.id, u]));
     const kMap = new Map(apiKeys.map((k: any) => [k.id, k]));
+
+    // 成本覆盖率：已配绝对成本（costInput/costPerCall）的模型数 / 渠道总模型数。
+    // 覆盖 < 100% 时该渠道上游成本含官方价×折扣估算 → 报表标注「估算」。
+    const costCoverage = new Map<string, { configured: number; total: number }>();
+    for (const cm of costRows as any[]) {
+      const cov = costCoverage.get(cm.channelId) ?? { configured: 0, total: 0 };
+      cov.total += 1;
+      if (cm.costInput != null || cm.costPerCall != null) cov.configured += 1;
+      costCoverage.set(cm.channelId, cov);
+    }
 
     const mapAgg = (r: any, billed?: { cost: number; upstreamCost: number }) => {
       const revenue = Number(r._sum?.cost ?? 0);
@@ -801,15 +818,21 @@ export class UsageService {
         .sort((a, b) => b.tokens - a.tokens)
         .slice(0, 20),
       byChannel: byChannel
-        .map((r) => ({
-          channelId: r.channelId,
-          name: chMap.get(r.channelId ?? '')?.name ?? '(已删除)',
-          provider: chMap.get(r.channelId ?? '')?.provider ?? '',
-          ...mapAgg(r, billedChannel.get(r.channelId)),
-          // 渠道健康度视角：错误数与平均耗时（对应智能路由的稳定性/延迟维度）
-          errors: errByChannel.get(r.channelId) ?? 0,
-          avgLatency: Math.round(r._avg?.latencyMs ?? 0),
-        }))
+        .map((r) => {
+          const cov = costCoverage.get(r.channelId ?? '') ?? { configured: 0, total: 0 };
+          return {
+            channelId: r.channelId,
+            name: chMap.get(r.channelId ?? '')?.name ?? '(已删除)',
+            provider: chMap.get(r.channelId ?? '')?.provider ?? '',
+            ...mapAgg(r, billedChannel.get(r.channelId)),
+            // 渠道健康度视角：错误数与平均耗时（对应智能路由的稳定性/延迟维度）
+            errors: errByChannel.get(r.channelId) ?? 0,
+            avgLatency: Math.round(r._avg?.latencyMs ?? 0),
+            // 成本口径标注：存在未配绝对成本的模型时上游成本为估算值
+            costCoverage: cov,
+            costEstimated: cov.total > 0 && cov.configured < cov.total,
+          };
+        })
         .sort((a, b) => b.tokens - a.tokens)
         .slice(0, 20),
       byUser: byUser

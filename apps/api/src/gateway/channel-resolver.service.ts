@@ -54,6 +54,10 @@ export class ChannelResolverService {
   private readonly defaultStrategy: RoutingStrategy;
   private readonly stickyEnabled: boolean;
   private readonly stickyRatio: number;
+  /** 粘性时间窗轮换（毫秒，≤0 = 关闭）：跨窗强制重选路，防单会话钉死渠道 */
+  private readonly stickyRotateMs: number;
+  /** 粘性负载占比门安全系数（≤0 = 关闭）：流量份额超权重份额×系数 → 放弃粘性 */
+  private readonly stickyLoadGate: number;
   /** 同层首选权重抽签温度（≤0 = 关闭，回退纯分数排序） */
   private readonly pickTau: number;
   private readonly autoReenableMs: number;
@@ -75,6 +79,12 @@ export class ChannelResolverService {
     this.stickyEnabled = config.get<string>('ROUTING_STICKY', 'true') !== 'false';
     const r = Number(config.get<string>('ROUTING_STICKY_RATIO', '0.8'));
     this.stickyRatio = Number.isFinite(r) && r > 0 && r <= 1 ? r : 0.8;
+    // 时间窗轮换：默认 30 分钟（牺牲该时刻部分 prompt cache 换热点打散），≤0 关闭
+    const rot = Number(config.get<string>('ROUTING_STICKY_ROTATE_MS', '1800000'));
+    this.stickyRotateMs = Number.isFinite(rot) && rot > 0 ? rot : 0;
+    // 负载占比门：默认 2（份额超权重份额 2 倍才放弃粘性），≤0 关闭
+    const gate = Number(config.get<string>('ROUTING_STICKY_LOAD_GATE', '2'));
+    this.stickyLoadGate = Number.isFinite(gate) && gate > 0 ? gate : 0;
     const t = Number(config.get<string>('ROUTING_WEIGHT_TAU', '0.1'));
     this.pickTau = Number.isFinite(t) && t > 0 ? t : 0;
     this.autoReenableMs =
@@ -258,7 +268,17 @@ export class ChannelResolverService {
 
     const stickyHit =
       this.stickyEnabled && opts.stickyKey
-        ? applySticky(ranked, scores, opts.stickyKey, this.stickyRatio)
+        ? applySticky(ranked, scores, opts.stickyKey, this.stickyRatio, {
+            rotateMs: this.stickyRotateMs,
+            ...(this.stickyLoadGate > 0
+              ? {
+                  loadGate: this.stickyLoadGate,
+                  // 近期流量 = 当日请求量（滑窗快照自带，无额外 IO）
+                  loads: new Map(eligible.map((c) => [c.id, metricsMap.get(c.id)?.dayReq ?? 0])),
+                  weights: new Map(eligible.map((c) => [c.id, c.weight])),
+                }
+              : {}),
+          })
         : null;
 
     if (this.debug) {

@@ -32,6 +32,7 @@ import { GroupsModule } from '../groups/groups.module';
     ImagesExecutorService,
     ChatExecutorService,
   ],
-  exports: [ChannelResolverService],
+  // RoutingMetricsService 导出给控制台渠道模块（L2 信号展示，供人工校准 qualityScore）
+  exports: [ChannelResolverService, RoutingMetricsService],
 })
 export class GatewayModule {}

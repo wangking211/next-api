@@ -10,6 +10,7 @@ import {
   Switch,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import { useQuery } from '@tanstack/react-query';
@@ -58,7 +59,10 @@ export default function UsageStatsPage() {
         { label: tr('usage.requests'), value: (r) => r.requests },
         { label: 'Token', value: (r) => r.tokens },
         { label: tr('usage.csv.billedCost'), value: (r) => (r.billedCost * 100).toFixed(2) },
-        { label: tr('usage.csv.byokCost'), value: (r) => ((r.cost - r.billedCost) * 100).toFixed(2) },
+        {
+          label: tr('usage.csv.byokCost'),
+          value: (r) => ((r.cost - r.billedCost) * 100).toFixed(2),
+        },
         ...(isAdmin
           ? [
               {
@@ -111,7 +115,10 @@ export default function UsageStatsPage() {
             <Statistic title={tr('usage.requests')} value={t?.requests ?? 0} loading={isLoading} />
           </Col>
           <Col xs={12} md={4}>
-            <Statistic title={tr('usage.successErrors')} value={`${t?.success ?? 0} / ${t?.errors ?? 0}`} />
+            <Statistic
+              title={tr('usage.successErrors')}
+              value={`${t?.success ?? 0} / ${t?.errors ?? 0}`}
+            />
           </Col>
           <Col xs={12} md={4}>
             <Statistic title="Token" value={t?.tokens ?? 0} />
@@ -129,7 +136,10 @@ export default function UsageStatsPage() {
           {isAdmin && (
             <>
               <Col xs={12} md={4}>
-                <Statistic title={tr('usage.costPaid')} value={formatCredits(t?.billedUpstreamCost ?? 0)} />
+                <Statistic
+                  title={tr('usage.costPaid')}
+                  value={formatCredits(t?.billedUpstreamCost ?? 0)}
+                />
               </Col>
               <Col xs={12} md={4}>
                 <Statistic
@@ -163,9 +173,12 @@ export default function UsageStatsPage() {
             },
             { title: tr('usage.requests'), dataIndex: 'requests', width: 90 },
             { title: 'Token', dataIndex: 'tokens', width: 130 },
-                        costCol(tr('usage.costBilled'), 'billedCost'),
+            costCol(tr('usage.costBilled'), 'billedCost'),
             ...(isAdmin
-              ? [costCol(tr('usage.costPaid'), 'billedUpstreamCost'), costCol(tr('usage.margin'), 'margin')]
+              ? [
+                  costCol(tr('usage.costPaid'), 'billedUpstreamCost'),
+                  costCol(tr('usage.margin'), 'margin'),
+                ]
               : []),
           ]}
         />
@@ -185,7 +198,7 @@ export default function UsageStatsPage() {
                 { title: tr('common.model'), dataIndex: 'model', ellipsis: true },
                 { title: tr('usage.requests'), dataIndex: 'requests', width: 80 },
                 { title: 'Token', dataIndex: 'tokens', width: 120 },
-                            costCol(tr('usage.costBilled'), 'billedCost'),
+                costCol(tr('usage.costBilled'), 'billedCost'),
                 ...(isAdmin ? [costCol(tr('usage.margin'), 'margin')] : []),
               ]}
             />
@@ -201,7 +214,24 @@ export default function UsageStatsPage() {
               pagination={false}
               scroll={{ x: 740 }}
               columns={[
-                { title: tr('usage.column.channel'), dataIndex: 'name', ellipsis: true },
+                {
+                  title: tr('usage.column.channel'),
+                  dataIndex: 'name',
+                  ellipsis: true,
+                  // 成本估算标注：该渠道存在未配绝对成本的模型 → 上游成本含「官方价×折扣」估算成分
+                  render: (v: string, r: ChannelRow) => (
+                    <Space size={4}>
+                      <span>{v}</span>
+                      {r.costEstimated && (
+                        <Tooltip title={tr('usage.costEstimatedTip')}>
+                          <Tag color="gold" style={{ marginInlineEnd: 0 }}>
+                            {tr('usage.costEstimated')}
+                          </Tag>
+                        </Tooltip>
+                      )}
+                    </Space>
+                  ),
+                },
                 { title: tr('usage.requests'), dataIndex: 'requests', width: 80 },
                 { title: 'Token', dataIndex: 'tokens', width: 120 },
                 {
@@ -217,7 +247,7 @@ export default function UsageStatsPage() {
                   width: 95,
                   render: (v: number) => `${v}ms`,
                 },
-                            costCol(tr('usage.costBilled'), 'billedCost'),
+                costCol(tr('usage.costBilled'), 'billedCost'),
                 ...(isAdmin ? [costCol(tr('usage.margin'), 'margin')] : []),
               ]}
             />

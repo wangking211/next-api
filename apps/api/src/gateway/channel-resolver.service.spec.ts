@@ -78,8 +78,11 @@ function makeService(
   decryptImpl?: (s: string) => string,
   metricsMap?: Map<string, RouteMetrics>,
   cache?: TtlCacheService,
-  /** 测试默认关闭首选权重抽签（排序断言需要确定性）；抽签用例按需覆盖 */
-  configVars: Record<string, string> = { ROUTING_WEIGHT_TAU: '0' },
+  /** 测试默认关闭首选权重抽签（排序断言需要确定性）与粘性时间窗轮换（哈希含 now 分桶）；相关用例按需覆盖 */
+  configVars: Record<string, string> = {
+    ROUTING_WEIGHT_TAU: '0',
+    ROUTING_STICKY_ROTATE_MS: '0',
+  },
 ) {
   const prisma = {
     channelModel: { findMany: jest.fn().mockResolvedValue(rows) },

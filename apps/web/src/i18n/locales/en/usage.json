@@ -9,6 +9,8 @@
   "usage.byokNotCharged": "BYOK conversion (not charged)",
   "usage.costPaid": "Upstream cost (paid)",
   "usage.margin": "Margin",
+  "usage.costEstimated": "Estimated",
+  "usage.costEstimatedTip": "This channel has models without explicit absolute cost; upstream cost includes estimates derived from official price x discount",
   "usage.byApiKey": "By API Key",
   "usage.byModel": "By model",
   "usage.byChannel": "By channel",

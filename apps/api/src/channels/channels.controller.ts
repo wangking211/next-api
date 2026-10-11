@@ -35,9 +35,7 @@ export class ChannelsController {
       model: query.model || undefined,
       userId: query.userId || undefined,
       status:
-        query.status && query.status in ChannelStatus
-          ? (query.status as ChannelStatus)
-          : undefined,
+        query.status && query.status in ChannelStatus ? (query.status as ChannelStatus) : undefined,
       ownerType:
         query.ownerType && query.ownerType in ChannelOwnerType
           ? (query.ownerType as ChannelOwnerType)
@@ -51,11 +49,14 @@ export class ChannelsController {
     return this.channels.availableModels(user);
   }
 
+  /** L2 信号（滑窗有效回复率/拒答率）：渠道定价表人工校准 qualityScore 用 */
+  @Get(':id/route-signals')
+  routeSignals(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.channels.routeSignals(user, id);
+  }
+
   @Post('test-connection')
-  testConnection(
-    @CurrentUser() user: AuthUser,
-    @Body() dto: TestConnectionDto,
-  ) {
+  testConnection(@CurrentUser() user: AuthUser, @Body() dto: TestConnectionDto) {
     return this.channels.testConnection(user, dto);
   }
 
@@ -65,11 +66,7 @@ export class ChannelsController {
   }
 
   @Post(':id/test')
-  test(
-    @CurrentUser() user: AuthUser,
-    @Param('id') id: string,
-    @Body() dto: TestChannelDto,
-  ) {
+  test(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: TestChannelDto) {
     return this.channels.testChannel(user, id, { model: dto.model, models: dto.models });
   }
 
@@ -79,11 +76,7 @@ export class ChannelsController {
   }
 
   @Patch(':id')
-  update(
-    @CurrentUser() user: AuthUser,
-    @Param('id') id: string,
-    @Body() dto: UpdateChannelDto,
-  ) {
+  update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateChannelDto) {
     return this.channels.update(user, id, dto);
   }
 

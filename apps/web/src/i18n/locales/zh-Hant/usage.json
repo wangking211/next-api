@@ -9,6 +9,8 @@
   "usage.byokNotCharged": "BYOK 折算（不扣費）",
   "usage.costPaid": "成本（實付）",
   "usage.margin": "毛利",
+  "usage.costEstimated": "估算",
+  "usage.costEstimatedTip": "該渠道存在未配絕對成本的模型，上游成本含「官方價×折扣」估算成分",
   "usage.byApiKey": "按 API Key",
   "usage.byModel": "按模型",
   "usage.byChannel": "按渠道",

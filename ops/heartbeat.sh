@@ -7,8 +7,9 @@
 # 容器栈检查：
 #   1. curl 探 /api/health（应用视角：db + redis）；
 #   2. docker inspect 查各容器 running / health / RestartCount（容器视角）；
-#   3. 有异常 → 推送 ALERT_WEBHOOK_URL（从 .env 提取；未配置则只写日志）；
-#   4. 恢复后补一条恢复通知；同一状态在去重窗口内不重复推送。
+#   3. 备份新鲜度（RPO 24h）：BACKUP_DIR 内最新 *.sql.gz 超过阈值未更新则告警；
+#   4. 有异常 → 推送 ALERT_WEBHOOK_URL（从 .env 提取；未配置则只写日志）；
+#   5. 恢复后补一条恢复通知；同一状态在去重窗口内不重复推送。
 #
 # 环境变量：
 #   ALERT_WEBHOOK_URL       告警地址（默认从 ENV_FILE 提取；留空 = 只记日志。
@@ -20,6 +21,9 @@
 #   HEARTBEAT_LOG           事件日志   默认 /var/log/aigw-heartbeat.log
 #   HEARTBEAT_RESTART_LIMIT 重启计数阈值 默认 3
 #   HEARTBEAT_DEDUP_SEC     同状态告警去重窗口（秒） 默认 1800
+#   BACKUP_DIR              备份目录（RPO 检查）  默认 /var/backups/aigw
+#   BACKUP_MAX_AGE_HOURS    备份新鲜度阈值（小时） 默认 26（每日备份 + 2h 余量）
+#   BACKUP_CHECK            是否检查备份新鲜度    默认 true（无备份目录时静默跳过）
 # 不用 set -e：检查循环要跑完所有故障项再统一上报。
 set -uo pipefail
 
@@ -30,6 +34,9 @@ HEARTBEAT_STATE="${HEARTBEAT_STATE:-/var/run/aigw-heartbeat.state}"
 HEARTBEAT_LOG="${HEARTBEAT_LOG:-/var/log/aigw-heartbeat.log}"
 HEARTBEAT_RESTART_LIMIT="${HEARTBEAT_RESTART_LIMIT:-3}"
 HEARTBEAT_DEDUP_SEC="${HEARTBEAT_DEDUP_SEC:-1800}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/aigw}"
+BACKUP_MAX_AGE_HOURS="${BACKUP_MAX_AGE_HOURS:-26}"
+BACKUP_CHECK="${BACKUP_CHECK:-true}"
 
 # 不整文件 source .env（值里的特殊字符会炸脚本），只提取告警地址
 if [ -z "${ALERT_WEBHOOK_URL:-}" ] && [ -f "$ENV_FILE" ]; then
@@ -61,7 +68,24 @@ for c in $HEARTBEAT_CONTAINERS; do
   fi
 done
 
+# 备份新鲜度（RPO 24h）：cron 每日一备，>26h 未见新备份视为备份链路断了。
+# 目录不存在 = 本机未启用备份 → 静默跳过（不把没装的机器刷成告警风暴）。
 now="$(date +%s)"
+if [ "$BACKUP_CHECK" = "true" ] && [ -d "$BACKUP_DIR" ]; then
+  newest="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.sql.gz' -printf '%T@\n' 2>/dev/null \
+    | sort -rn | head -1 || true)"
+  if [ -n "$newest" ]; then
+    newest_int="${newest%%.*}"
+    case "$newest_int" in '' | *[!0-9]*) newest_int=0 ;; esac
+    age_hours=$(( (now - newest_int) / 3600 ))
+    if [ "$age_hours" -gt "$BACKUP_MAX_AGE_HOURS" ]; then
+      problems+=("backup stale: newest dump in $BACKUP_DIR is ${age_hours}h old (limit ${BACKUP_MAX_AGE_HOURS}h)")
+    fi
+  else
+    problems+=("backup missing: no *.sql.gz under $BACKUP_DIR")
+  fi
+fi
+
 prev="$(cut -d' ' -f1,2 "$HEARTBEAT_STATE" 2>/dev/null || echo '0 ok')"
 prev_ts="${prev%% *}"
 prev_status="${prev##* }"

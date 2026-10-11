@@ -29,6 +29,7 @@ import {
   RequestLogDetail,
   RequestLogRow,
   RevenueSummary,
+  RouteSignalsResult,
   UsageAnalytics,
   UsageDailyRow,
   UsageSummary,
@@ -172,6 +173,13 @@ export const channelsApi = {
   },
   async availableModels(signal?: AbortSignal) {
     const { data } = await api.get<AvailableChannelModels>('/channels/available-models', {
+      signal,
+    });
+    return data;
+  },
+  /** L2 被动信号（滑窗有效回复率/拒答率）：渠道定价表人工校准 qualityScore 用 */
+  async routeSignals(id: string, signal?: AbortSignal) {
+    const { data } = await api.get<RouteSignalsResult>(`/channels/${id}/route-signals`, {
       signal,
     });
     return data;

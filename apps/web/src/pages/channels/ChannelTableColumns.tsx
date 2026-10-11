@@ -181,6 +181,17 @@ export function buildChannelColumns({
         const rows = r.modelPrices ?? [];
         const priced = rows.filter((m) => m.priceInput != null || m.priceOutput != null).length;
         const discounts = rows.map((m) => m.discount).filter((d): d is number => d != null);
+        // 成本覆盖率：已配绝对成本（costInput/costPerCall）的模型数 / 总模型数。
+        // 覆盖不全时智能路由与毛利统计对缺失模型用「官方价×成本折扣」估算。
+        const configured = rows.filter((m) => m.costInput != null || m.costPerCall != null).length;
+        const coverage =
+          rows.length > 0 && configured < rows.length ? (
+            <Tooltip title={t('channels.table.costCoverageTip')}>
+              <Tag color={configured === 0 ? 'red' : 'gold'}>
+                {t('channels.table.costCoverage', { configured, total: rows.length })}
+              </Tag>
+            </Tooltip>
+          ) : null;
         return (
           <Space size={4} wrap>
             {priced ? (
@@ -193,6 +204,7 @@ export function buildChannelColumns({
                 {t('channels.table.discountTag', { value: Math.min(...discounts) })}
               </Tag>
             )}
+            {coverage}
           </Space>
         );
       },
