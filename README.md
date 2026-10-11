@@ -91,6 +91,7 @@ pnpm cleanup             # 执行清理
 | PATCH/DELETE      | `/api/keys/:id`                       | 更新/删除 key                                                                                                                                                                                                               | 登录                              |
 | GET               | `/api/channels`                       | 渠道列表（分页+过滤：`name/provider/status/ownerType/model`）                                                                                                                                                               | 登录（管理员可见全部/按归属过滤） |
 | GET               | `/api/channels/available-models`      | 当前用户可用模型（按渠道分组）                                                                                                                                                                                              | 登录                              |
+| GET               | `/api/channels/:id/route-signals`     | 渠道 L2 被动信号（按模型返回滑窗有效回复率/拒答率，供人工校准质量分，只展示不自动覆盖人工分）                                                                                                                               | 属主或管理员                      |
 | POST              | `/api/channels`                       | 创建渠道                                                                                                                                                                                                                    | 登录（PLATFORM 仅管理员）         |
 | POST              | `/api/channels/:id/test`              | 渠道连通性测试（传 `models` 批量，缺省测试该渠道全部模型）                                                                                                                                                                  | 属主或管理员                      |
 | POST              | `/api/channels/test-connection`       | 测试未保存的渠道配置（新增/编辑弹窗用，支持 `models` 批量）                                                                                                                                                                 | 登录                              |
@@ -352,7 +353,7 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 - **限流/超限识别**：HTTP 429，或 4xx 错误体命中配额特征（`insufficient_quota` / `quota exceeded` / 日限额文案等）→ 记为「限流」：立即冷却并按连续次数指数退避（`CHANNEL_RATE_LIMIT_BASE_MS` ×2ⁿ，封顶 `CHANNEL_MODEL_COOLDOWN_MAX_MS`），**不累计**渠道 `failureCount`（不会因限流自动禁用），且故障转移到下一家。
 - **每日限额**：渠道可配 `每日调用限额` / `每日 Token 限额`（渠道编辑表单，留空不限；自然日按 UTC+8，可用 `CHANNEL_LIMIT_DAY_OFFSET_HOURS` 调整）。Redis 按 `route:d:<渠道>:<自然日>` 计数，评分前剔除已超限渠道；全部超限时兜底放行。
 - **半开恢复（渠道级）**：`autoDisabled` 渠道满 `CHANNEL_AUTO_REENABLE_MS` 冷却后懒式恢复（`failureCount` 置阈值-1，下一次失败即再禁用），无需定时任务。
-- **会话粘性**：请求头 `x-session-id`（缺省用 `userId + 前 2 条 messages 前缀`）映射到与榜首同 `(tier, priority)` 组内候选，且 `score(偏好) ≥ ROUTING_STICKY_RATIO × score(榜首)` 才前置 —— 保住上游 prompt cache 但不为缓存死抱劣质渠道；`ROUTING_STICKY=false` 关闭。
+- **会话粘性**：请求头 `x-session-id`（缺省用 `userId + 前 2 条 messages 前缀`）映射到与榜首同 `(tier, priority)` 组内候选，且 `score(偏好) ≥ ROUTING_STICKY_RATIO × score(榜首)` 才前置 —— 保住上游 prompt cache 但不为缓存死抱劣质渠道；`ROUTING_STICKY=false` 关闭。两个热点防护：**时间窗轮换**（粘性键按 `ROUTING_STICKY_ROTATE_MS`（默认 30min）分桶换哈希，跨桶强制重选路，不把单会话永久钉死同一渠道）与**负载占比门**（偏好候选近期流量份额 > 权重份额 × `ROUTING_STICKY_LOAD_GATE`（默认 2，0=关）且组内样本 ≥ 50 时放弃粘性，防粘性把流量堆到超载的低权重渠道）。
 - **整请求 deadline**：`GATEWAY_DEADLINE_MS`（默认 5min）为跨故障转移共享的总预算——耗尽即 504 `gateway_timeout`，单次尝试超时钳制在剩余预算内（默认仍 120s 封顶）；流式响应头发出后由空闲超时接管，不受此限（不砍正常进行中的长流）。
 - **错误分类**（`gateway.exec-support`）：5xx/连接失败 → 计渠道失败数 + 指标（**模型级故障豁免**：渠道其它模型窗口期内成功过 → 只记现场不计数，防一条坏模型连坐禁用整条渠道）；限流/超限 → 冷却不计失败（含上游 Retry-After 透传退避）；上游 401 → 只降路由分；拒答/内容过滤 → 只降质量分且**故障转移到下一家**（不同供应商审核宽严不同，换一家可能正常出量；拒答文案特征压过状态码，5xx+拒答文案不计渠道失败）；其余客户端 4xx 不做任何渠道判罚。流式中途断流走同一套分类口径（中途 429 不再误计渠道失败）。
 - **观测**：`ROUTING_DEBUG=true` 时每次路由打印候选打分与标记（`!` 冷却、`#` 超限、`~` 半开）；控制台「使用统计 → 按渠道」含请求数/错误数/平均延迟/费用，「调用日志」支持按渠道过滤与 CSV 导出。
@@ -363,6 +364,7 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 | --------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------ |
 | `ROUTING_STRATEGY`                                                    | `BALANCED`                  | 全局默认路由策略                                             |
 | `ROUTING_STICKY` / `ROUTING_STICKY_RATIO`                             | `true` / `0.8`              | 会话粘性开关 / 前置得分比阈值                                |
+| `ROUTING_STICKY_ROTATE_MS` / `ROUTING_STICKY_LOAD_GATE`               | `1800000` / `2`             | 粘性时间窗轮换（0=关） / 负载占比门倍数（0=关）              |
 | `ROUTING_WEIGHT_TAU`                                                  | `0.1`                       | 同层首选权重抽签温度（分数÷τ 与 ln(weight) 的博弈；≤0 关闭） |
 | `GATEWAY_DEADLINE_MS`                                                 | `300000`                    | 整请求跨故障转移总预算（≤0 关闭；耗尽返回 504）              |
 | `ROUTING_METRICS_WINDOW_MS` / `TTL_MS` / `RETRY_MS`                   | `600000` / `5000` / `10000` | 指标滑窗 / 快照缓存 / Redis 故障退避                         |
@@ -410,6 +412,8 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
   - **健康检查**（默认 5 分钟）：DB/Redis 探活，仅**状态迁移**时推 `ALERT_WEBHOOK_URL`（`service_degraded` / `service_recovered`；首检正常不告警，持续故障不重复刷屏），并刷新 `service_up` 指标；
   - **证书到期**（默认 6 小时）：TLS 握手读取对端证书有效期（`rejectUnauthorized: false` 只看有效期，不因中间证书缺失误报），剩余天数 ≤ `CERT_EXPIRY_WARN_DAYS`（默认 14）推 `cert_expiring` 告警并每 24h 重发，续期后复位；每次检查刷新 `cert_expiry_days` 指标。
   - 相关环境变量：`METRICS_TOKEN`、`WATCHDOG_ENABLED` / `WATCHDOG_INITIAL_DELAY_MS` / `WATCHDOG_HEALTH_INTERVAL_MS` / `WATCHDOG_CERT_INTERVAL_MS`、`CERT_CHECK_HOST`（默认 `xiaopuyun.com`）/ `CERT_CHECK_PORT` / `CERT_EXPIRY_WARN_DAYS`。
+- **结构化日志**：生产环境（`NODE_ENV=production`）应用日志输出为 JSON 行（`time` / `level` / `context` / `message`，错误另含 `stack`，error/fatal 走 stderr），便于日志采集与检索；开发环境保持 Nest 默认彩色可读输出。
+- **请求日志保留期**：`REQUEST_LOG_RETENTION_DAYS`（默认 `0`=不清理）>0 时，`LogRetentionService` 每日分批（每批 5000 行）删除超期的 `RequestLog`，定时器 `unref` 不阻塞进程退出；周期可用 `REQUEST_LOG_RETENTION_INTERVAL_MS`（默认 24h）调整。生产建议设 `180`（六个月）。
 
 ## 安全说明
 
