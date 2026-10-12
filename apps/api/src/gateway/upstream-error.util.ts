@@ -60,7 +60,7 @@ export function isModelAccessDenied(e: UpstreamError): boolean {
 export interface FailureClass {
   /** 限流/超限：冷却退避，不累计渠道失败 */
   limited: boolean;
-  /** 可重试故障（5xx / 网络中断）：累计渠道失败与 (渠道,模型) 熔断 */
+  /** 可重试故障（5xx / 网络中断 / 402 余额耗尽）：累计渠道失败与 (渠道,模型) 熔断 */
   transient: boolean;
   /** 上游鉴权失效（401）：只降路由质量指标 */
   authFault: boolean;
@@ -91,8 +91,12 @@ export function classifyUpstreamFailure(e: unknown): FailureClass {
   const authFault = !!ue && !limited && status === 401;
   const modelDenied = !!ue && !limited && !authFault && isModelAccessDenied(ue);
   const refusal = !limited && !authFault && !modelDenied && !!ue && isRefusal(ue);
+  // 402 = 上游账户余额耗尽：渠道侧故障（该渠道此刻任何模型都不可用），在分类层
+  // 统一按可重试故障处理（不依赖 provider 的 retryable 标记，所有能力执行器自动生效）：
+  // 计渠道失败/熔断并换下一家；余额恢复后走半开探活自动拉回。
+  const balance = !!ue && status === 402;
   // 普通 Error（网络中断/解码失败）与未命中任何特征的 UpstreamError 按可重试故障处理
-  const transient = !limited && !refusal && (!ue || ue.retryable);
+  const transient = !limited && !refusal && (!ue || ue.retryable || balance);
   return {
     limited,
     transient,

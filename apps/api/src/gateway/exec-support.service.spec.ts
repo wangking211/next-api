@@ -264,6 +264,44 @@ describe('handleUpstreamFailure（拒答参与故障转移 + 分类边界）', (
       count: true,
     });
   });
+
+  it('402 余额耗尽（provider 标不可重试）→ 计渠道失败并转移下一家', async () => {
+    const s = makeSupport();
+    const action = await s.support.handleUpstreamFailure(
+      new UpstreamError('Upstream error 402', 402, false, {
+        error: { message: 'Insufficient Balance', type: 'insufficient_balance' },
+      }),
+      failureCtx(s, chan, true),
+    );
+    expect(action).toBe('continue');
+    expect(s.health.recordFailure).toHaveBeenCalledWith('ch1', expect.any(String), {
+      count: true,
+    });
+    expect(s.metrics.record).toHaveBeenCalledWith(
+      'ch1',
+      'm',
+      'error',
+      expect.objectContaining({ status: 402 }),
+    );
+  });
+
+  it('401 鉴权失效 → 回归锁定：已在可转移类，只降质量分不计渠道失败', async () => {
+    const s = makeSupport();
+    const action = await s.support.handleUpstreamFailure(
+      new UpstreamError('Upstream error 401', 401, false, {
+        error: { message: 'Invalid or inactive API key' },
+      }),
+      failureCtx(s, chan, true),
+    );
+    expect(action).toBe('continue');
+    expect(s.health.recordFailure).not.toHaveBeenCalled();
+    expect(s.metrics.record).toHaveBeenCalledWith(
+      'ch1',
+      'm',
+      'error',
+      expect.objectContaining({ status: 401 }),
+    );
+  });
 });
 
 describe('handleUpstreamFailure（模型级故障豁免，不连坐渠道禁用）', () => {

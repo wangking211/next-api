@@ -81,6 +81,20 @@ describe('classifyUpstreamFailure（统一分类口径：故障转移与流式�
     expect(denied.transient).toBe(false);
   });
 
+  it('402 余额耗尽 → transient（不依赖 provider retryable：渠道侧故障照常换下一家）', () => {
+    const c = classifyUpstreamFailure(ue(402, false, 'Insufficient Balance'));
+    expect(c.transient).toBe(true);
+    expect(c.limited).toBe(false);
+    expect(c.refusal).toBe(false);
+    expect(c.status).toBe(402);
+  });
+
+  it('402 + 配额文案 → limited 优先（冷却退避、不计失败，同样可转移）', () => {
+    const c = classifyUpstreamFailure(ue(402, false, 'insufficient quota for this token'));
+    expect(c.limited).toBe(true);
+    expect(c.transient).toBe(false);
+  });
+
   it('普通 Error（网络中断/解码失败）→ transient，signal 取 message', () => {
     const c = classifyUpstreamFailure(new Error('socket hang up'));
     expect(c.transient).toBe(true);

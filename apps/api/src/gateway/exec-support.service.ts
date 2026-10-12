@@ -222,14 +222,14 @@ export class ExecSupportService {
   ): Promise<'continue' | 'responded'> {
     const latencyMs = Date.now() - ctx.attemptStart;
     // 错误分类（客户端 4xx 不计健康度，防止被恶意请求自动禁用渠道）：
-    //  限流/超限 → 冷却退避且不累计失败；5xx/连接故障 → 健康度失败计数（模型级故障豁免）；
+    //  限流/超限 → 冷却退避且不累计失败；5xx/连接故障/402 余额耗尽 → 健康度失败计数（模型级故障豁免）；
     //  上游鉴权失败(401) → 只降路由质量分；拒答/内容过滤 → 只降质量分，且换下一家再试
     const cls = classifyUpstreamFailure(e);
     await this.recordOutcomes(ctx.channel, ctx.model, cls, {
       latencyMs,
       errorMessage: cls.signal,
     });
-    // 故障转移：上游故障、限流/超限、鉴权失效、无权访问该模型、拒答都换下一家试
+    // 故障转移：上游故障、限流/超限、余额耗尽(402)、鉴权失效、无权访问该模型、拒答都换下一家试
     //（拒答换供应商常有不同审核宽严，换一家可能正常出量；全部候选才返回错误）
     if (
       (cls.transient || cls.limited || cls.authFault || cls.modelDenied || cls.refusal) &&
