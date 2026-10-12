@@ -137,9 +137,9 @@ export class ExecSupportService {
    * 按分类写健康度与路由指标——handleUpstreamFailure 与流式中断（响应头已发出、
    * 无法故障转移）两条路径共用同一口径：
    * - limited → 记 429 现场（不计失败）+ (渠道,模型) 冷却（含 Retry-After 退避）
-   * - transient → 渠道失败计数 + (渠道,模型) 熔断；模型级故障豁免只记现场不计数
+   * - transient / authFault(401) → 渠道失败计数 + (渠道,模型) 熔断；模型级故障豁免只记现场不计数
    * - modelDenied → 只冷却该 (渠道,模型) 组合
-   * - authFault → 记路由指标（连带熔断）；refusal → 只降质量分，不计失败、不熔断
+   * - refusal → 只降质量分，不计失败、不熔断
    */
   async recordOutcomes(
     channel: Channel,
@@ -170,7 +170,11 @@ export class ExecSupportService {
       });
       return;
     }
-    if (cls.transient) {
+    // transient 与 authFault(401) 同口径：都计渠道失败（含模型级故障豁免）并熔断该组合。
+    // 上游 401 = 渠道自己的 API Key 失效——Key 由服务端下发，客户端无法制造，
+    // 故不存在「恶意请求刷失败禁用渠道」的面；死 Key 渠道连续达阈值自动停用，
+    // 换 Key / 修复后半开探活自动恢复。
+    if (cls.transient || cls.authFault) {
       const scoped = await this.isModelScopedFailure(channel, model);
       await this.health.recordFailure(channel.id, args.errorMessage, { count: !scoped });
       await this.metrics.record(channel.id, model, 'error', metric);
@@ -180,8 +184,8 @@ export class ExecSupportService {
       await this.metrics.record(channel.id, model, 'model_denied', metric);
       return;
     }
-    if (cls.authFault || cls.refusal) {
-      await this.metrics.record(channel.id, model, cls.authFault ? 'error' : 'refused', metric);
+    if (cls.refusal) {
+      await this.metrics.record(channel.id, model, 'refused', metric);
     }
   }
 
@@ -221,9 +225,10 @@ export class ExecSupportService {
     },
   ): Promise<'continue' | 'responded'> {
     const latencyMs = Date.now() - ctx.attemptStart;
-    // 错误分类（客户端 4xx 不计健康度，防止被恶意请求自动禁用渠道）：
-    //  限流/超限 → 冷却退避且不累计失败；5xx/连接故障/402 余额耗尽 → 健康度失败计数（模型级故障豁免）；
-    //  上游鉴权失败(401) → 只降路由质量分；拒答/内容过滤 → 只降质量分，且换下一家再试
+    // 错误分类（客户端 4xx 不计健康度，防止被恶意请求自动禁用渠道；上游 401 是渠道
+    // 自己的 Key 失效、非客户端可制造，故计入健康度）：
+    //  限流/超限 → 冷却退避且不累计失败；5xx/连接故障/402 余额耗尽/401 Key 失效 → 健康度失败
+    //  计数（模型级故障豁免）；拒答/内容过滤 → 只降质量分，且换下一家再试
     const cls = classifyUpstreamFailure(e);
     await this.recordOutcomes(ctx.channel, ctx.model, cls, {
       latencyMs,

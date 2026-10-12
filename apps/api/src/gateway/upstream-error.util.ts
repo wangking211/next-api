@@ -62,7 +62,7 @@ export interface FailureClass {
   limited: boolean;
   /** 可重试故障（5xx / 网络中断 / 402 余额耗尽）：累计渠道失败与 (渠道,模型) 熔断 */
   transient: boolean;
-  /** 上游鉴权失效（401）：只降路由质量指标 */
+  /** 上游鉴权失效（401，渠道 Key 无效/过期）：与可重试故障同口径计渠道失败（Key 由服务端下发，非客户端可制造） */
   authFault: boolean;
   /** 无权访问该模型（403/404 特征）：只冷却该 (渠道,模型) 组合 */
   modelDenied: boolean;
