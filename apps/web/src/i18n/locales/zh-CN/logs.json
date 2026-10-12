@@ -19,6 +19,8 @@
   "logs.tokensInOut": "输入 {{prompt}} / 输出 {{completion}}",
   "logs.byokTip": "BYOK 自带密钥，不扣积分；折算 {{value}}",
   "logs.notBilled": "未计费",
+  "logs.cached": "缓存",
+  "logs.cachedTip": "命中精确匹配响应缓存，费用已按折扣计收",
   "logs.detail.open": "详情",
   "logs.detail.title": "调用详情",
   "logs.detail.provider": "服务商",

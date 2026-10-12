@@ -36,6 +36,13 @@ export interface UsageEntry {
   costOverride?: number;
   upstreamCostOverride?: number;
   /**
+   * 命中精确匹配响应缓存：无上游成本（upstreamCost 记 0），费用按 cacheDiscount 折算，
+   * 且不进渠道健康度/路由信号（调用方不记录即可，仅作落账标记）。
+   */
+  cached?: boolean;
+  /** 缓存折扣（0~1）：给定时 cost = 原价 × 折扣、upstreamCost = 0；缺省不打折 */
+  cacheDiscount?: number;
+  /**
    * 渠道×模型定价（网关 resolve 时已带出）；命中时 computeCosts 免查目录与渠道价，
    * 热路径省 2 次查询。缺省则回退 getChannelPricing。
    */
@@ -136,7 +143,7 @@ export class UsageService {
     const multiplier =
       entry.multiplier ?? (entry.userId ? await this.billing.getUserMultiplier(entry.userId) : 1);
     // 按次计费模型（图片等）直接给定金额；否则按 token 计价
-    const { cost, upstreamCost } =
+    const priced =
       entry.costOverride != null
         ? {
             cost: round6(entry.costOverride),
@@ -153,6 +160,11 @@ export class UsageService {
             multiplier,
             entry.pricing,
           );
+    // 命中精确匹配响应缓存：用户按折扣价付费（0<折扣<1 才生效），平台无上游支出 → 毛利=实收
+    const discounted =
+      entry.cacheDiscount != null && entry.cacheDiscount > 0 && entry.cacheDiscount < 1;
+    const cost = discounted ? round6(priced.cost * (entry.cacheDiscount as number)) : priced.cost;
+    const upstreamCost = discounted ? 0 : priced.upstreamCost;
     const date = utcDay();
 
     // Prometheus 网关指标（按模型的请求/tokens/实扣费用）。放在落库之前：
@@ -193,6 +205,7 @@ export class UsageService {
             chargeable: entry.chargeable === true,
             multiplierApplied: multiplier,
             multiplierSource: entry.multiplierSource ?? null,
+            cached: entry.cached === true,
             latencyMs: entry.latencyMs,
             status: entry.status,
             // 上游文案与请求/响应预览都可能混入密钥 → 入库前统一脱敏
@@ -569,6 +582,7 @@ export class UsageService {
           totalTokens: true,
           cost: true,
           chargeable: true,
+          cached: true,
           latencyMs: true,
           status: true,
           errorMessage: true,

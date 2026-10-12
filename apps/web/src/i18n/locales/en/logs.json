@@ -19,6 +19,8 @@
   "logs.tokensInOut": "Prompt {{prompt}} / Completion {{completion}}",
   "logs.byokTip": "BYOK key, no credits charged; converted {{value}}",
   "logs.notBilled": "Not billed",
+  "logs.cached": "Cached",
+  "logs.cachedTip": "Exact-match response cache hit; billed at the cache discount",
   "logs.detail.open": "Details",
   "logs.detail.title": "Request details",
   "logs.detail.provider": "Provider",

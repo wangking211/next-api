@@ -19,6 +19,8 @@
   "logs.tokensInOut": "輸入 {{prompt}} / 輸出 {{completion}}",
   "logs.byokTip": "BYOK 自帶金鑰，不扣積分；折算 {{value}}",
   "logs.notBilled": "未計費",
+  "logs.cached": "快取",
+  "logs.cachedTip": "命中精確比對回應快取，費用已按折扣計收",
   "logs.detail.open": "詳情",
   "logs.detail.title": "呼叫詳情",
   "logs.detail.provider": "服務商",

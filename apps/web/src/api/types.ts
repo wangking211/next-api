@@ -254,6 +254,8 @@ export interface RequestLogRow {
   cost: string;
   /** false = BYOK 自带密钥，未从余额扣费 */
   chargeable: boolean;
+  /** true = 命中精确匹配响应缓存（按缓存折扣计费，无上游成本） */
+  cached: boolean;
   latencyMs: number | null;
   status: number;
   errorMessage: string | null;

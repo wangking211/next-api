@@ -227,9 +227,17 @@ export default function LogsPage() {
           {
             title: t('logs.column.type'),
             dataIndex: 'isStream',
-            width: 70,
-            render: (v: boolean) =>
-              v ? <Tag>{t('logs.stream')}</Tag> : <Tag>{t('logs.nonStream')}</Tag>,
+            width: 120,
+            render: (v: boolean, r) => (
+              <>
+                {v ? <Tag>{t('logs.stream')}</Tag> : <Tag>{t('logs.nonStream')}</Tag>}
+                {r.cached && (
+                  <Tooltip title={t('logs.cachedTip')}>
+                    <Tag color="blue">{t('logs.cached')}</Tag>
+                  </Tooltip>
+                )}
+              </>
+            ),
           },
           {
             title: 'Tokens',
@@ -314,6 +322,13 @@ export default function LogsPage() {
               <Descriptions.Item label="Key">{detail.apiKey?.name ?? '-'}</Descriptions.Item>
               <Descriptions.Item label={t('logs.detail.type')}>
                 {detail.isStream ? t('logs.stream') : t('logs.nonStream')}
+                {detail.cached && (
+                  <Tooltip title={t('logs.cachedTip')}>
+                    <Tag color="blue" style={{ marginInlineStart: 8 }}>
+                      {t('logs.cached')}
+                    </Tag>
+                  </Tooltip>
+                )}
               </Descriptions.Item>
               <Descriptions.Item label={t('logs.detail.ioTokens')}>
                 {detail.promptTokens} / {detail.completionTokens}

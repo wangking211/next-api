@@ -374,6 +374,30 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 | `CHANNEL_FAILURE_THRESHOLD` / `CHANNEL_AUTO_REENABLE_MS`              | `5` / `900000`              | 渠道级失败禁用阈值 / 自动禁用冷却                            |
 | `CHANNEL_LIMIT_DAY_OFFSET_HOURS`                                      | `8`                         | 每日限额的自然日分界（UTC+8）                                |
 
+### 精确匹配响应缓存（/v1/chat/completions）
+
+同一「候选渠道集合 + 规范模型名 + 请求体」在短窗口内直接复用已生成的响应：**用户按折扣付费、平台零上游成本**。与语义缓存的本质区别是零误判——只做精确匹配，绝不做相似度猜测。
+
+- **缓存键** = `sha256(候选渠道ID集合(排序) × 模型(规范名) × 流式标记 × 规范化请求体)`。候选集合进键是**合规隔离的根基**：分组 / BYOK / 共享可见性不同的调用方候选集不同 → 键不同，国内组与海外组绝无串答案；别名与规范名命中同一份缓存。
+- **命中条件**（`shouldHandle`，读写同一口径）：请求体 `cache:true`（任意采样参数），或 `temperature===0`（确定性请求，语义等价、无意外）；`cache:false` 强制绕过。命中响应带 `X-Gateway-Cache: hit` 头，`RequestLog.cached=true`，控制台「调用日志」类型列显示「缓存」标记。
+- **计费口径**：命中按原价 × `RESPONSE_CACHE_DISCOUNT`（默认 0.6）实扣，`upstreamCost=0`（毛利=实收）；共享渠道命中同样给渠道主按折扣实收分成。预授权与正常路径同口径——余额不足以覆盖「输入+最大输出」全价上限时不命中（不给白嫖窗口）。
+- **不缓存**：拒答（`content_filter` / `refusal`——命中会跳过「换渠道重试」）、错误响应、超过 `RESPONSE_CACHE_MAX_BYTES` 的长输出。
+- **不污染信号**：命中不计渠道健康度与 L2 路由信号（缓存命中不是渠道质量证据），`usage.record` 照常落账（Prometheus/日聚合口径一致）。
+- **fail-open**：Redis 故障时缓存读写直接跳过（30s 冷却防热路径等重连），网关行为退化为正常路由；流式命中按原始 SSE 分片重放（Anthropic 客户端经既有翻译器转换），用量取生成时的真实值。
+
+```bash
+# 命中一次（temperature:0 自动走缓存；第二次为缓存命中，按 6 折计费）
+curl https://xiaopuyun.com/v1/chat/completions -H "Authorization: Bearer $KEY" \
+  -d '{"model":"deepseek-flash","temperature":0,"messages":[{"role":"user","content":"hi"}]}'
+```
+
+| 变量                       | 默认     | 说明                                    |
+| -------------------------- | -------- | --------------------------------------- |
+| `RESPONSE_CACHE_ENABLED`   | `true`   | 全局开关（false = 网关零接触缓存）      |
+| `RESPONSE_CACHE_TTL_MS`    | `600000` | 命中窗口（1s~1h）                       |
+| `RESPONSE_CACHE_DISCOUNT`  | `0.6`    | 命中折扣（0~1，用户实付 = 原价 × 折扣） |
+| `RESPONSE_CACHE_MAX_BYTES` | `524288` | 单条记录体积上限，超限不缓存            |
+
 ## 模型分组与产地（分组隔离 / 分组倍率 / 模型映射）
 
 以「分组」为核心做分档售卖与合规隔离（借鉴 new-api 的 GroupRatio / 渠道分组并做简化）：

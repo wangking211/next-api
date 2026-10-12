@@ -451,6 +451,8 @@ model RequestLog {
   /// 本次调用生效的售价倍率与来源（user / group / agent / default），用于账单审计
   multiplierApplied Decimal? @db.Decimal(6, 4)
   multiplierSource  String?
+  /// 是否命中精确匹配响应缓存：命中按缓存折扣计费、无上游成本，且不计渠道健康度/路由信号
+  cached            Boolean  @default(false)
   latencyMs        Int?
   status           Int      @default(200)
   errorMessage     String?

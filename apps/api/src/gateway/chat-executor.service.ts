@@ -2,7 +2,7 @@
  * 对话能力执行器：/v1/chat/completions 的 OpenAI 内部形态执行（含流式 SSE pipeStream、
  * token 估算 estimateUsage、预授权与故障转移）；Anthropic Messages 路由复用同一执行器。
  */
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import type { Response } from 'express';
 import { Channel } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
@@ -22,8 +22,13 @@ import { ChannelResolverService } from './channel-resolver.service';
 import { GroupsService } from '../groups/groups.service';
 import { ExecSupportService } from './exec-support.service';
 import { settleInBackground } from './settle.util';
+import {
+  ResponseCacheService,
+  refusalInJson,
+  refusalInStreamChunks,
+} from './response-cache.service';
 import { UpstreamError, openaiError } from './types';
-import type { GatewayAuthContext, GatewayRequest, StreamResult } from './types';
+import type { GatewayAuthContext, GatewayRequest, ResolvedChannel, StreamResult } from './types';
 import {
   AnthropicStreamTranslator,
   openAiToAnthropicResponse,
@@ -47,6 +52,8 @@ export class ChatExecutorService {
     private readonly groups: GroupsService,
     private readonly support: ExecSupportService,
     config: ConfigService,
+    // 精确匹配响应缓存（可选注入：未提供/未启用时整条链路零行为变化）
+    @Optional() private readonly respCache?: ResponseCacheService,
   ) {
     this.streamIdleMs = Number(config.get<string>('STREAM_IDLE_TIMEOUT_MS', '120000')) || 120000;
     this.defaultMaxOutputTokens =
@@ -126,6 +133,40 @@ export class ChatExecutorService {
     const upstreamAbort = new AbortController();
     const closeTracker = trackClientClose(res, () => upstreamAbort.abort());
 
+    // 精确匹配响应缓存：仅当 shouldHandle（cache:true 或 temperature===0）才算键；
+    // 键含排序后的候选渠道集合 → 只在可见性一致的调用方间复用（不穿分组/BYOK 边界）。
+    // 命中即按折扣计费直回：不触达上游、不计渠道健康度/路由信号；miss 则照常路由并回写。
+    const cache = this.respCache;
+    const cacheKey = cache?.shouldHandle(body)
+      ? cache.key(
+          model,
+          body,
+          isStream,
+          channels.map((c) => c.channel.id),
+        )
+      : null;
+    if (
+      cacheKey &&
+      (await this.serveCacheHit(req, res, cacheKey, {
+        channels,
+        model,
+        isStream,
+        apiFormat,
+        userId: user.id,
+        apiKeyId: apiKey.id,
+        startedAt,
+        promptFallback,
+        requestPreview,
+        maxOutputTokens,
+        multiplier: billingInfo.value,
+        multiplierSource: billingInfo.source,
+        guards,
+        closeTracker,
+      }))
+    ) {
+      return;
+    }
+
     for (let i = 0; i < channels.length; i++) {
       // 整请求 deadline：跨故障转移共享总预算，耗尽即 504（流头已发出的长流不受此限）
       if (this.support.deadlineLeft(startedAt) <= 0) {
@@ -174,6 +215,7 @@ export class ChatExecutorService {
             multiplier: billingInfo.value,
             multiplierSource: billingInfo.source,
             pricing,
+            cacheKey,
             tpm: req.gateway.tpm,
           });
         }
@@ -219,6 +261,17 @@ export class ChatExecutorService {
             totalTokens: usage.totalTokens,
             status: result.status,
           }),
+          // 写回精确匹配缓存（拒答不缓存：命中会跳过换渠道重试；体积超限由服务内部跳过）
+          ...(cacheKey && result.status === 200 && !refusalInJson(result.json)
+            ? [
+                cache!.set(cacheKey, {
+                  v: 1,
+                  channelId: channel.id,
+                  usage,
+                  json: result.json,
+                }),
+              ]
+            : []),
         ]);
         return response;
       } catch (e) {
@@ -269,6 +322,118 @@ export class ChatExecutorService {
       );
   }
 
+  /**
+   * 精确匹配缓存命中处理：非流式直接回放 JSON（anthropic 客户端再转换），
+   * 流式重放缓存的原始 SSE 分片（用量取生成时的真实值，避免估算偏差）。
+   * 命中同样落账（按折扣计费、upstreamCost=0、RequestLog.cached=true），
+   * 但不计渠道健康度与路由信号（缓存命中不是渠道质量证据）。
+   * @returns true = 响应已完整写出（调用方直接 return）；false = 不可命中，走正常路由
+   */
+  private async serveCacheHit(
+    req: GatewayRequest,
+    res: Response,
+    cacheKey: string,
+    ctx: {
+      channels: ResolvedChannel[];
+      model: string;
+      isStream: boolean;
+      apiFormat: 'openai' | 'anthropic';
+      userId: string;
+      apiKeyId: string;
+      startedAt: number;
+      promptFallback: number;
+      requestPreview: string;
+      maxOutputTokens: number;
+      multiplier: number;
+      multiplierSource: string;
+      guards: { getBalance(): Promise<number> };
+      closeTracker: { isClosed(): boolean };
+    },
+  ): Promise<boolean> {
+    const cache = this.respCache;
+    if (!cache) return false;
+    const hit = await cache.get(cacheKey);
+    if (!hit) return false;
+    // 命中记录的生成渠道必须仍在当前候选（键含候选集，缺失属防御分支 → 按 miss）
+    const rhc = ctx.channels.find((c) => c.channel.id === hit.channelId);
+    if (!rhc) return false;
+    const { channel } = rhc;
+    const chargeable = this.support.isChargeable(channel, ctx.userId);
+    const share = this.support.shareContext(channel, ctx.userId);
+    // 预授权口径与正常路径一致：余额不足以覆盖「输入 + 最大输出」全价上限 → 不命中（正常路径将回 403）
+    if (chargeable) {
+      const required =
+        ((ctx.promptFallback / 1_000_000) * rhc.pricing.priceInput +
+          (ctx.maxOutputTokens / 1_000_000) * rhc.pricing.priceOutput) *
+        ctx.multiplier;
+      if (required > 0 && (await ctx.guards.getBalance()) < required) return false;
+    }
+    res.setHeader('X-Gateway-Cache', 'hit');
+
+    if (ctx.isStream) {
+      const replay: StreamResult = {
+        status: 200,
+        chunks: replayCachedChunks(hit.chunks ?? []),
+        usageRef: { usage: hit.usage },
+      };
+      await this.pipeStream(res, replay, {
+        userId: ctx.userId,
+        apiKeyId: ctx.apiKeyId,
+        channel,
+        model: ctx.model,
+        startedAt: ctx.startedAt,
+        attemptStart: ctx.startedAt,
+        promptFallback: ctx.promptFallback,
+        requestPreview: ctx.requestPreview,
+        chargeable,
+        share,
+        idleMs: this.streamIdleMs,
+        isClientClosed: () => ctx.closeTracker.isClosed(),
+        apiFormat: ctx.apiFormat,
+        multiplier: ctx.multiplier,
+        multiplierSource: ctx.multiplierSource,
+        pricing: rhc.pricing,
+        tpm: req.gateway.tpm,
+        cached: true,
+        cacheDiscount: cache.discount,
+      });
+      return true;
+    }
+
+    const payload =
+      ctx.apiFormat === 'anthropic' ? openAiToAnthropicResponse(hit.json, ctx.model) : hit.json;
+    res.status(200).json(payload);
+    // TPM 回填（结算由 guard 的 finish 监听触发）
+    if (req.gateway.tpm) req.gateway.tpm.actual = hit.usage.totalTokens;
+    settleInBackground([
+      this.usage.record({
+        userId: ctx.userId,
+        apiKeyId: ctx.apiKeyId,
+        channelId: channel.id,
+        model: ctx.model,
+        provider: channel.provider,
+        promptTokens: hit.usage.promptTokens,
+        completionTokens: hit.usage.completionTokens,
+        cacheReadTokens: hit.usage.cacheReadTokens ?? 0,
+        cacheWriteTokens: hit.usage.cacheWriteTokens ?? 0,
+        totalTokens: hit.usage.totalTokens,
+        latencyMs: Date.now() - ctx.startedAt,
+        status: 200,
+        chargeable,
+        share,
+        isStream: false,
+        cached: true,
+        cacheDiscount: cache.discount,
+        requestPreview: ctx.requestPreview,
+        responsePreview: this.logContent ? extractAssistantText(hit.json) : null,
+        multiplier: ctx.multiplier,
+        multiplierSource: ctx.multiplierSource,
+        pricing: rhc.pricing,
+      }),
+    ]);
+    return true;
+  }
+
   private estimateUsage(body: Record<string, any>, json: any) {
     const promptTokens = estimatePromptTokens(body);
     const text = json?.choices?.[0]?.message?.content;
@@ -303,6 +468,11 @@ export class ChatExecutorService {
       multiplierSource?: string;
       /** 渠道×模型定价（随 resolve 带出）：落账免再查 */
       pricing?: ChannelPricing;
+      /** 缓存写回键（非空 = 成功后把原始分片写回精确匹配缓存；命中回放时为空） */
+      cacheKey?: string | null;
+      /** 命中缓存的回放：不计渠道健康度/路由信号，费用按缓存折扣计收 */
+      cached?: boolean;
+      cacheDiscount?: number;
       /** 共享分成上下文（他人上架的渠道）：落账时给渠道主入账 */
       share?: UsageEntry['share'];
       /** TPM 预扣上下文（guard 注入；流结束后回填实际用量） */
@@ -319,6 +489,11 @@ export class ChatExecutorService {
     res.flushHeaders?.();
 
     const collector = new SseUsageCollector();
+    // 缓存写回缓冲：按序收集原始 OpenAI 分片（命中回放时 cacheKey 为空、不收集）
+    const cache = this.respCache;
+    const rawChunks: string[] = [];
+    let rawBytes = 0;
+    let rawOverflow = false;
     // Anthropic 客户端：用量仍从原始 OpenAI 分片收集，但写出的内容翻译为 Anthropic 流事件
     const translator =
       meta.apiFormat === 'anthropic'
@@ -350,6 +525,11 @@ export class ChatExecutorService {
       for await (const chunk of result.chunks) {
         armIdle();
         collector.push(chunk);
+        if (meta.cacheKey && !rawOverflow) {
+          rawBytes += Buffer.byteLength(chunk, 'utf8');
+          if (rawBytes > (cache?.maxBytes ?? 0)) rawOverflow = true;
+          else rawChunks.push(chunk);
+        }
         if (translator) {
           for (const ev of translator.push(chunk)) res.write(ev);
         } else {
@@ -397,11 +577,12 @@ export class ChatExecutorService {
         multiplierSource: meta.multiplierSource,
         pricing: meta.pricing,
         share: meta.share,
+        ...(meta.cached ? { cached: true, cacheDiscount: meta.cacheDiscount } : {}),
       }),
     ];
 
-    // 客户端主动断开不计入渠道健康度
-    if (!clientClosed) {
+    // 客户端主动断开不计入渠道健康度；命中缓存的回放同样不计（缓存命中不是渠道质量证据）
+    if (!clientClosed && !meta.cached) {
       const latencyMs = Date.now() - meta.attemptStart;
       if (streamError) {
         // 响应头已发出、无法故障转移，但健康度/路由指标口径与故障转移路径一致：
@@ -430,8 +611,28 @@ export class ChatExecutorService {
         );
       }
     }
+    // 写回精确匹配缓存：仅完整成功（非中断/非断开）且未超体积上限；
+    // 拒答分片（content_filter / refusal）不缓存 —— 命中会跳过「换渠道重试」这条出路
+    if (
+      cache &&
+      meta.cacheKey &&
+      !clientClosed &&
+      !streamError &&
+      !rawOverflow &&
+      rawChunks.length > 0 &&
+      !refusalInStreamChunks(rawChunks)
+    ) {
+      tasks.push(
+        cache.set(meta.cacheKey, { v: 1, channelId: meta.channel.id, usage, chunks: rawChunks }),
+      );
+    }
     // 客户端已收完整个流：先结束响应，落账/健康度/指标转后台结算，不拖长连接占用
     if (!res.writableEnded) res.end();
     settleInBackground(tasks);
   }
+}
+
+/** 把缓存的 SSE 文本块按序重放为异步流（pipeStream 的消费口不变） */
+async function* replayCachedChunks(chunks: string[]): AsyncGenerator<string> {
+  for (const c of chunks) yield c;
 }
