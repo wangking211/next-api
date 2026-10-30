@@ -278,6 +278,8 @@ export interface LogFilters {
   from?: string;
   to?: string;
   userId?: string;
+  /** 按 API Key 过滤（Key 页「使用记录」跳转带入） */
+  apiKeyId?: string;
 }
 
 export interface UsageAnalytics {

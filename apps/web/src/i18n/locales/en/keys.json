@@ -1,5 +1,7 @@
 {
   "keys.create": "Create key",
+  "keys.edit": "Edit",
+  "keys.usageRecords": "Usage records",
   "keys.disable": "Disable",
   "keys.enable": "Enable",
   "keys.confirmDeleteKey": "Delete this key?",
@@ -26,6 +28,7 @@
   "keys.strategyLabel.qualityFirst": "Quality first",
   "keys.strategyLabel.default": "Default",
   "keys.createModal.title": "Create API key",
+  "keys.editModal.title": "Edit API key",
   "keys.form.name": "Name",
   "keys.form.nameRequired": "Please enter a name",
   "keys.form.namePlaceholder": "e.g. Production",

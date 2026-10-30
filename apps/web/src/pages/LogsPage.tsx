@@ -19,6 +19,7 @@ import {
 } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { adminApi, usageApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
@@ -62,7 +63,13 @@ export default function LogsPage() {
   const { message } = App.useApp();
   const isAdmin = user?.role === 'ADMIN';
   const [all, setAll] = useState(false);
-  const [filters, setFilters] = useState<LogFilters>({});
+  const [searchParams, setSearchParams] = useSearchParams();
+  /** 从 Key 页「使用记录」跳转带入的过滤（apiKeyName 仅用于展示） */
+  const apiKeyFromUrl = searchParams.get('apiKeyId') ?? undefined;
+  const apiKeyNameFromUrl = searchParams.get('apiKeyName') ?? apiKeyFromUrl;
+  const [filters, setFilters] = useState<LogFilters>(
+    apiKeyFromUrl ? { apiKeyId: apiKeyFromUrl } : {},
+  );
   const [detailId, setDetailId] = useState<string | null>(null);
   const [form] = Form.useForm();
   const scope = isAdmin && all ? 'all' : undefined;
@@ -92,7 +99,9 @@ export default function LogsPage() {
   });
 
   const apply = (v: any) => {
-    setFilters({
+    setFilters((prev) => ({
+      // 「按 Key 过滤」来自 Key 页跳转，不属于表单字段，查询时保留
+      apiKeyId: prev.apiKeyId,
       model: v.model || undefined,
       status: v.status || undefined,
       stream: v.stream,
@@ -100,14 +109,34 @@ export default function LogsPage() {
       userId: v.userId || undefined,
       from: v.range?.[0]?.toISOString(),
       to: v.range?.[1]?.toISOString(),
+    }));
+    pg.reset();
+  };
+
+  /** 清掉「按 Key 过滤」并同步移除 URL 参数（刷新后不再生效） */
+  const clearApiKeyFilter = () => {
+    setFilters((prev) => {
+      const next = { ...prev };
+      delete next.apiKeyId;
+      return next;
     });
     pg.reset();
+    const next = new URLSearchParams(searchParams);
+    next.delete('apiKeyId');
+    next.delete('apiKeyName');
+    setSearchParams(next, { replace: true });
   };
 
   const reset = () => {
     form.resetFields();
     setFilters({});
     pg.reset();
+    if (searchParams.has('apiKeyId') || searchParams.has('apiKeyName')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('apiKeyId');
+      next.delete('apiKeyName');
+      setSearchParams(next, { replace: true });
+    }
   };
 
   const exportCsv = async () => {
@@ -202,6 +231,14 @@ export default function LogsPage() {
       </Form>
 
       <QueryError show={isError} onRetry={refetch} />
+
+      {filters.apiKeyId ? (
+        <div style={{ marginBottom: 12 }}>
+          <Tag closable onClose={clearApiKeyFilter}>
+            {t('logs.filter.apiKey')}: {apiKeyNameFromUrl}
+          </Tag>
+        </div>
+      ) : null}
 
       <Table<RequestLogRow>
         rowKey="id"

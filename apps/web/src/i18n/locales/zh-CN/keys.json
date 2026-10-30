@@ -1,5 +1,7 @@
 {
   "keys.create": "创建 Key",
+  "keys.edit": "编辑",
+  "keys.usageRecords": "使用记录",
   "keys.disable": "停用",
   "keys.enable": "启用",
   "keys.confirmDeleteKey": "确定删除该 Key？",
@@ -26,6 +28,7 @@
   "keys.strategyLabel.qualityFirst": "质量优先",
   "keys.strategyLabel.default": "默认",
   "keys.createModal.title": "创建 API Key",
+  "keys.editModal.title": "编辑 API Key",
   "keys.form.name": "名称",
   "keys.form.nameRequired": "请输入名称",
   "keys.form.namePlaceholder": "例如：生产环境",

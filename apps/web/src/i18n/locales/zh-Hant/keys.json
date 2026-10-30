@@ -1,5 +1,7 @@
 {
   "keys.create": "建立 Key",
+  "keys.edit": "編輯",
+  "keys.usageRecords": "使用記錄",
   "keys.disable": "停用",
   "keys.enable": "啟用",
   "keys.confirmDeleteKey": "確定刪除該 Key？",
@@ -26,6 +28,7 @@
   "keys.strategyLabel.qualityFirst": "品質優先",
   "keys.strategyLabel.default": "預設",
   "keys.createModal.title": "建立 API Key",
+  "keys.editModal.title": "編輯 API Key",
   "keys.form.name": "名稱",
   "keys.form.nameRequired": "請輸入名稱",
   "keys.form.namePlaceholder": "例如：生產環境",

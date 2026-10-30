@@ -6,6 +6,7 @@
   "logs.filter.success": "成功",
   "logs.filter.error": "失败",
   "logs.filter.keyword": "内容关键词",
+  "logs.filter.apiKey": "密钥",
   "logs.filter.submit": "查询",
   "logs.filter.reset": "重置",
   "logs.exportCsv": "导出 CSV",

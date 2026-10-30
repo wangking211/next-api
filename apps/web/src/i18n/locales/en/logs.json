@@ -6,6 +6,7 @@
   "logs.filter.success": "Success",
   "logs.filter.error": "Failed",
   "logs.filter.keyword": "Content keyword",
+  "logs.filter.apiKey": "API Key",
   "logs.filter.submit": "Search",
   "logs.filter.reset": "Reset",
   "logs.exportCsv": "Export CSV",

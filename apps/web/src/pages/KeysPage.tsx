@@ -17,6 +17,7 @@ import {
 } from 'antd';
 import { PlusOutlined, CopyOutlined, ApiOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { keysApi, groupsApi } from '../api/endpoints';
 import { testKeyConnectivity } from '../api/keyConnectivity';
@@ -63,7 +64,9 @@ export default function KeysPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<ApiKeyInfo | null>(null);
   const [created, setCreated] = useState<ApiKeyCreated | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<KeyConnectivityResult | null>(null);
@@ -107,10 +110,51 @@ export default function KeysPage() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['keys'] });
       setCreateOpen(false);
+      setEditing(null);
       form.resetFields();
       setCreated(data);
     },
   });
+
+  const editMut = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Parameters<typeof keysApi.update>[1] }) =>
+      keysApi.update(id, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['keys'] });
+      setCreateOpen(false);
+      setEditing(null);
+      form.resetFields();
+      message.success(t('keys.toast.updated'));
+    },
+  });
+
+  /** 新建：清空表单后打开（与编辑共用同一弹窗） */
+  const openCreate = () => {
+    setEditing(null);
+    form.resetFields();
+    setCreateOpen(true);
+  };
+
+  /** 编辑：回填可修改字段（成本额度是 Decimal 字符串，转数字给 InputNumber） */
+  const openEdit = (r: ApiKeyInfo) => {
+    setEditing(r);
+    form.setFieldsValue({
+      name: r.name,
+      quotaLimit: r.quotaLimit ?? undefined,
+      costLimit: r.costLimit != null ? Number(r.costLimit) : undefined,
+      rpmLimit: r.rpmLimit ?? undefined,
+      tpmLimit: r.tpmLimit ?? undefined,
+      routingStrategy: r.routingStrategy ?? undefined,
+      models: r.models ?? [],
+      groupId: r.groupId ?? undefined,
+    });
+    setCreateOpen(true);
+  };
+
+  const closeForm = () => {
+    setCreateOpen(false);
+    setEditing(null);
+  };
 
   const updateMut = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) => keysApi.update(id, { status }),
@@ -150,7 +194,7 @@ export default function KeysPage() {
     <Card
       title="API Key"
       extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
           {t('keys.create')}
         </Button>
       }
@@ -270,9 +314,22 @@ export default function KeysPage() {
           {
             title: t('common.action'),
             fixed: 'right',
-            width: 170,
+            width: 300,
             render: (_, r) => (
               <Space>
+                <Button size="small" onClick={() => openEdit(r)}>
+                  {t('keys.edit')}
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() =>
+                    navigate(
+                      `/logs?apiKeyId=${encodeURIComponent(r.id)}&apiKeyName=${encodeURIComponent(r.name)}`,
+                    )
+                  }
+                >
+                  {t('keys.usageRecords')}
+                </Button>
                 {r.status === 'ACTIVE' ? (
                   <Button
                     size="small"
@@ -303,17 +360,36 @@ export default function KeysPage() {
       />
 
       <Modal
-        title={t('keys.createModal.title')}
+        title={editing ? t('keys.editModal.title') : t('keys.createModal.title')}
         open={createOpen}
-        onCancel={() => setCreateOpen(false)}
+        onCancel={closeForm}
         onOk={() => form.submit()}
-        confirmLoading={createMut.isPending}
+        confirmLoading={editing ? editMut.isPending : createMut.isPending}
         destroyOnClose
       >
         <Form
           form={form}
           layout="vertical"
-          onFinish={(v) => createMut.mutate(v)}
+          onFinish={(v) => {
+            if (!editing) {
+              createMut.mutate(v);
+              return;
+            }
+            // 编辑：空值显式传 null —— PATCH 语义里 undefined 表示「不修改」
+            editMut.mutate({
+              id: editing.id,
+              body: {
+                name: v.name,
+                quotaLimit: v.quotaLimit ?? null,
+                costLimit: v.costLimit ?? null,
+                rpmLimit: v.rpmLimit ?? null,
+                tpmLimit: v.tpmLimit ?? null,
+                routingStrategy: v.routingStrategy ?? null,
+                models: Array.isArray(v.models) && v.models.length ? v.models : null,
+                ...(isAdmin ? { groupId: v.groupId ?? null } : {}),
+              },
+            });
+          }}
           requiredMark={false}
         >
           <Form.Item
