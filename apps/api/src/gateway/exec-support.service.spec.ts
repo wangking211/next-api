@@ -396,3 +396,23 @@ describe('ExecSupportService 整请求 deadline', () => {
     expect(support.attemptTimeoutMs(Date.now())).toBe(120_000);
   });
 });
+
+describe('ExecSupportService 单次尝试超时（GATEWAY_ATTEMPT_TIMEOUT_MS）', () => {
+  it('配置生效，且仍不超过整请求剩余预算', () => {
+    const a = makeSupport([], { GATEWAY_ATTEMPT_TIMEOUT_MS: '90000' });
+    expect(a.support.attemptTimeoutMs(Date.now())).toBe(90_000);
+
+    const b = makeSupport([], {
+      GATEWAY_ATTEMPT_TIMEOUT_MS: '90000',
+      GATEWAY_DEADLINE_MS: '30000',
+    });
+    expect(b.support.attemptTimeoutMs(Date.now())).toBeLessThanOrEqual(30_000);
+  });
+
+  it('非法或过小值回退默认 120s（避免误配把请求全部瞬间打死）', () => {
+    const bad = makeSupport([], { GATEWAY_ATTEMPT_TIMEOUT_MS: 'abc' });
+    expect(bad.support.attemptTimeoutMs(Date.now())).toBe(120_000);
+    const tiny = makeSupport([], { GATEWAY_ATTEMPT_TIMEOUT_MS: '10' });
+    expect(tiny.support.attemptTimeoutMs(Date.now())).toBe(120_000);
+  });
+});

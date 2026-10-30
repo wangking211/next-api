@@ -23,7 +23,6 @@ import { RoutingMetricsService } from './routing-metrics.service';
 import { detectRequiredCapabilities } from './capabilities';
 import { settleInBackground } from './settle.util';
 import type { GatewayRequest, UpstreamError } from './types';
-import { DEFAULT_UPSTREAM_TIMEOUT_MS } from './providers/stream.util';
 import {
   upstreamErrorMessage,
   classifyUpstreamFailure,
@@ -34,6 +33,8 @@ import {
 export class ExecSupportService {
   /** 整请求 deadline：跨故障转移共享的总预算（毫秒）；<=0 表示关闭 */
   readonly deadlineMs: number;
+  /** 单次尝试的上游超时上限（毫秒）：GATEWAY_ATTEMPT_TIMEOUT_MS，默认 120s */
+  private readonly attemptTimeoutCapMs: number;
 
   constructor(
     private readonly resolver: ChannelResolverService,
@@ -45,6 +46,9 @@ export class ExecSupportService {
   ) {
     const d = Number(config.get<string>('GATEWAY_DEADLINE_MS', '300000'));
     this.deadlineMs = Number.isFinite(d) && d > 0 ? d : 0;
+    const t = Number(config.get<string>('GATEWAY_ATTEMPT_TIMEOUT_MS', '120000'));
+    // 过小（<1s）或非法值一律回退默认：避免误配导致所有请求瞬间超时
+    this.attemptTimeoutCapMs = Number.isFinite(t) && t >= 1000 ? t : 120_000;
   }
 
   /**
@@ -293,9 +297,12 @@ export class ExecSupportService {
     return Math.max(0, this.deadlineMs - (Date.now() - startedAt));
   }
 
-  /** 单次尝试的上游超时：默认 120s，且不超过整请求剩余预算（故障转移越多，单次窗口越紧） */
+  /**
+   * 单次尝试的上游超时：GATEWAY_ATTEMPT_TIMEOUT_MS（默认 120s），且不超过整请求剩余预算
+   *（故障转移越多，单次窗口越紧）。调小可让上游卡死时更快失败/更早转移。
+   */
   attemptTimeoutMs(startedAt: number): number {
-    return Math.min(DEFAULT_UPSTREAM_TIMEOUT_MS, this.deadlineLeft(startedAt));
+    return Math.min(this.attemptTimeoutCapMs, this.deadlineLeft(startedAt));
   }
 
   /** 预算耗尽 → 504（错误体形态由调用方按 openai/anthropic 协议提供） */
