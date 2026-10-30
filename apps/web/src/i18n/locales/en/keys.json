@@ -55,5 +55,15 @@
   "keys.table.groupNone": "Follow default",
   "keys.form.group": "Group",
   "keys.form.groupPlaceholder": "Blank = follow the user default",
-  "keys.form.groupAdminOnly": "Admin only"
+  "keys.form.groupAdminOnly": "Admin only",
+  "keys.docs.button": "Integration guide",
+  "keys.docs.title": "Integration guide",
+  "keys.docs.close": "Got it",
+  "keys.docs.keyHint": "Replace sk-xxxxxxxx in the examples below with your own key (the plaintext is shown only once at creation)",
+  "keys.docs.baseUrlLabel": "OpenAI-compatible base URL (use this in the OpenAI SDK)",
+  "keys.docs.anthropicLabel": "Anthropic SDK base URL (without /v1)",
+  "keys.docs.authLabel": "Authentication",
+  "keys.docs.endpointsLabel": "Common endpoints",
+  "keys.docs.exampleLabel": "Example (curl)",
+  "keys.docs.sdkNote": "The OpenAI SDK appends /chat/completions, so its base URL must include /v1; the Anthropic SDK appends /v1/messages, so its base URL must omit /v1."
 }

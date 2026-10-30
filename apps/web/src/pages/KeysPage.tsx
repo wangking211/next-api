@@ -15,7 +15,7 @@ import {
   Tooltip,
   Typography,
 } from 'antd';
-import { PlusOutlined, CopyOutlined, ApiOutlined } from '@ant-design/icons';
+import { PlusOutlined, CopyOutlined, ApiOutlined, BookOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -67,6 +67,7 @@ export default function KeysPage() {
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<ApiKeyInfo | null>(null);
+  const [docsOpen, setDocsOpen] = useState(false);
   const [created, setCreated] = useState<ApiKeyCreated | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<KeyConnectivityResult | null>(null);
@@ -190,13 +191,26 @@ export default function KeysPage() {
     }
   };
 
+  // 接入说明的地址按当前部署域名生成（本地/生产自动适配）
+  const origin = window.location.origin;
+  const baseUrl = `${origin}/v1`;
+  const curlExample = `curl ${baseUrl}/chat/completions \\
+  -H "Authorization: Bearer sk-xxxxxxxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":32}'`;
+
   return (
     <Card
       title="API Key"
       extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          {t('keys.create')}
-        </Button>
+        <Space>
+          <Button icon={<BookOutlined />} onClick={() => setDocsOpen(true)}>
+            {t('keys.docs.button')}
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            {t('keys.create')}
+          </Button>
+        </Space>
       }
     >
       <QueryError show={isError} onRetry={refetch} />
@@ -474,6 +488,80 @@ export default function KeysPage() {
       </Modal>
 
       <Modal
+        title={t('keys.docs.title')}
+        open={docsOpen}
+        onCancel={() => setDocsOpen(false)}
+        footer={
+          <Button type="primary" onClick={() => setDocsOpen(false)}>
+            {t('keys.docs.close')}
+          </Button>
+        }
+        width={680}
+      >
+        <Typography.Paragraph type="secondary">{t('keys.docs.keyHint')}</Typography.Paragraph>
+
+        <Typography.Text strong>{t('keys.docs.baseUrlLabel')}</Typography.Text>
+        <Typography.Paragraph copyable={{ text: baseUrl }}>
+          <Typography.Text code>{baseUrl}</Typography.Text>
+        </Typography.Paragraph>
+
+        <Typography.Text strong>{t('keys.docs.anthropicLabel')}</Typography.Text>
+        <Typography.Paragraph copyable={{ text: origin }}>
+          <Typography.Text code>{origin}</Typography.Text>
+        </Typography.Paragraph>
+
+        <Typography.Text strong>{t('keys.docs.authLabel')}</Typography.Text>
+        <Typography.Paragraph>
+          <Typography.Text code>Authorization: Bearer sk-xxxxxxxx</Typography.Text>{' '}
+          <Typography.Text type="secondary">/ x-api-key: sk-xxxxxxxx</Typography.Text>
+        </Typography.Paragraph>
+
+        <Typography.Text strong>{t('keys.docs.endpointsLabel')}</Typography.Text>
+        <ul style={{ margin: '6px 0 14px', paddingLeft: 20 }}>
+          <li>
+            <Typography.Text code>POST /v1/chat/completions</Typography.Text>
+          </li>
+          <li>
+            <Typography.Text code>POST /v1/messages</Typography.Text>{' '}
+            <Typography.Text type="secondary">Anthropic</Typography.Text>
+          </li>
+          <li>
+            <Typography.Text code>POST /v1/embeddings</Typography.Text>
+          </li>
+          <li>
+            <Typography.Text code>POST /v1/images/generations</Typography.Text>
+          </li>
+          <li>
+            <Typography.Text code>GET /v1/models</Typography.Text>
+          </li>
+        </ul>
+
+        <Typography.Text strong>{t('keys.docs.exampleLabel')}</Typography.Text>
+        <Typography.Paragraph copyable={{ text: curlExample }}>
+          <pre
+            style={{
+              margin: 0,
+              marginTop: 6,
+              background: 'var(--ink)',
+              border: '1px solid var(--ink-border)',
+              color: 'var(--ink-text)',
+              borderRadius: 6,
+              padding: 12,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all',
+              fontSize: 12.5,
+            }}
+          >
+            {curlExample}
+          </pre>
+        </Typography.Paragraph>
+
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          {t('keys.docs.sdkNote')}
+        </Typography.Paragraph>
+      </Modal>
+
+      <Modal
         title={t('keys.createdModal.title')}
         open={!!created}
         onCancel={closeCreated}
@@ -484,6 +572,13 @@ export default function KeysPage() {
         ]}
       >
         <Typography.Paragraph type="warning">{t('keys.createdModal.warning')}</Typography.Paragraph>
+        <Typography.Paragraph>
+          <Typography.Text strong>{t('keys.docs.baseUrlLabel')}</Typography.Text>
+          <br />
+          <Typography.Text code copyable={{ text: baseUrl }}>
+            {baseUrl}
+          </Typography.Text>
+        </Typography.Paragraph>
         <Space.Compact style={{ width: '100%' }}>
           <Input readOnly value={created?.plaintext} />
           <Button type="primary" icon={<CopyOutlined />} onClick={() => copy(created!.plaintext)}>

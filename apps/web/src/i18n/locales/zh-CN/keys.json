@@ -55,5 +55,15 @@
   "keys.table.groupNone": "跟随默认",
   "keys.form.group": "所属分组",
   "keys.form.groupPlaceholder": "留空 = 跟随用户默认",
-  "keys.form.groupAdminOnly": "仅管理员可修改"
+  "keys.form.groupAdminOnly": "仅管理员可修改",
+  "keys.docs.button": "接入说明",
+  "keys.docs.title": "接入说明",
+  "keys.docs.close": "知道了",
+  "keys.docs.keyHint": "下方示例中的 sk-xxxxxxxx 请替换为你自己的 Key（明文仅在创建时显示一次）",
+  "keys.docs.baseUrlLabel": "OpenAI 兼容 Base URL（OpenAI SDK 填这个）",
+  "keys.docs.anthropicLabel": "Anthropic SDK Base URL（不要带 /v1）",
+  "keys.docs.authLabel": "认证方式",
+  "keys.docs.endpointsLabel": "常用端点",
+  "keys.docs.exampleLabel": "调用示例（curl）",
+  "keys.docs.sdkNote": "OpenAI SDK 会自动追加 /chat/completions，所以 Base URL 要带 /v1；Anthropic SDK 会自动追加 /v1/messages，所以 Base URL 不要带 /v1。"
 }
