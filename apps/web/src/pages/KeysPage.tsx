@@ -206,7 +206,7 @@ export default function KeysPage() {
         loading={isLoading}
         dataSource={keys}
         pagination={false}
-        scroll={{ x: 1100 }}
+        scroll={{ x: 1600 }}
         columns={[
           { title: t('keys.table.name'), dataIndex: 'name' },
           {
