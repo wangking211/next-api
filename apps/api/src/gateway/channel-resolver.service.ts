@@ -19,6 +19,7 @@ import {
   CatalogPricingRow,
   ChannelModelPricingRow,
   deriveChannelPricing,
+  isPeakTime,
 } from '../billing/pricing.util';
 import { shareExhausted, shareUrgencyBonus } from './channel-share.util';
 import {
@@ -64,6 +65,10 @@ export class ChannelResolverService {
   private readonly failureThreshold: number;
   private readonly debug: boolean;
   private readonly catalogTtl: number;
+  /** 峰段窗口（UTC，逗号分隔）；空 = 关闭峰谷计价 */
+  private readonly peakWindows: string;
+  private readonly peakWeekdays: string;
+  private readonly peakHolidays: string[];
 
   constructor(
     private readonly prisma: PrismaService,
@@ -92,6 +97,17 @@ export class ChannelResolverService {
     this.failureThreshold = Number(config.get<string>('CHANNEL_FAILURE_THRESHOLD', '5')) || 5;
     this.debug = config.get<string>('ROUTING_DEBUG') === 'true';
     this.catalogTtl = Number(config.get<string>('CATALOG_CACHE_TTL_MS', '60000')) || 60_000;
+    this.peakWindows = config.get<string>('PEAK_WINDOWS_UTC', '01:00-04:00,06:00-10:00') ?? '';
+    this.peakWeekdays = config.get<string>('PEAK_WEEKDAYS', '1-5') ?? '1-5';
+    this.peakHolidays = (config.get<string>('PEAK_HOLIDAYS', '') ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  /** 当前是否低谷（目录 offPeakMultiplier 生效） */
+  private isOffPeakNow(): boolean {
+    return !isPeakTime(new Date(), this.peakWindows, this.peakWeekdays, this.peakHolidays);
   }
 
   /**
@@ -174,6 +190,8 @@ export class ChannelResolverService {
     // 只在显式 false 时拦截，避免部分字段的目录行（未 select enabled）被误判
     if (catalog && catalog.enabled === false) return [];
     const officialIn = catalog?.inputPrice != null ? Number(catalog.inputPrice) : 0;
+    // 峰谷计价：同一次解析内只判定一次，候选定价全部用同一口径
+    const offPeak = this.isOffPeakNow();
 
     const candidates: Candidate[] = [];
     const recoveries: Promise<void>[] = [];
@@ -206,6 +224,7 @@ export class ChannelResolverService {
           pricing: deriveChannelPricing(
             cm as unknown as ChannelModelPricingRow,
             catalog as CatalogPricingRow | null,
+            { offPeak },
           ),
         },
         tier:

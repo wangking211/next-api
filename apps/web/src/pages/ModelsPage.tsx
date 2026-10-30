@@ -32,14 +32,18 @@ export default function ModelsPage() {
   const [editing, setEditing] = useState<ModelInfo | null>(null);
   const [form] = Form.useForm();
 
-  const { data: models = [], isLoading, isError, refetch } = useQuery({
+  const {
+    data: models = [],
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
     queryKey: ['models'],
     queryFn: ({ signal }) => modelsApi.list(signal),
   });
 
   const saveMut = useMutation({
-    mutationFn: (v: any) =>
-      editing ? modelsApi.update(editing.id, v) : modelsApi.create(v),
+    mutationFn: (v: any) => (editing ? modelsApi.update(editing.id, v) : modelsApi.create(v)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['models'] });
       setOpen(false);
@@ -92,6 +96,7 @@ export default function ModelsPage() {
       outputPrice: Number(r.outputPrice),
       cacheReadPrice: Number(r.cacheReadPrice ?? 0),
       cacheWritePrice: Number(r.cacheWritePrice ?? 0),
+      offPeakMultiplier: r.offPeakMultiplier != null ? Number(r.offPeakMultiplier) : undefined,
       perCallPrice: r.perCallPrice != null ? Number(r.perCallPrice) : null,
       enabled: r.enabled,
     });
@@ -104,10 +109,7 @@ export default function ModelsPage() {
       extra={
         isAdmin && (
           <Space>
-            <Popconfirm
-              title={t('models.classify.confirm')}
-              onConfirm={() => classifyMut.mutate()}
-            >
+            <Popconfirm title={t('models.classify.confirm')} onConfirm={() => classifyMut.mutate()}>
               <Button loading={classifyMut.isPending} title={t('models.classify.tip')}>
                 {t('models.classify.button')}
               </Button>
@@ -128,9 +130,17 @@ export default function ModelsPage() {
         pagination={{ pageSize: 20 }}
         scroll={{ x: 1200 }}
         columns={[
-          { title: t('models.column.name'), dataIndex: 'name', render: (v: string) => <code>{v}</code> },
+          {
+            title: t('models.column.name'),
+            dataIndex: 'name',
+            render: (v: string) => <code>{v}</code>,
+          },
           { title: t('models.column.displayName'), dataIndex: 'displayName' },
-          { title: t('models.column.provider'), dataIndex: 'provider', render: (v: string) => <Tag>{v}</Tag> },
+          {
+            title: t('models.column.provider'),
+            dataIndex: 'provider',
+            render: (v: string) => <Tag>{v}</Tag>,
+          },
           {
             title: t('models.column.origin'),
             dataIndex: 'origin',
@@ -169,6 +179,13 @@ export default function ModelsPage() {
             render: (v: string) => Number(v ?? 0).toFixed(4),
           },
           {
+            title: t('models.column.offPeak'),
+            dataIndex: 'offPeakMultiplier',
+            width: 110,
+            render: (v: string | null) =>
+              v != null && Number(v) > 0 && Number(v) < 1 ? `×${Number(v)}` : '—',
+          },
+          {
             title: t('models.column.perCallPrice'),
             dataIndex: 'perCallPrice',
             render: (v: string | null) =>
@@ -177,7 +194,8 @@ export default function ModelsPage() {
           {
             title: t('models.column.enabled'),
             dataIndex: 'enabled',
-            render: (v: boolean) => (v ? <Tag color="green">{t('common.yes')}</Tag> : <Tag>{t('common.no')}</Tag>),
+            render: (v: boolean) =>
+              v ? <Tag color="green">{t('common.yes')}</Tag> : <Tag>{t('common.no')}</Tag>,
           },
           ...(isAdmin
             ? [
@@ -190,7 +208,10 @@ export default function ModelsPage() {
                       <Button size="small" onClick={() => openEdit(r)}>
                         {t('common.edit')}
                       </Button>
-                      <Popconfirm title={t('models.confirmDelete')} onConfirm={() => removeMut.mutate(r.id)}>
+                      <Popconfirm
+                        title={t('models.confirmDelete')}
+                        onConfirm={() => removeMut.mutate(r.id)}
+                      >
                         <Button size="small" danger>
                           {t('common.delete')}
                         </Button>
@@ -227,10 +248,18 @@ export default function ModelsPage() {
           >
             <Input placeholder="gpt-4o-mini" disabled={!!editing} />
           </Form.Item>
-          <Form.Item name="displayName" label={t('models.form.displayNameLabel')} rules={[{ required: true }]}>
+          <Form.Item
+            name="displayName"
+            label={t('models.form.displayNameLabel')}
+            rules={[{ required: true }]}
+          >
             <Input placeholder="GPT-4o mini" />
           </Form.Item>
-          <Form.Item name="provider" label={t('models.form.providerLabel')} rules={[{ required: true }]}>
+          <Form.Item
+            name="provider"
+            label={t('models.form.providerLabel')}
+            rules={[{ required: true }]}
+          >
             <Input placeholder="openai" />
           </Form.Item>
           <Space size={16} wrap>
@@ -259,6 +288,13 @@ export default function ModelsPage() {
             </Form.Item>
             <Form.Item name="cacheWritePrice" label={t('models.form.cacheWriteLabel')}>
               <InputNumber min={0} step={0.01} />
+            </Form.Item>
+            <Form.Item
+              name="offPeakMultiplier"
+              label={t('models.form.offPeakLabel')}
+              tooltip={t('models.form.offPeakTip')}
+            >
+              <InputNumber min={0} max={1} step={0.05} placeholder="1" />
             </Form.Item>
             <Form.Item name="perCallPrice" label={t('models.form.perCallPriceLabel')}>
               <InputNumber min={0} step={0.001} />

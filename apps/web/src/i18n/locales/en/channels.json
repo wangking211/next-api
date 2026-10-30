@@ -81,6 +81,7 @@
   "channels.pricing.l2Samples": "Samples",
   "channels.pricing.cost": "Cost (credits/1M)",
   "channels.pricing.salePrice": "Sale price (credits/1M)",
+  "channels.pricing.offPeak": "Off-peak",
   "channels.message.channelUpdated": "Channel updated",
   "channels.message.channelCreated": "Channel created",
   "channels.message.updated": "Updated",

@@ -355,6 +355,7 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 - **半开恢复（渠道级）**：`autoDisabled` 渠道满 `CHANNEL_AUTO_REENABLE_MS` 冷却后懒式恢复（`failureCount` 置阈值-1，下一次失败即再禁用），无需定时任务。
 - **会话粘性**：请求头 `x-session-id`（缺省用 `userId + 前 2 条 messages 前缀`）映射到与榜首同 `(tier, priority)` 组内候选，且 `score(偏好) ≥ ROUTING_STICKY_RATIO × score(榜首)` 才前置 —— 保住上游 prompt cache 但不为缓存死抱劣质渠道；`ROUTING_STICKY=false` 关闭。两个热点防护：**时间窗轮换**（粘性键按 `ROUTING_STICKY_ROTATE_MS`（默认 30min）分桶换哈希，跨桶强制重选路，不把单会话永久钉死同一渠道）与**负载占比门**（偏好候选近期流量份额 > 权重份额 × `ROUTING_STICKY_LOAD_GATE`（默认 2，0=关）且组内样本 ≥ 50 时放弃粘性，防粘性把流量堆到超载的低权重渠道）。
 - **整请求 deadline**：`GATEWAY_DEADLINE_MS`（默认 5min）为跨故障转移共享的总预算——耗尽即 504 `gateway_timeout`，单次尝试超时钳制在剩余预算内（`GATEWAY_ATTEMPT_TIMEOUT_MS`，默认 120s；调小可让上游卡死时更快失败、更早转移到下一家）；流式响应头发出后由空闲超时接管，不受此限（不砍正常进行中的长流）。
+- **峰谷计价**：模型目录可配「低谷倍率」（0~1）；`PEAK_WINDOWS_UTC` / `PEAK_WEEKDAYS` / `PEAK_HOLIDAYS` 判定峰段，低谷期成本与售价统一乘该系数（默认按 DeepSeek 峰段：周一至周五 01:00–04:00、06:00–10:00 UTC；`PEAK_HOLIDAYS` 需随年份维护，命中则全天低谷）。
 - **错误分类**（`gateway.exec-support`）：5xx/连接失败/**402 上游余额耗尽**/**401 渠道 Key 失效** → 计渠道失败数 + 指标（**模型级故障豁免**：渠道其它模型窗口期内成功过 → 只记现场不计数，防一条坏模型连坐禁用整条渠道）；402/401 均按渠道侧故障处理并**故障转移到下一家**（余额耗尽或 Key 失效时该渠道任何模型都不可用，连续失败达阈值自动禁用，充值/换 Key 后半开探活自动恢复；401 计入健康度无滥用面——Key 由服务端下发，客户端无法制造；分类层统一收口，402 不依赖各 provider 的 retryable 标记）；限流/超限 → 冷却不计失败（含上游 Retry-After 透传退避）；拒答/内容过滤 → 只降质量分且**故障转移到下一家**（不同供应商审核宽严不同，换一家可能正常出量；拒答文案特征压过状态码，5xx+拒答文案不计渠道失败）；其余客户端 4xx 不做任何渠道判罚。流式中途断流走同一套分类口径（中途 429 不再误计渠道失败）。
 - **观测**：`ROUTING_DEBUG=true` 时每次路由打印候选打分与标记（`!` 冷却、`#` 超限、`~` 半开）；控制台「使用统计 → 按渠道」含请求数/错误数/平均延迟/费用，「调用日志」支持按渠道过滤与 CSV 导出。
 

@@ -177,6 +177,8 @@ export interface ModelInfo {
   outputPrice: string;
   cacheReadPrice: string;
   cacheWritePrice: string;
+  /** 低谷价倍率（0~1）；null/1 = 无峰谷差异 */
+  offPeakMultiplier: string | null;
   /** 按次价格（USD/次）；null = 按 token 计价 */
   perCallPrice: string | null;
   enabled: boolean;

@@ -17,6 +17,7 @@ import {
   ChannelModelPricingRow,
   ChannelPricing,
   deriveChannelPricing,
+  isPeakTime,
 } from './pricing.util';
 
 export { ChannelPricing } from './pricing.util';
@@ -44,6 +45,7 @@ const CATALOG_PRICE_SELECT = {
   cacheReadPrice: true,
   cacheWritePrice: true,
   perCallPrice: true,
+  offPeakMultiplier: true,
 } as const;
 
 /** 收益趋势 SQL 的缺省上界哨兵（远未来）：缺省/仅 from 时固定参数位，语义上等价于无上界 */
@@ -54,6 +56,12 @@ export class BillingService {
   private readonly catalogTtl: number;
   /** 共享渠道平台抽成默认值（基点，1/10000）：渠道可单独覆盖 */
   private readonly shareFeeBps: number;
+  /** 峰段窗口（UTC，逗号分隔）；空 = 关闭峰谷计价 */
+  private readonly peakWindows: string;
+  /** 峰段适用的 ISO 周几（1=周一 … 7=周日） */
+  private readonly peakWeekdays: string;
+  /** 全天低谷的日期（UTC，YYYY-MM-DD），用于法定节假日 */
+  private readonly peakHolidays: string[];
 
   constructor(
     private readonly prisma: PrismaService,
@@ -64,6 +72,17 @@ export class BillingService {
     this.catalogTtl = Number(config?.get<string>('CATALOG_CACHE_TTL_MS', '60000')) || 60_000;
     const bps = Number(config?.get<string>('CHANNEL_SHARE_FEE_BPS', '2000'));
     this.shareFeeBps = Number.isFinite(bps) ? Math.max(0, Math.min(10000, Math.floor(bps))) : 2000;
+    this.peakWindows = config?.get<string>('PEAK_WINDOWS_UTC', '01:00-04:00,06:00-10:00') ?? '';
+    this.peakWeekdays = config?.get<string>('PEAK_WEEKDAYS', '1-5') ?? '1-5';
+    this.peakHolidays = (config?.get<string>('PEAK_HOLIDAYS', '') ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  /** 当前是否低谷（用于目录 offPeakMultiplier 打折） */
+  private isOffPeakNow(): boolean {
+    return !isPeakTime(new Date(), this.peakWindows, this.peakWeekdays, this.peakHolidays);
   }
 
   /**
@@ -253,6 +272,7 @@ export class BillingService {
     return deriveChannelPricing(
       cm as ChannelModelPricingRow | null,
       catalog as CatalogPricingRow | null,
+      { offPeak: this.isOffPeakNow() },
     );
   }
 

@@ -6,6 +6,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
   MinLength,
@@ -84,4 +85,11 @@ export class CreateModelDto {
   @MaxLength(128, { each: true })
   @ArrayMaxSize(32)
   aliases?: string[];
+
+  /** 低谷价倍率（0~1，如 0.5）；留空/1 = 无峰谷差异 */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  @Max(1)
+  offPeakMultiplier?: number | null;
 }

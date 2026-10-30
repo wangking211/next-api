@@ -81,6 +81,7 @@
   "channels.pricing.l2Samples": "樣本",
   "channels.pricing.cost": "成本(積分/1M)",
   "channels.pricing.salePrice": "售價(積分/1M)",
+  "channels.pricing.offPeak": "低谷",
   "channels.message.channelUpdated": "渠道已更新",
   "channels.message.channelCreated": "渠道已建立",
   "channels.message.updated": "已更新",

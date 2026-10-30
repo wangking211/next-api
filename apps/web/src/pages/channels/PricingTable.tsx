@@ -1,10 +1,11 @@
-import { Input, InputNumber, Table, Tooltip, Typography } from 'antd';
+import { Input, InputNumber, Space, Table, Tooltip, Typography } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { getCreditsPerUsd } from '../../utils/format';
 import type { ModelInfo, RouteSignalRow } from '../../api/types';
 import type { PriceRow, SetPrice } from './constants';
 
-/** 渠道×模型 折扣编辑表；右侧实时显示按官方价折算的成本/售价（积分/1M）。
+/** 渠道×模型 折扣编辑表；右侧实时显示按官方价折算的成本/售价（积分/1M），
+ *  目录配置了低谷倍率时同时显示低谷价。
  *  L2 信号列展示滑窗被动指标（有效回复率/拒答率），辅助人工校准 qualityScore——
  *  只展示，不自动覆盖人工分。 */
 export function PricingTable({
@@ -30,6 +31,12 @@ export function PricingTable({
   };
   const disc = (model: string, key: 'costDiscount' | 'priceDiscount') =>
     (pricing[model]?.[key] as number | undefined) ?? 1;
+  /** 目录低谷倍率（0~1）；未配置/1 = 无峰谷差异 */
+  const offPeakFactor = (name: string) => {
+    const m = catalog.find((c) => c.name === name);
+    const v = m?.offPeakMultiplier != null ? Number(m.offPeakMultiplier) : 1;
+    return v > 0 && v < 1 ? v : 1;
+  };
   const credits = (usdPerM: number, d: number) => (usdPerM * d * getCreditsPerUsd()).toFixed(2);
   const num = (model: string, key: keyof PriceRow) => (
     <InputNumber
@@ -142,27 +149,43 @@ export function PricingTable({
         },
         {
           title: t('channels.pricing.cost'),
-          width: 150,
+          width: 170,
           render: (_: unknown, r: { model: string }) => {
             const o = official(r.model);
             const d = disc(r.model, 'costDiscount');
+            const f = offPeakFactor(r.model);
             return (
-              <Typography.Text type="secondary">
-                {credits(o.in, d)} / {credits(o.out, d)}
-              </Typography.Text>
+              <Space direction="vertical" size={0}>
+                <Typography.Text type="secondary">
+                  {credits(o.in, d)} / {credits(o.out, d)}
+                </Typography.Text>
+                {f < 1 ? (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    {t('channels.pricing.offPeak')} {credits(o.in * f, d)} / {credits(o.out * f, d)}
+                  </Typography.Text>
+                ) : null}
+              </Space>
             );
           },
         },
         {
           title: t('channels.pricing.salePrice'),
-          width: 150,
+          width: 170,
           render: (_: unknown, r: { model: string }) => {
             const o = official(r.model);
             const d = disc(r.model, 'priceDiscount');
+            const f = offPeakFactor(r.model);
             return (
-              <Typography.Text strong>
-                {credits(o.in, d)} / {credits(o.out, d)}
-              </Typography.Text>
+              <Space direction="vertical" size={0}>
+                <Typography.Text strong>
+                  {credits(o.in, d)} / {credits(o.out, d)}
+                </Typography.Text>
+                {f < 1 ? (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    {t('channels.pricing.offPeak')} {credits(o.in * f, d)} / {credits(o.out * f, d)}
+                  </Typography.Text>
+                ) : null}
+              </Space>
             );
           },
         },

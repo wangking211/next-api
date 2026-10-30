@@ -48,6 +48,7 @@ export class ModelsService {
         perCallPrice: dto.perCallPrice ?? null,
         capabilities: dto.capabilities ?? [],
         aliases: dto.aliases ?? [],
+        offPeakMultiplier: dto.offPeakMultiplier ?? null,
         enabled: dto.enabled ?? true,
       },
     });
