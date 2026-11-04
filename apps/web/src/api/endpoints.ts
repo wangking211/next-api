@@ -378,6 +378,19 @@ export const usageApi = {
     });
     return res.data as Blob;
   },
+  /** 渠道×模型×日 对账汇总 CSV（管理员全量；普通用户仅自己的渠道） */
+  async reconciliation(
+    params: { from?: string; to?: string; channelId?: string },
+    signal?: AbortSignal,
+  ): Promise<Blob> {
+    const res = await api.get('/usage/reconciliation', {
+      params,
+      responseType: 'blob',
+      signal,
+      timeout: 120_000,
+    });
+    return res.data as Blob;
+  },
 };
 
 export const billingApi = {

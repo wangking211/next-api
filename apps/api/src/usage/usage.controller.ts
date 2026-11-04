@@ -16,11 +16,7 @@ function toInt(value: string | undefined, fallback: number): number {
 export class UsageController {
   constructor(private readonly usage: UsageService) {}
 
-  private scope(
-    user: AuthUser,
-    scope?: string,
-    targetUserId?: string,
-  ): string | null {
+  private scope(user: AuthUser, scope?: string, targetUserId?: string): string | null {
     if (user.role !== Role.ADMIN) return user.id;
     if (targetUserId) return targetUserId;
     if (scope === 'all') return null;
@@ -59,6 +55,22 @@ export class UsageController {
     return this.usage.analytics(this.scope(user, scope, userId), toInt(days, 30), {
       from: from || undefined,
       to: to || undefined,
+    });
+  }
+
+  /** 渠道×模型×日 对账汇总 CSV（管理员全量；普通用户仅自己的渠道） */
+  @Get('reconciliation')
+  async reconciliation(
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('channelId') channelId?: string,
+  ) {
+    return this.usage.reconciliationCsv(user, res, {
+      from: from || undefined,
+      to: to || undefined,
+      channelId: channelId || undefined,
     });
   }
 
@@ -120,21 +132,14 @@ export class UsageController {
       from: from || undefined,
       to: to || undefined,
     };
-    const csv = await this.usage.exportLogs(
-      this.scope(user, scope, targetUserId),
-      query,
-    );
+    const csv = await this.usage.exportLogs(this.scope(user, scope, targetUserId), query);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="request-logs.csv"');
     res.send('\uFEFF' + csv);
   }
 
   @Get('logs/:id')
-  detail(
-    @CurrentUser() user: AuthUser,
-    @Param('id') id: string,
-    @Query('scope') scope?: string,
-  ) {
+  detail(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('scope') scope?: string) {
     return this.usage.detail(this.scope(user, scope), id);
   }
 }

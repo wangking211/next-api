@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  App,
   Button,
   Card,
   Col,
@@ -16,10 +17,11 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { usageApi } from '../api/endpoints';
+import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import QueryError from '../components/QueryError';
 import { formatCredits } from '../utils/format';
-import { downloadCsv, toCsv } from '../utils/csv';
+import { downloadBlob, downloadCsv, toCsv } from '../utils/csv';
 import type { UsageAnalytics } from '../api/types';
 
 type KeyRow = UsageAnalytics['byApiKey'][number];
@@ -36,6 +38,7 @@ const costCol = (title: string, dataIndex: string, width = 120) => ({
 export default function UsageStatsPage() {
   const { t: tr } = useTranslation();
   const { user } = useAuth();
+  const { message } = App.useApp();
   const isAdmin = user?.role === 'ADMIN';
   const [all, setAll] = useState(false);
   const [range, setRange] = useState<[string, string] | null>(null);
@@ -78,6 +81,19 @@ export default function UsageStatsPage() {
     downloadCsv('usage-by-key.csv', csv);
   };
 
+  /** 渠道×模型×日 对账汇总 CSV（沿用当前时间范围；默认近 30 天） */
+  const exportReconciliation = async () => {
+    try {
+      const blob = await usageApi.reconciliation({
+        from: range?.[0],
+        to: range?.[1],
+      });
+      downloadBlob('reconciliation.csv', blob);
+    } catch (e) {
+      message.error(errorMessage(e));
+    }
+  };
+
   return (
     <Space direction="vertical" size={16} style={{ display: 'flex' }}>
       <Card
@@ -102,6 +118,7 @@ export default function UsageStatsPage() {
               </span>
             )}
             <Button onClick={exportKeys}>{tr('usage.exportCsv')}</Button>
+            <Button onClick={exportReconciliation}>{tr('usage.exportReconciliation')}</Button>
           </Space>
         }
       >

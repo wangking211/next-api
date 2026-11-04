@@ -247,11 +247,13 @@ export class AnthropicProvider implements Provider {
       throw new UpstreamError('Upstream returned empty stream', 502, true);
     }
     const usageRef: { usage?: UsageInfo } = {};
+    const requestIdRef: { id?: string } = {};
     return {
       status: 200,
-      chunks: this.translateStream(res.body, req.model, usageRef),
+      chunks: this.translateStream(res.body, req.model, usageRef, requestIdRef),
       headers: { 'Content-Type': 'text/event-stream' },
       usageRef,
+      requestIdRef,
     };
   }
 
@@ -259,6 +261,7 @@ export class AnthropicProvider implements Provider {
     stream: ReadableStream<Uint8Array>,
     model: string,
     usageRef?: { usage?: UsageInfo },
+    requestIdRef?: { id?: string },
   ): AsyncGenerator<string> {
     let id = `chatcmpl-${Date.now()}`;
     const created = Math.floor(Date.now() / 1000);
@@ -292,6 +295,9 @@ export class AnthropicProvider implements Provider {
       switch (ev.event) {
         case 'message_start': {
           id = data.message?.id ?? id;
+          if (requestIdRef && typeof data.message?.id === 'string') {
+            requestIdRef.id = data.message.id;
+          }
           started = true;
           const u = data.message?.usage ?? {};
           inputTokens = u.input_tokens ?? 0;

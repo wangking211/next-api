@@ -57,6 +57,8 @@ export interface StreamResult {
    * provider 可在翻译过程中写入此处，网关优先采用它而不是估算值。
    */
   usageRef?: { usage?: UsageInfo };
+  /** 上游请求 id（流式过程中采集，用于与上游账单逐笔对账） */
+  requestIdRef?: { id?: string };
 }
 
 export interface ResolvedChannel {

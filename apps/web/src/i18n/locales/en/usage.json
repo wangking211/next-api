@@ -2,6 +2,7 @@
   "usage.title": "Usage stats",
   "usage.viewAllUsers": "View all users",
   "usage.exportCsv": "Export CSV",
+  "usage.exportReconciliation": "Reconciliation export (channel × day)",
   "usage.help": "With no date range selected, stats cover the last 30 days. Requests, tokens and cost are aggregated per API Key. Cost (charged) uses the same basis as balance deduction; BYOK calls are not charged and their converted amount is shown separately.",
   "usage.requests": "Requests",
   "usage.successErrors": "Success / Errors",

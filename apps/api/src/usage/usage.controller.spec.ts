@@ -12,12 +12,36 @@ function makeController() {
 const member = { id: 'user1', role: Role.USER } as AuthUser;
 const admin = { id: 'admin1', role: Role.ADMIN } as AuthUser;
 
+describe('UsageController.reconciliation（对账导出）', () => {
+  it('委托 service 生成 CSV，并透传 from/to/channelId', async () => {
+    const usage = { reconciliationCsv: jest.fn().mockResolvedValue(undefined) };
+    const controller = new UsageController(usage as unknown as UsageService);
+    const res = { setHeader: jest.fn(), send: jest.fn() };
+
+    await controller.reconciliation(admin, res as never, '2026-10-01', '2026-11-01', 'ch1');
+
+    expect(usage.reconciliationCsv).toHaveBeenCalledWith(admin, res, {
+      from: '2026-10-01',
+      to: '2026-11-01',
+      channelId: 'ch1',
+    });
+  });
+});
+
 /** 回归：logs 的 userId 过滤必须经 scope() 解析，不能被 query 覆盖（曾可跨租户读日志） */
 describe('UsageController.logs 属主约束', () => {
   it('普通用户即使传了他人 userId 也只查自己', async () => {
     const { controller, usage } = makeController();
 
-    await controller.logs(member, undefined, undefined, undefined, undefined, undefined, 'victim-user');
+    await controller.logs(
+      member,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'victim-user',
+    );
 
     const [scopeUserId, query] = usage.logs.mock.calls[0];
     expect(scopeUserId).toBe('user1');

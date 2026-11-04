@@ -458,6 +458,8 @@ model RequestLog {
   latencyMs        Int?
   status           Int      @default(200)
   errorMessage     String?
+  /// 上游请求 id（DeepSeek/Anthropic 等返回），用于与上游账单逐笔对账
+  upstreamRequestId String?
   isStream         Boolean  @default(false)
   requestPreview   String?  @db.Text
   responsePreview  String?  @db.Text
@@ -468,6 +470,7 @@ model RequestLog {
   @@index([channelId, createdAt])
   @@index([status, createdAt])
   @@index([createdAt])
+  @@index([upstreamRequestId])
 }
 
 model UsageDaily {

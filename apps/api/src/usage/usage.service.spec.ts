@@ -2,7 +2,7 @@ import { UsageService, UsageEntry } from './usage.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { BillingService } from '../billing/billing.service';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 
 /**
  * 计费口径：
@@ -407,5 +407,49 @@ describe('UsageService 日志查询属主约束', () => {
     const where = prisma.requestLog.findMany.mock.calls[0][0].where;
     expect(where.userId).toBe('user1');
     expect(where.OR).toHaveLength(3);
+  });
+});
+
+describe('UsageService.reconciliationCsv（渠道×日对账导出）', () => {
+  it('输出 CSV：表头 + 含逗号的渠道名转义 + BYOK 分列', async () => {
+    const prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([
+        {
+          day: '2026-11-03',
+          channel: 'deepseekForWangking211, Inc',
+          model: 'deepseek-flash',
+          requests: 7,
+          ok: 7,
+          errors: 0,
+          prompt_tokens: 100n,
+          completion_tokens: 50n,
+          cache_read_tokens: 10n,
+          total_tokens: 150n,
+          cost_usd: '0.018000',
+          billed_usd: '0.000000',
+          byok_requests: 7,
+          byok_cost_usd: '0.018000',
+        },
+      ]),
+    };
+    const svc = new UsageService(
+      prisma as unknown as PrismaService,
+      {} as unknown as BillingService,
+      { get: (_k: string, d?: string) => d } as unknown as ConfigService,
+    );
+    const res = { setHeader: jest.fn(), send: jest.fn() };
+    await svc.reconciliationCsv({ id: 'u1', role: Role.ADMIN }, res, {
+      from: '2026-11-01',
+      to: '2026-11-04',
+    });
+
+    const body = res.send.mock.calls[0][0] as string;
+    expect(body.startsWith('\uFEFFday,channel,model,requests')).toBe(true);
+    expect(body).toContain('"deepseekForWangking211, Inc"');
+    expect(body).toContain('0.018000');
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      expect.stringContaining('reconciliation.csv'),
+    );
   });
 });

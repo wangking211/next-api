@@ -9,6 +9,7 @@ export class SseUsageCollector {
   private buffer = '';
   private output = '';
   private upstreamUsage: UsageInfo | null = null;
+  private requestId: string | null = null;
 
   push(chunk: string): void {
     this.buffer += chunk;
@@ -29,20 +30,22 @@ export class SseUsageCollector {
       if (!payload || payload === '[DONE]') continue;
       try {
         const json = JSON.parse(payload);
+        // 上游请求 id（分片通常每帧都带，取第一个非空值）
+        if (!this.requestId && typeof json.id === 'string' && json.id) this.requestId = json.id;
         if (json.usage) {
+          const u = json.usage;
+          const cacheRead =
+            u.cache_read_tokens ??
+            u.prompt_tokens_details?.cached_tokens ??
+            u.prompt_cache_hit_tokens;
+          const cacheWrite = u.cache_write_tokens;
           this.upstreamUsage = {
-            promptTokens: json.usage.prompt_tokens ?? 0,
-            completionTokens: json.usage.completion_tokens ?? 0,
-            totalTokens:
-              json.usage.total_tokens ??
-              (json.usage.prompt_tokens ?? 0) + (json.usage.completion_tokens ?? 0),
-            // 部分上游（如 DeepSeek / 本平台渠道）会在 usage 里带缓存 token，一并采集
-            ...(json.usage.cache_read_tokens != null
-              ? { cacheReadTokens: json.usage.cache_read_tokens }
-              : {}),
-            ...(json.usage.cache_write_tokens != null
-              ? { cacheWriteTokens: json.usage.cache_write_tokens }
-              : {}),
+            promptTokens: u.prompt_tokens ?? 0,
+            completionTokens: u.completion_tokens ?? 0,
+            totalTokens: u.total_tokens ?? (u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0),
+            // 部分上游（DeepSeek / 本平台渠道）会在 usage 里带缓存 token，一并采集
+            ...(cacheRead != null ? { cacheReadTokens: cacheRead } : {}),
+            ...(cacheWrite != null ? { cacheWriteTokens: cacheWrite } : {}),
           };
         }
         const content = json.choices?.[0]?.delta?.content;
@@ -56,6 +59,11 @@ export class SseUsageCollector {
   /** 累计的输出文本 */
   get text(): string {
     return this.output;
+  }
+
+  /** 上游请求 id（未采集到为 null） */
+  get upstreamRequestId(): string | null {
+    return this.requestId;
   }
 
   result(fallbackPromptTokens: number): UsageInfo {

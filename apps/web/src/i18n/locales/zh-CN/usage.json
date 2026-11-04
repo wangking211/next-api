@@ -2,6 +2,7 @@
   "usage.title": "使用统计",
   "usage.viewAllUsers": "查看全部用户",
   "usage.exportCsv": "导出 CSV",
+  "usage.exportReconciliation": "对账导出（渠道×日）",
   "usage.help": "不选时间段默认统计近 30 天。按 API Key 汇总每个 Key 的累计请求、Token 与费用。 「费用（实扣）」与余额扣款同口径；BYOK 自带密钥的调用不扣积分，其折算金额单列显示。",
   "usage.requests": "请求",
   "usage.successErrors": "成功 / 失败",

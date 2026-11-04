@@ -44,6 +44,43 @@ describe('SseUsageCollector', () => {
     });
   });
 
+  it('maps OpenAI cached_tokens and DeepSeek prompt_cache_hit_tokens', () => {
+    const a = new SseUsageCollector();
+    a.push(
+      chunk({
+        usage: {
+          prompt_tokens: 100,
+          completion_tokens: 5,
+          total_tokens: 105,
+          prompt_tokens_details: { cached_tokens: 80 },
+        },
+      }),
+    );
+    expect(a.result(0).cacheReadTokens).toBe(80);
+
+    const b = new SseUsageCollector();
+    b.push(
+      chunk({
+        usage: {
+          prompt_tokens: 100,
+          completion_tokens: 5,
+          total_tokens: 105,
+          prompt_cache_hit_tokens: 60,
+          prompt_cache_miss_tokens: 40,
+        },
+      }),
+    );
+    expect(b.result(0).cacheReadTokens).toBe(60);
+  });
+
+  it('captures the upstream request id from the first chunk', () => {
+    const c = new SseUsageCollector();
+    expect(c.upstreamRequestId).toBeNull();
+    c.push(chunk({ id: 'chatcmpl-up-1', choices: [{ delta: { content: 'x' } }] }));
+    c.push(chunk({ id: 'chatcmpl-up-1', choices: [{ delta: {} }] }));
+    expect(c.upstreamRequestId).toBe('chatcmpl-up-1');
+  });
+
   it('falls back to estimation when usage missing', () => {
     const c = new SseUsageCollector();
     c.push(chunk({ choices: [{ delta: { content: '12345678' } }] }));

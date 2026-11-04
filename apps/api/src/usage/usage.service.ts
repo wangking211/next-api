@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { redactSecrets } from '../common/redact.util';
@@ -28,6 +28,8 @@ export interface UsageEntry {
   /** 是否从用户余额扣费（平台渠道为 true，BYOK 为 false） */
   chargeable?: boolean;
   isStream?: boolean;
+  /** 上游请求 id（DeepSeek/Anthropic 等返回），用于逐笔对账 */
+  upstreamRequestId?: string | null;
   /** 本次生效的售价倍率（网关已解析时直传，避免二次解析）；缺省则回退用户/代理倍率 */
   multiplier?: number;
   /** 倍率来源：user / group / agent / default，用于账单审计 */
@@ -211,6 +213,7 @@ export class UsageService {
             // 上游文案与请求/响应预览都可能混入密钥 → 入库前统一脱敏
             errorMessage: redactOrNull(entry.errorMessage),
             isStream: entry.isStream ?? false,
+            upstreamRequestId: entry.upstreamRequestId ?? null,
             requestPreview: this.logContent
               ? truncate(redactOrNull(entry.requestPreview), this.maxChars)
               : null,
@@ -494,6 +497,99 @@ export class UsageService {
       );
     }
     return lines.join('\n');
+  }
+
+  /**
+   * 渠道×模型×日 对账汇总 CSV（北京时间自然日）：
+   * - 管理员可全量；普通用户仅自己名下的渠道
+   * - `cost_usd` 为折算金额（含 BYOK），`billed_usd` 为平台实扣
+   * - 单独给出 BYOK 的请求数与折算成本，便于与上游账号账单核对
+   */
+  async reconciliationCsv(
+    user: { id: string; role: Role },
+    res: { setHeader(k: string, v: string): void; send(body: string): void },
+    opts: { from?: string; to?: string; channelId?: string } = {},
+  ): Promise<void> {
+    const toDate = opts.to ? new Date(opts.to) : new Date();
+    const to = Number.isNaN(toDate.getTime()) ? new Date() : toDate;
+    const fromDate = opts.from ? new Date(opts.from) : new Date(to.getTime() - 30 * 86400_000);
+    const from = Number.isNaN(fromDate.getTime())
+      ? new Date(to.getTime() - 30 * 86400_000)
+      : fromDate;
+    const admin = user.role === Role.ADMIN;
+
+    const rows = await this.prisma.$queryRaw<Array<Record<string, unknown>>>(Prisma.sql`
+      SELECT (rl."createdAt" AT TIME ZONE 'Asia/Shanghai')::date::text AS day,
+             COALESCE(c.name, '(deleted)') AS channel,
+             rl.model,
+             COUNT(*)::int AS requests,
+             COUNT(*) FILTER (WHERE rl.status = 200)::int AS ok,
+             COUNT(*) FILTER (WHERE rl.status <> 200)::int AS errors,
+             COALESCE(SUM(rl."promptTokens"), 0)::bigint AS prompt_tokens,
+             COALESCE(SUM(rl."completionTokens"), 0)::bigint AS completion_tokens,
+             COALESCE(SUM(rl."cacheReadTokens"), 0)::bigint AS cache_read_tokens,
+             COALESCE(SUM(rl."totalTokens"), 0)::bigint AS total_tokens,
+             COALESCE(SUM(rl.cost), 0)::text AS cost_usd,
+             COALESCE(SUM(CASE WHEN rl.chargeable THEN rl.cost ELSE 0 END), 0)::text AS billed_usd,
+             COUNT(*) FILTER (WHERE NOT rl.chargeable)::int AS byok_requests,
+             COALESCE(SUM(CASE WHEN NOT rl.chargeable THEN rl.cost ELSE 0 END), 0)::text AS byok_cost_usd
+      FROM "RequestLog" rl
+      LEFT JOIN "Channel" c ON c.id = rl."channelId"
+      WHERE rl."createdAt" >= ${from} AND rl."createdAt" < ${to}
+        ${opts.channelId ? Prisma.sql`AND rl."channelId" = ${opts.channelId}` : Prisma.empty}
+        ${admin ? Prisma.empty : Prisma.sql`AND c."ownerUserId" = ${user.id}`}
+      GROUP BY 1, 2, 3
+      ORDER BY 1 DESC, 2 ASC, 3 ASC
+    `);
+
+    const header = [
+      'day',
+      'channel',
+      'model',
+      'requests',
+      'ok',
+      'errors',
+      'prompt_tokens',
+      'completion_tokens',
+      'cache_read_tokens',
+      'total_tokens',
+      'cost_usd',
+      'billed_usd',
+      'byok_requests',
+      'byok_cost_usd',
+    ];
+    const lines = [header.join(',')];
+    for (const r of rows) {
+      lines.push(
+        [
+          r.day,
+          r.channel,
+          r.model,
+          r.requests,
+          r.ok,
+          r.errors,
+          r.prompt_tokens,
+          r.completion_tokens,
+          r.cache_read_tokens,
+          r.total_tokens,
+          r.cost_usd,
+          r.billed_usd,
+          r.byok_requests,
+          r.byok_cost_usd,
+        ]
+          .map((v) => this.csvCell(v))
+          .join(','),
+      );
+    }
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="reconciliation.csv"');
+    res.send('\uFEFF' + lines.join('\n'));
+  }
+
+  /** CSV 单元格转义：逗号/引号/换行包裹双引号 */
+  private csvCell(v: unknown): string {
+    const s = v == null ? '' : String(v);
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   }
 
   async summary(userId: string | null, days = 30) {

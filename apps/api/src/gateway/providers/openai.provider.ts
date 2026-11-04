@@ -23,7 +23,13 @@ function extractUsage(json: any) {
     promptTokens: prompt,
     completionTokens: completion,
     totalTokens: u.total_tokens ?? prompt + completion,
-    cacheReadTokens: u.prompt_tokens_details?.cached_tokens ?? 0,
+    // 标准 OpenAI: prompt_tokens_details.cached_tokens；DeepSeek: prompt_cache_hit_tokens
+    cacheReadTokens:
+      u.prompt_tokens_details?.cached_tokens ??
+      u.prompt_cache_hit_tokens ??
+      u.cache_read_tokens ??
+      0,
+    ...(u.cache_write_tokens != null ? { cacheWriteTokens: u.cache_write_tokens } : {}),
   };
 }
 
