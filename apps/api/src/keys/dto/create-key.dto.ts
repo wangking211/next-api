@@ -62,4 +62,12 @@ export class CreateKeyDto {
   @IsString()
   @MaxLength(64)
   groupId?: string | null;
+
+  /** 渠道白名单（渠道 id 多选），空/缺省表示不限制 */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  @ArrayMaxSize(200)
+  allowedChannelIds?: string[];
 }

@@ -97,6 +97,7 @@ export class EmbeddingsExecutorService {
         strategy: apiKey.routingStrategy,
         stickyKey: this.support.buildStickyKey(req, user.id, body),
         groupId: group.id,
+        allowedChannelIds: apiKey.allowedChannelIds,
       }),
       this.support.checkCapabilities(model, body, res, err),
     ]);

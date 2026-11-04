@@ -88,6 +88,17 @@ describe('KeysService.create', () => {
     await service.create('u1', { name: 'n', groupId: 'g9' }, true);
     expect(prisma.apiKey.create.mock.calls[1][0].data.groupId).toBe('g9');
   });
+
+  it('allowedChannelIds 归一：trim + 去空 + 去重；缺省存空数组（不限制）', async () => {
+    const { service, prisma } = makeService();
+    prisma.apiKey.create.mockResolvedValue({ ...row, allowedChannelIds: ['c1', 'c2'] });
+
+    await service.create('u1', { name: 'n', allowedChannelIds: [' c1 ', 'c2', '', 'c1'] });
+    expect(prisma.apiKey.create.mock.calls[0][0].data.allowedChannelIds).toEqual(['c1', 'c2']);
+
+    await service.create('u1', { name: 'n2' });
+    expect(prisma.apiKey.create.mock.calls[1][0].data.allowedChannelIds).toEqual([]);
+  });
 });
 
 describe('KeysService.list', () => {
@@ -104,6 +115,19 @@ describe('KeysService.list', () => {
     expect(prisma.apiKey.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { userId: 'u1' } }),
     );
+  });
+
+  it('透出 allowedChannelIds；旧数据缺字段时回退空数组（不限制）', async () => {
+    const { service, prisma } = makeService();
+    prisma.apiKey.findMany.mockResolvedValue([
+      { ...row, allowedChannelIds: ['c1'] },
+      { ...row, id: 'k2', allowedChannelIds: undefined },
+    ]);
+
+    const keys = await service.list('u1');
+
+    expect(keys[0].allowedChannelIds).toEqual(['c1']);
+    expect(keys[1].allowedChannelIds).toEqual([]);
   });
 });
 
@@ -136,6 +160,27 @@ describe('KeysService.update', () => {
       where: { id: 'k1' },
       data: { models: [] },
     });
+  });
+
+  it('allowedChannelIds：null/[] 清空（不限制），不传则不改该字段', async () => {
+    const { service, prisma } = makeService();
+    prisma.apiKey.findFirst.mockResolvedValue(row);
+    prisma.apiKey.update.mockResolvedValue({ ...row, allowedChannelIds: [] });
+
+    await service.update('u1', 'k1', { allowedChannelIds: null });
+    expect(prisma.apiKey.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 'k1' },
+      data: { allowedChannelIds: [] },
+    });
+
+    await service.update('u1', 'k1', { allowedChannelIds: ['c1', ' c1 ', ''] });
+    expect(prisma.apiKey.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 'k1' },
+      data: { allowedChannelIds: ['c1'] },
+    });
+
+    await service.update('u1', 'k1', { name: 'x' });
+    expect(prisma.apiKey.update.mock.calls[2][0].data).not.toHaveProperty('allowedChannelIds');
   });
 
   it('key 不属于当前用户 → NotFoundException（API_KEY_NOT_FOUND）', async () => {
@@ -184,7 +229,7 @@ describe('KeysService.remove（用量并桶后删除）', () => {
       },
     ]);
     prisma.usageDaily.findFirst
-      .mockResolvedValueOnce({ id: 'null-bucket'}) // r1：同 (user,date) 已有 NULL 桶
+      .mockResolvedValueOnce({ id: 'null-bucket' }) // r1：同 (user,date) 已有 NULL 桶
       .mockResolvedValueOnce(null); // r2：无
     prisma.usageDaily.update.mockResolvedValue({});
     prisma.usageDaily.delete.mockResolvedValue({});

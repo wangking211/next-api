@@ -251,6 +251,47 @@ describe('ChannelResolverService', () => {
     expect(groups.channelScopeWhere).toHaveBeenCalledWith('u1', 'g1');
   });
 
+  it('Key 级渠道白名单：where 里追加 id IN 交集，候选只剩白名单渠道', async () => {
+    const keep = makeCM({ channel: makeChannel({ id: 'keep', priority: 0 }) });
+    const drop = makeCM({ channel: makeChannel({ id: 'drop', priority: 9 }) });
+    const { service, prisma } = makeService([keep, drop]);
+    // 让 mock 按 where.channel.AND 的 id in 过滤，模拟数据库行为
+    prisma.channelModel.findMany.mockImplementation(({ where }: { where: any }) => {
+      const allow = (where.channel.AND ?? []).find((c: { id?: { in: string[] } }) => c.id?.in);
+      return Promise.resolve(
+        allow ? [keep, drop].filter((r) => allow.id.in.includes(r.channel.id)) : [keep, drop],
+      );
+    });
+
+    const res = await service.resolve('u1', 'm', { allowedChannelIds: ['keep'] });
+    expect(ids(res)).toEqual(['keep']);
+
+    const arg = prisma.channelModel.findMany.mock.calls[0][0];
+    // 白名单只做「交集」：可用性 + 可见性两项原样保留，白名单追加在末位
+    expect(arg.where.channel.AND[0].OR).toHaveLength(2);
+    expect(arg.where.channel.AND[1]).toEqual({ __scope: 'u1|none' });
+    expect(arg.where.channel.AND[2]).toEqual({ id: { in: ['keep'] } });
+  });
+
+  it('Key 级渠道白名单为空/缺省不加条件；填了不可见渠道也换不来候选', async () => {
+    const a = makeCM({ channel: makeChannel({ id: 'a' }) });
+
+    const plain = makeService([a]);
+    await plain.service.resolve('u1', 'm');
+    expect(plain.prisma.channelModel.findMany.mock.calls[0][0].where.channel.AND).toHaveLength(2);
+
+    const empty = makeService([a]);
+    await empty.service.resolve('u1', 'm', { allowedChannelIds: [] });
+    expect(empty.prisma.channelModel.findMany.mock.calls[0][0].where.channel.AND).toHaveLength(2);
+
+    // 白名单里的 id 不在可见候选中（如他人的私有渠道）→ 交集为空 → 上层 404
+    const stranger = makeService([a]);
+    stranger.prisma.channelModel.findMany.mockResolvedValue([]);
+    await expect(
+      stranger.service.resolve('u1', 'm', { allowedChannelIds: ['someone-elses-channel'] }),
+    ).resolves.toEqual([]);
+  });
+
   it('honors the routing strategy option (CHEAPEST vs FASTEST)', async () => {
     const cheap = makeCM({ costInput: 1, channel: makeChannel({ id: 'cheap', priority: 0 }) });
     const fast = makeCM({ costInput: 10, channel: makeChannel({ id: 'fast', priority: 0 }) });
@@ -611,6 +652,19 @@ describe('ChannelResolverService catalog 快照缓存', () => {
     await service.availableModels('u1', 'g1');
     const availWhere = prisma.channelModel.findMany.mock.calls[1][0].where;
     expect(availWhere.channel.AND[1]).toEqual({ __scope: 'u1|g1' });
+  });
+
+  it('Key 级渠道白名单同样作用于 /v1/models（与路由同口径）', async () => {
+    const { service, prisma } = makeService([]);
+
+    await service.availableModels('u1', null, ['c1']);
+    expect(prisma.channelModel.findMany.mock.calls[0][0].where.channel.AND[2]).toEqual({
+      id: { in: ['c1'] },
+    });
+
+    // 空白名单 = 不限制，条件数与旧行为一致
+    await service.availableModels('u1', null, []);
+    expect(prisma.channelModel.findMany.mock.calls[1][0].where.channel.AND).toHaveLength(2);
   });
 
   it('共享额度用尽/到期的渠道不再派发', async () => {

@@ -19,7 +19,7 @@ import { PlusOutlined, CopyOutlined, ApiOutlined, BookOutlined } from '@ant-desi
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { keysApi, groupsApi } from '../api/endpoints';
+import { keysApi, groupsApi, channelsApi } from '../api/endpoints';
 import { testKeyConnectivity } from '../api/keyConnectivity';
 import type { KeyConnectivityResult } from '../api/keyConnectivity';
 import { useAuth } from '../auth/AuthContext';
@@ -106,6 +106,15 @@ export default function KeysPage() {
     queryFn: ({ signal }) => groupsApi.list(signal),
   });
 
+  // 渠道白名单选项（普通用户接口只返回自有渠道，天然只能选自己的）
+  const { data: channelList = [] } = useQuery({
+    queryKey: ['channels', 'keyWhitelist'],
+    queryFn: ({ signal }) =>
+      channelsApi.list({ page: 1, pageSize: 100 }, signal).then((p) => p.items),
+    staleTime: 60_000,
+  });
+  const channelName = (id: string) => channelList.find((c) => c.id === id)?.name ?? id;
+
   const createMut = useMutation({
     mutationFn: keysApi.create,
     onSuccess: (data) => {
@@ -147,6 +156,7 @@ export default function KeysPage() {
       tpmLimit: r.tpmLimit ?? undefined,
       routingStrategy: r.routingStrategy ?? undefined,
       models: r.models ?? [],
+      allowedChannelIds: r.allowedChannelIds ?? [],
       groupId: r.groupId ?? undefined,
     });
     setCreateOpen(true);
@@ -298,6 +308,22 @@ export default function KeysPage() {
               ),
           },
           {
+            title: t('keys.table.channelWhitelist'),
+            dataIndex: 'allowedChannelIds',
+            width: 170,
+            render: (v: string[]) =>
+              v?.length ? (
+                <Space size={[0, 4]} wrap>
+                  {v.slice(0, 3).map((id) => (
+                    <Tag key={id}>{channelName(id)}</Tag>
+                  ))}
+                  {v.length > 3 ? <Tag>+{v.length - 3}</Tag> : null}
+                </Space>
+              ) : (
+                t('keys.table.unlimited')
+              ),
+          },
+          {
             title: t('keys.table.lastUsed'),
             dataIndex: 'lastUsedAt',
             render: (v: string | null) => (v ? formatDateTime(v) : t('keys.table.never')),
@@ -400,6 +426,10 @@ export default function KeysPage() {
                 tpmLimit: v.tpmLimit ?? null,
                 routingStrategy: v.routingStrategy ?? null,
                 models: Array.isArray(v.models) && v.models.length ? v.models : null,
+                allowedChannelIds:
+                  Array.isArray(v.allowedChannelIds) && v.allowedChannelIds.length
+                    ? v.allowedChannelIds
+                    : null,
                 ...(isAdmin ? { groupId: v.groupId ?? null } : {}),
               },
             });
@@ -482,6 +512,23 @@ export default function KeysPage() {
               placeholder={t('keys.form.modelsPlaceholder')}
               open={false}
               suffixIcon={null}
+            />
+          </Form.Item>
+          <Form.Item
+            name="allowedChannelIds"
+            label={t('keys.form.channels')}
+            extra={t('keys.form.channelsExtra')}
+            normalize={(v: unknown) =>
+              Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : v
+            }
+          >
+            <Select
+              mode="multiple"
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder={t('keys.form.channelsPlaceholder')}
+              options={channelList.map((c) => ({ value: c.id, label: c.name }))}
             />
           </Form.Item>
         </Form>

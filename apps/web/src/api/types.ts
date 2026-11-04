@@ -66,6 +66,8 @@ export interface ApiKeyInfo {
   routingStrategy: RoutingStrategy | null;
   tpmLimit: number | null;
   models: string[];
+  /** 渠道白名单（渠道 id）；空数组 = 不限制 */
+  allowedChannelIds: string[];
   groupId: string | null;
   group: GroupTag | null;
   expiresAt: string | null;

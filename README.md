@@ -349,6 +349,7 @@ ssh -i ~/.ssh/aigw_deploy -o BatchMode=yes -o IdentitiesOnly=yes root@<服务器
 | `QUALITY_FIRST` 质量优先 | .10   | .10   | .20       | .55     | .05   |
 
 - **设置入口**：控制台「密钥」创建弹窗可选路由策略（留空 = 全局默认）；渠道「逐模型定价」表可填 **质量分** `qualityScore`（0~2，1=正常：官方直连 1.0、可用中转 0.85、疑似降智 0.6）。
+- **Key 级渠道白名单**：`ApiKey.allowedChannelIds`（渠道 id 多选，控制台「密钥」创建/编辑弹窗选），路由候选与 `/v1/models` 展示都只在勾选渠道内取——**与分组/共享可见性取交集**（白名单只能收窄，填别人的私有渠道 id 不会放开，只会没候选）；空数组 = 不限制；故障转移同样只在白名单内跳转，白名单内全部不可用时返回 404 `model_not_found`。
 - **故障熔断（模型级）**：Redis 记录 (渠道,模型) 连续失败数 `cf`，达 `CHANNEL_MODEL_FAILURE_THRESHOLD` 进入冷却 `CHANNEL_MODEL_COOLDOWN_MS`（开放期剔除候选，全部冷却则兜底放行）；冷却过期且失败未清 → **半开**（评分 ×0.1 仅作兜底探测），成功即复位。
 - **限流/超限识别**：HTTP 429，或 4xx 错误体命中配额特征（`insufficient_quota` / `quota exceeded` / 日限额文案等）→ 记为「限流」：立即冷却并按连续次数指数退避（`CHANNEL_RATE_LIMIT_BASE_MS` ×2ⁿ，封顶 `CHANNEL_MODEL_COOLDOWN_MAX_MS`），**不累计**渠道 `failureCount`（不会因限流自动禁用），且故障转移到下一家。
 - **每日限额**：渠道可配 `每日调用限额` / `每日 Token 限额`（渠道编辑表单，留空不限；自然日按 UTC+8，可用 `CHANNEL_LIMIT_DAY_OFFSET_HOURS` 调整）。Redis 按 `route:d:<渠道>:<自然日>` 计数，评分前剔除已超限渠道；全部超限时兜底放行。

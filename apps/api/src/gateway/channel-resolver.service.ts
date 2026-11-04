@@ -37,6 +37,8 @@ export interface RouteOptions {
   stickyKey?: string | null;
   /** 生效模型分组 id（渠道分组隔离）；null/缺省 = 不限制 */
   groupId?: string | null;
+  /** Key 级渠道白名单；空/null/缺省 = 不限制（仅收窄，不放宽可见性） */
+  allowedChannelIds?: string[] | null;
 }
 
 interface Candidate {
@@ -173,13 +175,23 @@ export class ChannelResolverService {
       userId,
       opts.groupId ?? null,
     );
+    // Key 级渠道白名单：只做交集收窄——可见性（自有/共享/分组）仍由 visibility 决定，
+    // 因此填了别人的私有渠道 id 也不会被放开，只会让候选变少
+    const keyAllow: Prisma.ChannelWhereInput | null =
+      opts.allowedChannelIds && opts.allowedChannelIds.length > 0
+        ? { id: { in: opts.allowedChannelIds } }
+        : null;
     const [rows, catalog] = await Promise.all([
       this.prisma.channelModel.findMany({
         where: {
           modelName: model,
           enabled: true,
           channel: {
-            AND: [this.availabilityWhere(this.reenableCutoff()), visibility],
+            AND: [
+              this.availabilityWhere(this.reenableCutoff()),
+              visibility,
+              ...(keyAllow ? [keyAllow] : []),
+            ],
           },
         },
         include: { channel: true },
@@ -476,13 +488,24 @@ export class ChannelResolverService {
   }
 
   /** 汇总用户当前可实际调用的模型（自有+共享+平台启用渠道所支持的模型） */
-  async availableModels(userId: string, groupId?: string | null): Promise<string[]> {
+  async availableModels(
+    userId: string,
+    groupId?: string | null,
+    allowedChannelIds?: string[] | null,
+  ): Promise<string[]> {
     const visibility = this.groups.channelScopeWhere(userId, groupId ?? null);
     const rows = await this.prisma.channelModel.findMany({
       where: {
         enabled: true,
         channel: {
-          AND: [this.availabilityWhere(this.reenableCutoff()), visibility],
+          AND: [
+            this.availabilityWhere(this.reenableCutoff()),
+            visibility,
+            // Key 级渠道白名单：让 /v1/models 与实际路由同口径（白名单内没有的模型不再展示）
+            ...(allowedChannelIds && allowedChannelIds.length > 0
+              ? [{ id: { in: allowedChannelIds } }]
+              : []),
+          ],
         },
       },
       select: { modelName: true, channel: true },

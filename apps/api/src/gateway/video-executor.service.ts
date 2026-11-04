@@ -92,6 +92,7 @@ export class VideoExecutorService {
         strategy: apiKey.routingStrategy,
         stickyKey: this.support.buildStickyKey(req, user.id, body),
         groupId: group.id,
+        allowedChannelIds: apiKey.allowedChannelIds,
       }),
     ]);
     if (channels.length === 0) {
@@ -382,6 +383,7 @@ export class VideoExecutorService {
         await this.resolver.resolve(user.id, cls.ref.model, {
           strategy: apiKey.routingStrategy,
           groupId: group.id,
+          allowedChannelIds: apiKey.allowedChannelIds,
         }),
         cls.ref.model,
       );
@@ -392,6 +394,7 @@ export class VideoExecutorService {
           await this.resolver.resolve(user.id, name, {
             strategy: apiKey.routingStrategy,
             groupId: group.id,
+            allowedChannelIds: apiKey.allowedChannelIds,
           }),
           name,
         );

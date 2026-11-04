@@ -5,6 +5,12 @@ import { CryptoService } from '../common/crypto.service';
 import { CreateKeyDto } from './dto/create-key.dto';
 import { UpdateKeyDto } from './dto/update-key.dto';
 
+/** 渠道白名单归一：trim + 去空 + 去重（保持顺序）；null → []（不限制） */
+function normalizeChannelIds(v?: string[] | null): string[] {
+  if (!v) return [];
+  return [...new Set(v.map((s) => s.trim()).filter(Boolean))];
+}
+
 @Injectable()
 export class KeysService {
   constructor(
@@ -34,6 +40,8 @@ export class KeysService {
     routingStrategy: RoutingStrategy | null;
     tpmLimit: number | null;
     models: string[];
+    /** 渠道白名单；缺省视为不限制（旧数据/测试行可能没有该字段） */
+    allowedChannelIds?: string[];
     groupId: string | null;
     group?: { id: string; name: string; displayName: string } | null;
     expiresAt: Date | null;
@@ -53,6 +61,7 @@ export class KeysService {
       routingStrategy: k.routingStrategy,
       tpmLimit: k.tpmLimit,
       models: k.models,
+      allowedChannelIds: k.allowedChannelIds ?? [],
       groupId: k.groupId,
       group: k.group ?? null,
       expiresAt: k.expiresAt,
@@ -75,6 +84,8 @@ export class KeysService {
         routingStrategy: dto.routingStrategy ?? null,
         tpmLimit: dto.tpmLimit ?? null,
         models: dto.models ?? [],
+        // 渠道白名单：只收窄路由候选集（可见性规则仍先生效），空 = 不限制
+        allowedChannelIds: normalizeChannelIds(dto.allowedChannelIds),
         // 分组只允许管理员指定，普通用户创建的 Key 一律继承用户分组
         groupId: isAdmin ? (dto.groupId ?? null) : null,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
@@ -109,6 +120,8 @@ export class KeysService {
     if (dto.routingStrategy !== undefined) data.routingStrategy = dto.routingStrategy;
     if (dto.tpmLimit !== undefined) data.tpmLimit = dto.tpmLimit;
     if (dto.models !== undefined) data.models = dto.models ?? [];
+    if (dto.allowedChannelIds !== undefined)
+      data.allowedChannelIds = normalizeChannelIds(dto.allowedChannelIds);
     // 分组只允许管理员调整
     if (isAdmin && dto.groupId !== undefined) data.groupId = dto.groupId;
     if (dto.expiresAt !== undefined) {

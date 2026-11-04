@@ -124,6 +124,8 @@ export const keysApi = {
     rpmLimit?: number;
     tpmLimit?: number;
     models?: string[];
+    /** 渠道白名单（渠道 id 多选）；空/缺省 = 不限制 */
+    allowedChannelIds?: string[];
     expiresAt?: string;
     /** 智能路由策略；留空跟随全局默认 */
     routingStrategy?: string;
@@ -144,6 +146,8 @@ export const keysApi = {
       routingStrategy: string | null;
       tpmLimit: number | null;
       models: string[] | null;
+      /** 渠道白名单；null/[] 清空（不限制） */
+      allowedChannelIds: string[] | null;
       /** 所属分组（仅管理员生效） */
       groupId: string | null;
     }>,

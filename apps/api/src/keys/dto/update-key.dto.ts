@@ -67,4 +67,12 @@ export class UpdateKeyDto {
   @IsString()
   @MaxLength(64)
   groupId?: string | null;
+
+  /** 渠道白名单，null/[] 清空（不限制） */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  @ArrayMaxSize(200)
+  allowedChannelIds?: string[] | null;
 }

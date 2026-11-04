@@ -49,7 +49,7 @@ export class GatewayController {
   async listModels(@Req() req: GatewayRequest, @Res() res: Response) {
     const { user, apiKey } = req.gateway;
     const group = await this.groups.effectiveGroup(user, apiKey.groupId);
-    let names = await this.resolver.availableModels(user.id, group.id);
+    let names = await this.resolver.availableModels(user.id, group.id, apiKey.allowedChannelIds);
     // 模型分组可见性（分组未配置可见模型 = 不限制）
     names = names.filter((n) => this.groups.isModelVisible(group, n));
     // Key 模型白名单：仅展示允许的模型（空数组表示不限制）
@@ -159,11 +159,7 @@ export class GatewayController {
 
   @ApiOperation({ summary: '视频任务状态（/videos/{id}）' })
   @Get('videos/:id')
-  async videoTaskStatus(
-    @Req() req: GatewayRequest,
-    @Res() res: Response,
-    @Param('id') id: string,
-  ) {
+  async videoTaskStatus(@Req() req: GatewayRequest, @Res() res: Response, @Param('id') id: string) {
     return this.videoExecutor.executeVideoStatus(req, res, id);
   }
 
@@ -202,5 +198,4 @@ export class GatewayController {
       videoCompatStatusResponse(json, this.videoExecutor.videoContentUrl(req, taskId)),
     );
   }
-
 }

@@ -228,6 +228,8 @@ model ApiKey {
   tpmLimit   Int?
   /// 模型白名单（支持别名与 :latest）；空数组 = 不限制
   models     String[] @default([])
+  /// 渠道白名单（渠道 id 多选）；空数组 = 不限制。仅收窄候选集，可见性规则仍先生效
+  allowedChannelIds String[] @default([])
   /// 令牌级分组覆盖（优先级高于用户所属分组）；null = 用用户分组
   groupId    String?
   group      ModelGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
