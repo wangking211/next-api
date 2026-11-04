@@ -74,6 +74,24 @@ export interface LogQuery {
   to?: string;
 }
 
+/** 渠道×模型×日 对账行（金额为 USD 字符串，避免浮点误差） */
+export interface ReconciliationRow {
+  day: string;
+  channel: string;
+  model: string;
+  requests: number;
+  ok: number;
+  errors: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cache_read_tokens: number;
+  total_tokens: number;
+  cost_usd: string;
+  billed_usd: string;
+  byok_requests: number;
+  byok_cost_usd: string;
+}
+
 function utcDay(d = new Date()): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
@@ -446,6 +464,7 @@ export class UsageService {
         latencyMs: true,
         status: true,
         errorMessage: true,
+        upstreamRequestId: true,
         apiKey: { select: { name: true } },
         channel: { select: { name: true } },
       },
@@ -471,6 +490,7 @@ export class UsageService {
       '延迟ms',
       '状态',
       '错误',
+      '上游请求ID',
     ];
     const lines = [header.join(',')];
     for (const r of rows) {
@@ -491,6 +511,7 @@ export class UsageService {
           r.latencyMs ?? '',
           r.status,
           r.errorMessage ?? '',
+          r.upstreamRequestId ?? '',
         ]
           .map(esc)
           .join(','),
@@ -500,16 +521,14 @@ export class UsageService {
   }
 
   /**
-   * 渠道×模型×日 对账汇总 CSV（北京时间自然日）：
+   * 渠道×模型×日 对账汇总（北京时间自然日）：
    * - 管理员可全量；普通用户仅自己名下的渠道
    * - `cost_usd` 为折算金额（含 BYOK），`billed_usd` 为平台实扣
-   * - 单独给出 BYOK 的请求数与折算成本，便于与上游账号账单核对
    */
-  async reconciliationCsv(
+  async reconciliationRows(
     user: { id: string; role: Role },
-    res: { setHeader(k: string, v: string): void; send(body: string): void },
     opts: { from?: string; to?: string; channelId?: string } = {},
-  ): Promise<void> {
+  ): Promise<ReconciliationRow[]> {
     const toDate = opts.to ? new Date(opts.to) : new Date();
     const to = Number.isNaN(toDate.getTime()) ? new Date() : toDate;
     const fromDate = opts.from ? new Date(opts.from) : new Date(to.getTime() - 30 * 86400_000);
@@ -541,6 +560,32 @@ export class UsageService {
       GROUP BY 1, 2, 3
       ORDER BY 1 DESC, 2 ASC, 3 ASC
     `);
+
+    // BigInt 无法 JSON 序列化；token 量级远低于 Number.MAX_SAFE_INTEGER，转 number 安全
+    return rows.map((r) => ({
+      day: String(r.day),
+      channel: String(r.channel),
+      model: String(r.model),
+      requests: Number(r.requests),
+      ok: Number(r.ok),
+      errors: Number(r.errors),
+      prompt_tokens: Number(r.prompt_tokens),
+      completion_tokens: Number(r.completion_tokens),
+      cache_read_tokens: Number(r.cache_read_tokens),
+      total_tokens: Number(r.total_tokens),
+      cost_usd: String(r.cost_usd),
+      billed_usd: String(r.billed_usd),
+      byok_requests: Number(r.byok_requests),
+      byok_cost_usd: String(r.byok_cost_usd),
+    }));
+  }
+
+  async reconciliationCsv(
+    user: { id: string; role: Role },
+    res: { setHeader(k: string, v: string): void; send(body: string): void },
+    opts: { from?: string; to?: string; channelId?: string } = {},
+  ): Promise<void> {
+    const rows = await this.reconciliationRows(user, opts);
 
     const header = [
       'day',

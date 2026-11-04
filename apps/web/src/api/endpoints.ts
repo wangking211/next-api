@@ -26,6 +26,7 @@ import {
   PublicStats,
   RedeemCode,
   RedeemCodeStatus,
+  ReconciliationRow,
   RequestLogDetail,
   RequestLogRow,
   RevenueSummary,
@@ -390,6 +391,17 @@ export const usageApi = {
       timeout: 120_000,
     });
     return res.data as Blob;
+  },
+  /** 渠道×模型×日 对账明细（JSON，对账页面用） */
+  async reconciliationRows(
+    params: { from?: string; to?: string; channelId?: string },
+    signal?: AbortSignal,
+  ): Promise<ReconciliationRow[]> {
+    const { data } = await api.get<ReconciliationRow[]>('/usage/reconciliation/rows', {
+      params,
+      signal,
+    });
+    return data;
   },
 };
 

@@ -13,6 +13,7 @@ import billing from './billing.json';
 import agent from './agent.json';
 import admin from './admin.json';
 import groups from './groups.json';
+import reconciliation from './reconciliation.json';
 
 /** 繁體中文（台灣用語）——键集必须与 zh-CN 完全一致（scripts/i18n-check.mjs 校验） */
 export default {
@@ -31,4 +32,5 @@ export default {
   ...agent,
   ...admin,
   ...groups,
+  ...reconciliation,
 };

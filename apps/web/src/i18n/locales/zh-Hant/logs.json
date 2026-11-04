@@ -32,6 +32,7 @@
   "logs.detail.cost": "費用",
   "logs.detail.latency": "延遲",
   "logs.detail.id": "日誌 ID",
+  "logs.detail.upstreamRequestId": "上游請求 ID",
   "logs.detail.error": "錯誤訊息",
   "logs.detail.request": "輸入（請求 messages）",
   "logs.detail.response": "輸出（模型回覆）",

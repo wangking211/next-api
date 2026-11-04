@@ -32,6 +32,7 @@
   "logs.detail.cost": "Cost",
   "logs.detail.latency": "Latency",
   "logs.detail.id": "Log ID",
+  "logs.detail.upstreamRequestId": "Upstream request ID",
   "logs.detail.error": "Error",
   "logs.detail.request": "Input (request messages)",
   "logs.detail.response": "Output (model reply)",

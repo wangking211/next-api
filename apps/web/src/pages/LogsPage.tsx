@@ -393,6 +393,13 @@ export default function LogsPage() {
                 )}
               </Descriptions.Item>
               <Descriptions.Item label={t('logs.detail.id')}>{detail.id}</Descriptions.Item>
+              {detail.upstreamRequestId ? (
+                <Descriptions.Item label={t('logs.detail.upstreamRequestId')}>
+                  <Typography.Text copyable={{ text: detail.upstreamRequestId }}>
+                    {detail.upstreamRequestId}
+                  </Typography.Text>
+                </Descriptions.Item>
+              ) : null}
             </Descriptions>
             {detail.errorMessage && (
               <TextBlock title={t('logs.detail.error')} text={detail.errorMessage} />

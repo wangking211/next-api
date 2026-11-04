@@ -1,0 +1,22 @@
+{
+  "reconciliation.title": "Channel reconciliation",
+  "reconciliation.help": "Aggregated by channel × model × Beijing day. Cost includes BYOK (estimated); billed is the platform charge. Compare with your upstream account bill by day/channel. Shows the last 30 days by default.",
+  "reconciliation.channel": "Channel",
+  "reconciliation.refresh": "Refresh",
+  "reconciliation.export": "Export CSV",
+  "reconciliation.requests": "Requests",
+  "reconciliation.errors": "Errors",
+  "reconciliation.tokens": "Tokens",
+  "reconciliation.cost": "Cost (est.)",
+  "reconciliation.billed": "Billed",
+  "reconciliation.day": "Date",
+  "reconciliation.channelCol": "Channel",
+  "reconciliation.model": "Model",
+  "reconciliation.ok": "OK",
+  "reconciliation.prompt": "Prompt tokens",
+  "reconciliation.completion": "Completion tokens",
+  "reconciliation.cacheRead": "Cache read tokens",
+  "reconciliation.total": "Total tokens",
+  "reconciliation.byokRequests": "BYOK requests",
+  "reconciliation.byokCost": "BYOK cost (est.)"
+}

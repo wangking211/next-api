@@ -58,6 +58,21 @@ export class UsageController {
     });
   }
 
+  /** 渠道×模型×日 对账明细（JSON，页面用） */
+  @Get('reconciliation/rows')
+  reconciliationRows(
+    @CurrentUser() user: AuthUser,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('channelId') channelId?: string,
+  ) {
+    return this.usage.reconciliationRows(user, {
+      from: from || undefined,
+      to: to || undefined,
+      channelId: channelId || undefined,
+    });
+  }
+
   /** 渠道×模型×日 对账汇总 CSV（管理员全量；普通用户仅自己的渠道） */
   @Get('reconciliation')
   async reconciliation(

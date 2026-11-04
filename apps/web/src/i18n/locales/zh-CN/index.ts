@@ -13,6 +13,7 @@ import billing from './billing.json';
 import agent from './agent.json';
 import admin from './admin.json';
 import groups from './groups.json';
+import reconciliation from './reconciliation.json';
 
 /** 简体中文（基准字典：t() 键的类型来源，缺失键会导致 typecheck 失败） */
 export default {
@@ -31,4 +32,5 @@ export default {
   ...agent,
   ...admin,
   ...groups,
+  ...reconciliation,
 };

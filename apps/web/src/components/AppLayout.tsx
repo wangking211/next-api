@@ -17,6 +17,7 @@ import {
   ApartmentOutlined,
   ClusterOutlined,
   PayCircleOutlined,
+  CalculatorOutlined,
 } from '@ant-design/icons';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -43,6 +44,7 @@ export default function AppLayout() {
       '/models',
       '/logs',
       '/usage-stats',
+      '/reconciliation',
       '/billing',
       '/revenue',
       '/agent',
@@ -65,6 +67,7 @@ export default function AppLayout() {
       '/models': t('layout.title.models'),
       '/logs': t('layout.title.logs'),
       '/usage-stats': t('layout.title.usageStats'),
+      '/reconciliation': t('layout.title.reconciliation'),
       '/billing': t('layout.title.billing'),
       '/revenue': t('layout.title.revenue'),
       '/agent': t('layout.title.agent'),
@@ -94,6 +97,11 @@ export default function AppLayout() {
     { key: '/models', icon: <AppstoreOutlined />, label: t('layout.menu.models') },
     { key: '/logs', icon: <FileTextOutlined />, label: t('layout.menu.logs') },
     { key: '/usage-stats', icon: <BarChartOutlined />, label: t('layout.menu.usageStats') },
+    {
+      key: '/reconciliation',
+      icon: <CalculatorOutlined />,
+      label: t('layout.menu.reconciliation'),
+    },
     { key: '/billing', icon: <WalletOutlined />, label: t('layout.menu.billing') },
     { key: '/revenue', icon: <PayCircleOutlined />, label: t('layout.menu.revenue') },
     ...(user?.role === 'AGENT' || user?.role === 'ADMIN'

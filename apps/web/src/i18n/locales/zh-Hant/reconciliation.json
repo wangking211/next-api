@@ -1,0 +1,22 @@
+{
+  "reconciliation.title": "渠道對賬",
+  "reconciliation.help": "按「渠道 × 模型 × 北京時間日」彙總；折算成本含 BYOK，平台實扣僅為實際扣費。可與上游帳號帳單按日/渠道核對。預設展示近 30 天。",
+  "reconciliation.channel": "渠道",
+  "reconciliation.refresh": "重新整理",
+  "reconciliation.export": "匯出 CSV",
+  "reconciliation.requests": "請求數",
+  "reconciliation.errors": "失敗數",
+  "reconciliation.tokens": "Token 數",
+  "reconciliation.cost": "折算費用",
+  "reconciliation.billed": "平台實扣",
+  "reconciliation.day": "日期",
+  "reconciliation.channelCol": "渠道",
+  "reconciliation.model": "模型",
+  "reconciliation.ok": "成功",
+  "reconciliation.prompt": "輸入 tokens",
+  "reconciliation.completion": "輸出 tokens",
+  "reconciliation.cacheRead": "快取讀 tokens",
+  "reconciliation.total": "總 tokens",
+  "reconciliation.byokRequests": "BYOK 請求",
+  "reconciliation.byokCost": "BYOK 折算"
+}

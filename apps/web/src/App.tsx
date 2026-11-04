@@ -18,6 +18,7 @@ const AvailableModelsPage = lazy(() => import('./pages/AvailableModelsPage'));
 const ModelsPage = lazy(() => import('./pages/ModelsPage'));
 const LogsPage = lazy(() => import('./pages/LogsPage'));
 const UsageStatsPage = lazy(() => import('./pages/UsageStatsPage'));
+const ReconciliationPage = lazy(() => import('./pages/ReconciliationPage'));
 const BillingPage = lazy(() => import('./pages/BillingPage'));
 const RevenuePage = lazy(() => import('./pages/RevenuePage'));
 const AgentPage = lazy(() => import('./pages/AgentPage'));
@@ -54,6 +55,7 @@ export default function App() {
                 <Route path="/models" element={<ModelsPage />} />
                 <Route path="/logs" element={<LogsPage />} />
                 <Route path="/usage-stats" element={<UsageStatsPage />} />
+                <Route path="/reconciliation" element={<ReconciliationPage />} />
                 <Route path="/billing" element={<BillingPage />} />
                 <Route path="/revenue" element={<RevenuePage />} />
                 {/* 菜单只对代理/管理员展示，但直达 URL 也必须拦：后端 /api/agent 全线 403 */}

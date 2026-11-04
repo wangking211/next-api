@@ -270,6 +270,26 @@ export interface RequestLogDetail extends RequestLogRow {
   userId: string;
   requestPreview: string | null;
   responsePreview: string | null;
+  /** 上游请求 id（DeepSeek/Anthropic 等返回），逐笔对账用 */
+  upstreamRequestId: string | null;
+}
+
+/** 渠道×模型×日 对账行（金额为 USD 字符串） */
+export interface ReconciliationRow {
+  day: string;
+  channel: string;
+  model: string;
+  requests: number;
+  ok: number;
+  errors: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cache_read_tokens: number;
+  total_tokens: number;
+  cost_usd: string;
+  billed_usd: string;
+  byok_requests: number;
+  byok_cost_usd: string;
 }
 
 export interface LogFilters {
