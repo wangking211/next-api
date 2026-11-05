@@ -285,6 +285,43 @@ describe('handleUpstreamFailure（拒答参与故障转移 + 分类边界）', (
     );
   });
 
+  it('403 + 欠费文案（Insufficient user quota）→ 余额口径：计渠道失败并转移，不走限流冷却', async () => {
+    const s = makeSupport();
+    const action = await s.support.handleUpstreamFailure(
+      new UpstreamError('Upstream error 403', 403, false, {
+        error: { message: 'Insufficient user quota, remaining quota: ¥-0.001008' },
+      }),
+      failureCtx(s, chan, true),
+    );
+    expect(action).toBe('continue');
+    expect(s.health.recordRateLimited).not.toHaveBeenCalled();
+    expect(s.health.recordFailure).toHaveBeenCalledWith('ch1', expect.any(String), {
+      count: true,
+    });
+    expect(s.metrics.record).toHaveBeenCalledWith(
+      'ch1',
+      'm',
+      'error',
+      expect.objectContaining({ status: 403 }),
+    );
+  });
+
+  it('403 欠费是账户级故障 → 即便其它模型窗口期内成功过也计数（不做模型级豁免）', async () => {
+    const s = makeSupport();
+    s.metrics.hasRecentSuccessOutside.mockResolvedValue(true);
+    const channel = { id: 'ch1', models: ['m', 'm2'] } as unknown as Channel;
+    const action = await s.support.handleUpstreamFailure(
+      new UpstreamError('Upstream error 403', 403, false, {
+        error: { message: '余额不足，请充值' },
+      }),
+      failureCtx(s, channel, true),
+    );
+    expect(action).toBe('continue');
+    expect(s.health.recordFailure).toHaveBeenCalledWith('ch1', expect.any(String), {
+      count: true,
+    });
+  });
+
   it('401 鉴权失效 → 计渠道失败（死 Key 渠道可自动停用）并转移下一家', async () => {
     const s = makeSupport();
     const action = await s.support.handleUpstreamFailure(

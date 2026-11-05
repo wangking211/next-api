@@ -114,6 +114,18 @@ export default function KeysPage() {
     staleTime: 60_000,
   });
   const channelName = (id: string) => channelList.find((c) => c.id === id)?.name ?? id;
+  // 排除当前用户确定不可见的渠道：他人的私有渠道（admin 也路由不了别人的 PRIVATE，
+  // 白名单只做可见性取交集）——选了也只是白填，不给这个选项
+  const myId = user?.id;
+  const selectableChannels = channelList.filter(
+    (c) =>
+      !(
+        c.ownerType === 'USER' &&
+        c.ownerUserId != null &&
+        c.ownerUserId !== myId &&
+        c.shareMode === 'PRIVATE'
+      ),
+  );
 
   const createMut = useMutation({
     mutationFn: keysApi.create,
@@ -528,7 +540,7 @@ export default function KeysPage() {
               showSearch
               optionFilterProp="label"
               placeholder={t('keys.form.channelsPlaceholder')}
-              options={channelList.map((c) => ({ value: c.id, label: c.name }))}
+              options={selectableChannels.map((c) => ({ value: c.id, label: c.name }))}
             />
           </Form.Item>
         </Form>

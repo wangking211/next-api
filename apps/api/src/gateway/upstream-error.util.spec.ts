@@ -81,18 +81,43 @@ describe('classifyUpstreamFailure（统一分类口径：故障转移与流式�
     expect(denied.transient).toBe(false);
   });
 
-  it('402 余额耗尽 → transient（不依赖 provider retryable：渠道侧故障照常换下一家）', () => {
+  it('402 余额耗尽 → balance（不依赖 provider retryable：渠道侧故障照常换下一家）', () => {
     const c = classifyUpstreamFailure(ue(402, false, 'Insufficient Balance'));
-    expect(c.transient).toBe(true);
+    expect(c.balance).toBe(true);
     expect(c.limited).toBe(false);
+    expect(c.transient).toBe(false);
     expect(c.refusal).toBe(false);
     expect(c.status).toBe(402);
   });
 
-  it('402 + 配额文案 → limited 优先（冷却退避、不计失败，同样可转移）', () => {
-    const c = classifyUpstreamFailure(ue(402, false, 'insufficient quota for this token'));
+  it('余额文案优先于限流：402/4xx 欠费语义 → balance（计失败），不再落 limited 冷却', () => {
+    // 旧口径：402 + 配额文案 → limited；欠费不会自愈，必须计失败直到充值
+    const q = classifyUpstreamFailure(ue(402, false, 'insufficient quota for this token'));
+    expect(q.balance).toBe(true);
+    expect(q.limited).toBe(false);
+    expect(q.transient).toBe(false);
+
+    // 线上 tokenfleetAICn 实测形态：403 + 欠费文案（QUOTA_RE 同样命中 quota 字样）
+    const relay = classifyUpstreamFailure(
+      ue(403, false, 'Insufficient user quota, remaining quota: ¥-0.001008'),
+    );
+    expect(relay.balance).toBe(true);
+    expect(relay.limited).toBe(false);
+    expect(relay.transient).toBe(false);
+
+    const cn = classifyUpstreamFailure(ue(403, false, '余额不足，请充值'));
+    expect(cn.balance).toBe(true);
+    expect(cn.limited).toBe(false);
+  });
+
+  it('无余额特征的超限文案仍 → limited（冷却退避、不计失败，同样可转移）', () => {
+    const c = classifyUpstreamFailure(ue(403, false, 'daily request limit exceeded'));
     expect(c.limited).toBe(true);
+    expect(c.balance).toBe(false);
     expect(c.transient).toBe(false);
+    const r = classifyUpstreamFailure(ue(429, false, 'rate limit exceeded, try later'));
+    expect(r.limited).toBe(true);
+    expect(r.balance).toBe(false);
   });
 
   it('普通 Error（网络中断/解码失败）→ transient，signal 取 message', () => {
@@ -107,6 +132,7 @@ describe('classifyUpstreamFailure（统一分类口径：故障转移与流式�
     const c = classifyUpstreamFailure(ue(400, false, 'messages[0].content is required'));
     expect(c).toMatchObject({
       limited: false,
+      balance: false,
       transient: false,
       authFault: false,
       modelDenied: false,

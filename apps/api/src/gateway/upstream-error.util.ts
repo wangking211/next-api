@@ -35,6 +35,24 @@ export function isRateLimited(e: UpstreamError): boolean {
   return QUOTA_RE.test(upstreamErrorSignal(e));
 }
 
+/**
+ * 上游「账户余额/额度已耗尽」特征：402，或 4xx 错误体里的欠费语义
+ * （中转站常见 403/400/429 + `Insufficient user quota`、`insufficient_quota`、`余额不足`、`请充值`）。
+ *
+ * 与限流的本质区别：**欠费不会自愈**——限流等窗口过去就恢复，欠费只有充值才能恢复。
+ * 因此它按可重试故障计渠道失败与 (渠道,模型) 熔断，连续达阈值自动停用，
+ * 充值后靠半开探活拉回；否则「上游没钱」的渠道会一直被冷却-重试循环吊着，
+ * 既不进 autoDisabled，健康度也一直是假绿（线上 tokenfleetAICn 即此形态）。
+ */
+const BALANCE_RE =
+  /(insufficient[\s_-]*(?:user[\s_-]*)?(?:balance|credit|quota|funds)|payment[\s_-]*required|no\s+(?:remaining\s+)?credits?|credits?\s+(?:balance\s+)?(?:exhausted|empty|depleted)|余额不足|余额已不足|账户余额不足|余额耗尽|余额为负|请.{0,8}充值|欠费)/i;
+
+export function isBalanceExhausted(e: UpstreamError): boolean {
+  if (e.status === 402) return true; // Payment Required：无条件按余额耗尽处理
+  if (e.status < 400 || e.status >= 500) return false;
+  return BALANCE_RE.test(upstreamErrorSignal(e));
+}
+
 /** 拒答/内容过滤特征：用户内容被安全策略拒绝，只降质量分，不伤稳定性也不熔断 */
 const REFUSAL_RE =
   /(content[_\s-]?filter|content_policy|safety|refusal|refused|内容安全|敏感内容)/i;
@@ -60,7 +78,9 @@ export function isModelAccessDenied(e: UpstreamError): boolean {
 export interface FailureClass {
   /** 限流/超限：冷却退避，不累计渠道失败 */
   limited: boolean;
-  /** 可重试故障（5xx / 网络中断 / 402 余额耗尽）：累计渠道失败与 (渠道,模型) 熔断 */
+  /** 上游余额/额度耗尽（402，或 4xx 带欠费文案）：按可重试故障计失败与熔断，充值后半开恢复 */
+  balance: boolean;
+  /** 可重试故障（5xx / 网络中断 / 余额耗尽）：累计渠道失败与 (渠道,模型) 熔断 */
   transient: boolean;
   /** 上游鉴权失效（401，渠道 Key 无效/过期）：与可重试故障同口径计渠道失败（Key 由服务端下发，非客户端可制造） */
   authFault: boolean;
@@ -78,7 +98,9 @@ export interface FailureClass {
 
 /**
  * 上游失败分类（纯函数，无 IO）：一次判定供故障转移、健康度与路由指标共用。
- * 优先级：限流 > 鉴权失效 > 模型无权 > 拒答 > 可重试故障——
+ * 优先级：余额耗尽 > 限流 > 鉴权失效 > 模型无权 > 拒答 > 可重试故障——
+ * 余额文案（`Insufficient user quota` / `余额不足` 等）常与配额/限流文案同形
+ * （中转站 403/429 + quota 字样），但欠费不会自愈，必须优先按余额计失败；
  * 拒答文案特征压过状态码，防止「503 + content_policy 文案」被当成普通故障
  * 累计 failureCount 打死渠道（拒答只降质量分，且可转移到下一家上游再试）。
  */
@@ -87,18 +109,20 @@ export function classifyUpstreamFailure(e: unknown): FailureClass {
   const status = ue?.status;
   const signal =
     (ue && upstreamErrorSignal(ue)) || String((e as Error)?.message ?? '') || 'upstream error';
-  const limited = ue ? isRateLimited(ue) : false;
-  const authFault = !!ue && !limited && status === 401;
-  const modelDenied = !!ue && !limited && !authFault && isModelAccessDenied(ue);
-  const refusal = !limited && !authFault && !modelDenied && !!ue && isRefusal(ue);
-  // 402 = 上游账户余额耗尽：渠道侧故障（该渠道此刻任何模型都不可用），在分类层
-  // 统一按可重试故障处理（不依赖 provider 的 retryable 标记，所有能力执行器自动生效）：
+  // 余额语义优先于限流：402 无条件；4xx 命中欠费文案（403 Insufficient user quota 等）
+  const balance = ue ? isBalanceExhausted(ue) : false;
+  const limited = ue && !balance ? isRateLimited(ue) : false;
+  const authFault = !!ue && !balance && !limited && status === 401;
+  const modelDenied = !!ue && !balance && !limited && !authFault && isModelAccessDenied(ue);
+  const refusal = !balance && !limited && !authFault && !modelDenied && !!ue && isRefusal(ue);
+  // 余额耗尽 = 渠道侧故障（该渠道此刻任何模型都不可用），在分类层统一按可重试故障
+  // 处理（不依赖 provider 的 retryable 标记，所有能力执行器自动生效）：
   // 计渠道失败/熔断并换下一家；余额恢复后走半开探活自动拉回。
-  const balance = !!ue && status === 402;
-  // 普通 Error（网络中断/解码失败）与未命中任何特征的 UpstreamError 按可重试故障处理
-  const transient = !limited && !refusal && (!ue || ue.retryable || balance);
+  // 普通 Error（网络中断/解码失败）与未命中任何特征的 UpstreamError 同样按可重试故障处理
+  const transient = !balance && !limited && !refusal && (!ue || ue.retryable);
   return {
     limited,
+    balance,
     transient,
     authFault,
     modelDenied,
