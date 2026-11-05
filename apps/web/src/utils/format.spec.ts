@@ -75,6 +75,12 @@ describe('formatMoney（展示币种开关）', () => {
     expect(moneyUnit()).toBe('USD');
   });
 
+  it('USD：大额固定两位小数（千分位），不堆叠多余精度', () => {
+    setCurrency('usd');
+    expect(moneyValue('1234.5678')).toBe('1,234.57');
+    expect(moneyValue('999999.999')).toBe('1,000,000.00');
+  });
+
   it('CNY：按 1 USD = N 元换算（config 未加载时用展示兜底汇率）', () => {
     setCurrency('cny');
     expect(formatMoney(1.5)).toBe('10.50 CNY');

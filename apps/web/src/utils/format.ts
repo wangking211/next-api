@@ -90,11 +90,12 @@ function group(value: number, maxFractionDigits: number): string {
   });
 }
 
-/** 金额的数值部分（不含单位）：积分 2 位小数；USD/CNY 最多 6 位（避免小额被抹成 0） */
+/** 金额的数值部分（不含单位）：积分 2 位小数；USD/CNY 大额 2 位、小额最多 6 位（小额不被抹成 0） */
 export function moneyValue(usd: string | number | null | undefined): string {
   const n = Number(usd ?? 0);
   const value = Number.isFinite(n) ? n * moneyFactor() : 0;
-  return group(value, displayCurrency === 'credits' ? 2 : 6);
+  const maxFractionDigits = displayCurrency === 'credits' ? 2 : Math.abs(value) >= 1 ? 2 : 6;
+  return group(value, maxFractionDigits);
 }
 
 /** 金额单位：积分随界面语言；USD/CNY 用 ISO 代码（无需翻译） */
