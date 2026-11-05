@@ -19,13 +19,14 @@ import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { agentApi, billingApi, withdrawalsApi } from '../api/endpoints';
-import { formatCredits, formatDateTime, fromCredits } from '../utils/format';
+import { formatDateTime, formatMoney, fromCredits, useCurrency } from '../utils/format';
 import QueryError from '../components/QueryError';
 import type { AgentMember, BalanceTransaction, Withdrawal } from '../api/types';
 
 export default function AgentPage() {
   const { message } = App.useApp();
   const { t } = useTranslation();
+  useCurrency(); // 订阅展示币种
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [rechargeTarget, setRechargeTarget] = useState<AgentMember | null>(null);
@@ -131,13 +132,13 @@ export default function AgentPage() {
           <Col xs={12} md={6}>
             <Statistic
               title={t('agent.overview.balance')}
-              value={formatCredits(overview?.balance ?? 0)}
+              value={formatMoney(overview?.balance ?? 0)}
             />
           </Col>
           <Col xs={12} md={6}>
             <Statistic
               title={t('agent.overview.commissionTotal')}
-              value={formatCredits(overview?.commissionTotal ?? 0)}
+              value={formatMoney(overview?.commissionTotal ?? 0)}
             />
           </Col>
           <Col xs={12} md={6}>
@@ -146,7 +147,7 @@ export default function AgentPage() {
           <Col xs={12} md={6}>
             <Statistic
               title={t('agent.overview.membersUsage30d')}
-              value={formatCredits(overview?.membersUsage30d?.cost ?? 0)}
+              value={formatMoney(overview?.membersUsage30d?.cost ?? 0)}
             />
           </Col>
         </Row>
@@ -191,7 +192,7 @@ export default function AgentPage() {
               title: t('agent.member.balance'),
               dataIndex: 'balance',
               width: 130,
-              render: (v: number) => formatCredits(v),
+              render: (v: number) => formatMoney(v),
             },
             {
               title: t('agent.member.multiplier'),
@@ -212,7 +213,7 @@ export default function AgentPage() {
             {
               title: t('agent.member.cost30d'),
               width: 130,
-              render: (_, r) => formatCredits(r.usage30d.cost),
+              render: (_, r) => formatMoney(r.usage30d.cost),
             },
             {
               title: t('common.action'),
@@ -248,7 +249,7 @@ export default function AgentPage() {
               dataIndex: 'amount',
               width: 140,
               render: (v: string) => (
-                <Typography.Text type="success">{formatCredits(v)}</Typography.Text>
+                <Typography.Text type="success">{formatMoney(v)}</Typography.Text>
               ),
             },
             {
@@ -354,7 +355,7 @@ export default function AgentPage() {
               title: t('common.amount'),
               dataIndex: 'amount',
               width: 130,
-              render: (v: string) => formatCredits(v),
+              render: (v: string) => formatMoney(v),
             },
             {
               title: t('common.status'),

@@ -20,7 +20,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { redeemCodesApi } from '../api/endpoints';
-import { formatCredits, formatDateTime, fromCredits } from '../utils/format';
+import { formatDateTime, formatMoney, fromCredits, useCurrency } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
 import { usePagination } from '../hooks/usePagination';
 import QueryError from '../components/QueryError';
@@ -73,6 +73,7 @@ function expiryFromPreset(preset: string): string | undefined {
 export default function AdminRedeemPage() {
   const { message } = App.useApp();
   const { t } = useTranslation();
+  useCurrency(); // 订阅展示币种
   const qc = useQueryClient();
   const statusMeta = getStatusMeta(t);
   const [open, setOpen] = useState(false);
@@ -167,11 +168,15 @@ export default function AdminRedeemPage() {
         scroll={{ x: 900 }}
         pagination={pg.pagination(data?.total)}
         columns={[
-          { title: t('admin.redeem.column.code'), dataIndex: 'code', render: (v: string) => <code>{v}</code> },
+          {
+            title: t('admin.redeem.column.code'),
+            dataIndex: 'code',
+            render: (v: string) => <code>{v}</code>,
+          },
           {
             title: t('admin.redeem.column.denomination'),
             dataIndex: 'amount',
-            render: (v: string) => formatCredits(v),
+            render: (v: string) => formatMoney(v),
           },
           {
             title: t('common.status'),
@@ -197,7 +202,10 @@ export default function AdminRedeemPage() {
             width: 100,
             render: (_, r) =>
               r.status === 'UNUSED' ? (
-                <Popconfirm title={t('admin.redeem.voidConfirm')} onConfirm={() => disableMut.mutate(r.id)}>
+                <Popconfirm
+                  title={t('admin.redeem.voidConfirm')}
+                  onConfirm={() => disableMut.mutate(r.id)}
+                >
                   <Button size="small" danger>
                     {t('admin.redeem.void')}
                   </Button>
@@ -222,10 +230,23 @@ export default function AdminRedeemPage() {
           requiredMark={false}
           initialValues={{ quantity: 10, expiryPreset: 'forever' }}
         >
-          <Form.Item name="amount" label={t('admin.redeem.amountLabel')} rules={[{ required: true, message: t('admin.redeem.amountRequired') }]}>
-            <InputNumber min={1} step={100} style={{ width: '100%' }} placeholder={t('admin.redeem.amountPlaceholder')} />
+          <Form.Item
+            name="amount"
+            label={t('admin.redeem.amountLabel')}
+            rules={[{ required: true, message: t('admin.redeem.amountRequired') }]}
+          >
+            <InputNumber
+              min={1}
+              step={100}
+              style={{ width: '100%' }}
+              placeholder={t('admin.redeem.amountPlaceholder')}
+            />
           </Form.Item>
-          <Form.Item name="quantity" label={t('admin.redeem.quantityLabel')} rules={[{ required: true }]}>
+          <Form.Item
+            name="quantity"
+            label={t('admin.redeem.quantityLabel')}
+            rules={[{ required: true }]}
+          >
             <InputNumber min={1} max={1000} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item name="note" label={t('admin.redeem.noteLabel')}>

@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { usageApi } from '../api/endpoints';
 import { useAuth } from '../auth/AuthContext';
-import { formatDateTime, toCredits } from '../utils/format';
+import { formatDateTime, formatMoney, moneyUnit, moneyValue, useCurrency } from '../utils/format';
 import QueryError from '../components/QueryError';
 import type { RequestLogRow } from '../api/types';
 import { StatCard } from './dashboard/StatCard';
@@ -14,6 +14,7 @@ import { PageHeader } from './dashboard/PageHeader';
 
 export default function DashboardPage() {
   const { t } = useTranslation();
+  useCurrency(); // 订阅展示币种：切换后金额/单位刷新
   const { user } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
   const [all, setAll] = useState(false);
@@ -69,7 +70,7 @@ export default function DashboardPage() {
   /** 折算总额与实扣的差额即 BYOK（自带密钥）未计费的部分 */
   const byokNote = (cost: number, billed: number) =>
     cost - billed > 0.0000005
-      ? ` · ${t('dashboard.rank.byokNote', { value: toCredits(cost - billed).toFixed(2) })}`
+      ? ` · ${t('dashboard.rank.byokNote', { value: moneyValue(cost - billed) })}`
       : '';
 
   return (
@@ -99,16 +100,16 @@ export default function DashboardPage() {
         <Col xs={12} md={6}>
           <StatCard
             label={t('dashboard.stat.billedCost')}
-            value={toCredits(summary?.billedCost ?? 0).toFixed(2)}
-            suffix={t('dashboard.unit.credits')}
+            value={moneyValue(summary?.billedCost ?? 0)}
+            suffix={moneyUnit()}
           />
         </Col>
         {isAdmin && (
           <Col xs={12} md={6}>
             <StatCard
               label={t('dashboard.stat.grossProfit')}
-              value={toCredits(margin).toFixed(2)}
-              suffix={t('dashboard.unit.credits')}
+              value={moneyValue(margin)}
+              suffix={moneyUnit()}
               valueColor={margin >= 0 ? 'var(--ok)' : 'var(--err)'}
             />
           </Col>
@@ -127,10 +128,10 @@ export default function DashboardPage() {
               key: m.model,
               label: m.model,
               value: m.tokens,
-              sub: `· ${t('common.creditsValue', { value: toCredits(m.billedCost).toFixed(2) })}${byokNote(
+              sub: `· ${formatMoney(m.billedCost)}${byokNote(
                 m.cost,
                 m.billedCost,
-              )}${isAdmin ? ` · ${t('dashboard.stat.grossProfit')} ${toCredits(m.margin).toFixed(2)}` : ''} · ${t('dashboard.rank.failed')} ${m.errors}`,
+              )}${isAdmin ? ` · ${t('dashboard.stat.grossProfit')} ${moneyValue(m.margin)}` : ''} · ${t('dashboard.rank.failed')} ${m.errors}`,
             }))}
           />
         </Col>
@@ -141,10 +142,10 @@ export default function DashboardPage() {
               key: c.channelId ?? c.name,
               label: `${c.name}${c.provider ? ` (${c.provider})` : ''}`,
               value: c.tokens,
-              sub: `· ${t('common.creditsValue', { value: toCredits(c.billedCost).toFixed(2) })}${byokNote(
+              sub: `· ${formatMoney(c.billedCost)}${byokNote(
                 c.cost,
                 c.billedCost,
-              )}${isAdmin ? ` · ${t('dashboard.stat.grossProfit')} ${toCredits(c.margin).toFixed(2)}` : ''}`,
+              )}${isAdmin ? ` · ${t('dashboard.stat.grossProfit')} ${moneyValue(c.margin)}` : ''}`,
             }))}
           />
         </Col>
@@ -156,10 +157,10 @@ export default function DashboardPage() {
                 key: u.userId,
                 label: u.name,
                 value: u.tokens,
-                sub: `· ${t('common.creditsValue', { value: toCredits(u.billedCost).toFixed(2) })}${byokNote(
+                sub: `· ${formatMoney(u.billedCost)}${byokNote(
                   u.cost,
                   u.billedCost,
-                )}${isAdmin ? ` · ${t('dashboard.stat.grossProfit')} ${toCredits(u.margin).toFixed(2)}` : ''}`,
+                )}${isAdmin ? ` · ${t('dashboard.stat.grossProfit')} ${moneyValue(u.margin)}` : ''}`,
               }))}
             />
           </Col>

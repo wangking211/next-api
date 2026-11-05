@@ -175,13 +175,20 @@ export interface ModelInfo {
   provider: string;
   origin: ModelOrigin;
   vendor: string | null;
+  /** 官方标价：按 priceCurrency 计价（CNY=¥、USD=$）；inputPrice 等记账列恒为 USD */
   inputPrice: string;
   outputPrice: string;
   cacheReadPrice: string;
   cacheWritePrice: string;
+  /** 官方标价币种（CNY/USD），决定价格列的展示单位 */
+  priceCurrency: 'CNY' | 'USD';
+  /** 录入时汇率快照（1 USD = N CNY）；priceCurrency=USD 时为 null */
+  fxRate: string | null;
+  /** 官方原币价快照（单位 = priceCurrency）；null = 存量行按 USD 口径展示 */
+  officialPrices: Record<string, number | null> | null;
   /** 低谷价倍率（0~1）；null/1 = 无峰谷差异 */
   offPeakMultiplier: string | null;
-  /** 按次价格（USD/次）；null = 按 token 计价 */
+  /** 按次价格（单位 = priceCurrency）；null = 按 token 计价 */
   perCallPrice: string | null;
   enabled: boolean;
   createdAt: string;
@@ -276,7 +283,7 @@ export interface RequestLogDetail extends RequestLogRow {
   upstreamRequestId: string | null;
 }
 
-/** 渠道×模型×日 对账行（金额为 USD 字符串） */
+/** 渠道×模型×日 对账行（金额为 USD 字符串；人民币列按当日汇率快照折算，汇率不可用为 null） */
 export interface ReconciliationRow {
   day: string;
   channel: string;
@@ -292,6 +299,12 @@ export interface ReconciliationRow {
   billed_usd: string;
   byok_requests: number;
   byok_cost_usd: string;
+  /** 当日汇率快照（1 USD = N CNY）；汇率不可用为 null */
+  fx_rate: string | null;
+  /** 成本人民币列；汇率不可用为 null */
+  cost_cny: string | null;
+  /** 实扣人民币列；汇率不可用为 null */
+  billed_cny: string | null;
 }
 
 export interface LogFilters {

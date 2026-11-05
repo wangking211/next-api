@@ -1,6 +1,18 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../i18n';
-import { formatCredits, formatDateTime, formatUsd, fromCredits, toCredits } from './format';
+import {
+  formatCny,
+  formatCredits,
+  formatDateTime,
+  formatMoney,
+  formatUsd,
+  fromCredits,
+  moneyUnit,
+  moneyValue,
+  setCurrency,
+  subscribeCurrency,
+  toCredits,
+} from './format';
 
 /** 文案走 i18n，断言统一固定语言，避免跑在英文环境时用例随 navigator 变化 */
 beforeEach(async () => {
@@ -44,6 +56,61 @@ describe('formatUsd', () => {
   it('非法输入回退到 $0.000000，而不是打出 NaN', () => {
     expect(formatUsd('nope')).toBe('$0.000000');
     expect(formatUsd(null)).toBe('$0.000000');
+  });
+});
+
+describe('formatMoney（展示币种开关）', () => {
+  afterEach(() => setCurrency('credits'));
+
+  it('默认积分口径与 formatCredits 完全一致', () => {
+    expect(formatMoney(1.5)).toBe(formatCredits(1.5));
+    expect(moneyUnit()).toBe('积分');
+  });
+
+  it('USD：按 1:1 展示，带 ISO 单位并保留小额精度', () => {
+    setCurrency('usd');
+    expect(formatMoney('1.5')).toBe('1.50 USD');
+    expect(formatMoney('0.018')).toBe('0.018 USD');
+    expect(moneyValue('1.5')).toBe('1.50');
+    expect(moneyUnit()).toBe('USD');
+  });
+
+  it('CNY：按 1 USD = N 元换算（config 未加载时用展示兜底汇率）', () => {
+    setCurrency('cny');
+    expect(formatMoney(1.5)).toBe('10.50 CNY');
+    expect(moneyUnit()).toBe('CNY');
+  });
+
+  it('切换持久化到 localStorage，并通知订阅者；退订后不再回调', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeCurrency(listener);
+
+    setCurrency('usd');
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem('aigw.currency')).toBe('usd');
+
+    unsubscribe();
+    setCurrency('cny');
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('非法/空金额按 0 展示，不产生 NaN', () => {
+    setCurrency('usd');
+    expect(formatMoney(null)).toBe('0.00 USD');
+    expect(formatMoney('abc')).toBe('0.00 USD');
+  });
+});
+
+describe('formatCny（对账人民币列，固定 CNY 口径）', () => {
+  it('汇率不可用（null）显示破折号', () => {
+    expect(formatCny(null)).toBe('—');
+    expect(formatCny(undefined)).toBe('—');
+    expect(formatCny('abc')).toBe('—');
+  });
+
+  it('已折算值直接展示并带 CNY 单位', () => {
+    expect(formatCny('0.1278')).toBe('0.1278 CNY');
+    expect(formatCny(7)).toBe('7.00 CNY');
   });
 });
 

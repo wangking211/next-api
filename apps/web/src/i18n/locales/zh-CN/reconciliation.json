@@ -18,5 +18,8 @@
   "reconciliation.cacheRead": "缓存读 tokens",
   "reconciliation.total": "总 tokens",
   "reconciliation.byokRequests": "BYOK 请求",
-  "reconciliation.byokCost": "BYOK 折算"
+  "reconciliation.byokCost": "BYOK 折算",
+  "reconciliation.costCny": "折算费用 (CNY)",
+  "reconciliation.billedCny": "平台实扣 (CNY)",
+  "reconciliation.fxRate": "当日汇率 (CNY/USD)"
 }

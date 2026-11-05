@@ -22,7 +22,14 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { useTranslation } from 'react-i18next';
 import { billingApi, paymentApi } from '../api/endpoints';
 import { getCreditsPerCny, getPayRate, isPayEnabled } from '../api/config';
-import { formatDateTime, toCredits } from '../utils/format';
+import {
+  formatDateTime,
+  formatMoney,
+  fromCredits,
+  moneyUnit,
+  moneyValue,
+  useCurrency,
+} from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
 import { usePagination } from '../hooks/usePagination';
 import QueryError from '../components/QueryError';
@@ -39,6 +46,7 @@ const PRESET_AMOUNTS = [1, 10, 50, 100, 500];
 export default function BillingPage() {
   const { message } = App.useApp();
   const { t } = useTranslation();
+  useCurrency(); // 订阅展示币种：切换后余额/流水/订单金额刷新
   const qc = useQueryClient();
   const [type, setType] = useState<BalanceTxType | 'ALL'>('ALL');
   const [code, setCode] = useState('');
@@ -74,13 +82,8 @@ export default function BillingPage() {
     { label: t('billing.pay.way.alipay'), value: 'ALI_QR' },
   ];
 
-  const creditsText = (credits: number): string =>
-    t('common.creditsValue', {
-      value: Number(credits ?? 0).toLocaleString('zh-CN', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
-    });
+  // 入参为积分数量（订单/兑换码面值），按当前展示币种展示
+  const creditsText = (credits: number): string => formatMoney(fromCredits(credits));
 
   const {
     data: balance,
@@ -112,7 +115,7 @@ export default function BillingPage() {
   const redeemMut = useMutation({
     mutationFn: billingApi.redeem,
     onSuccess: (res) => {
-      message.success(t('billing.redeem.success', { credits: creditsText(toCredits(res.amount)) }));
+      message.success(t('billing.redeem.success', { credits: formatMoney(res.amount) }));
       setCode('');
       qc.invalidateQueries({ queryKey: ['billing'] });
     },
@@ -159,8 +162,8 @@ export default function BillingPage() {
           <QueryError show={balErr} onRetry={balRefetch} />
           <Statistic
             title={t('billing.balance.title')}
-            value={balErr ? '—' : toCredits(balance?.balance).toFixed(2)}
-            suffix={t('billing.balance.suffix')}
+            value={balErr ? '—' : moneyValue(balance?.balance)}
+            suffix={moneyUnit()}
           />
           <Space.Compact style={{ marginTop: 16, maxWidth: 420 }}>
             <Input
@@ -345,7 +348,7 @@ export default function BillingPage() {
                   return (
                     <Typography.Text type={n >= 0 ? 'success' : 'danger'}>
                       {n >= 0 ? '+' : ''}
-                      {toCredits(n).toFixed(2)}
+                      {formatMoney(n)}
                     </Typography.Text>
                   );
                 },
@@ -353,7 +356,7 @@ export default function BillingPage() {
               {
                 title: t('billing.txnTable.balanceSnapshot'),
                 dataIndex: 'balanceAfter',
-                render: (v: string) => toCredits(v).toFixed(2),
+                render: (v: string) => formatMoney(v),
               },
               {
                 title: t('billing.txnTable.description'),

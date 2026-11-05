@@ -3,7 +3,7 @@ import { Descriptions, Drawer, Table, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { adminApi, usageApi } from '../api/endpoints';
-import { formatCredits, formatDateTime, toCredits } from '../utils/format';
+import { formatDateTime, formatMoney, useCurrency } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
 import { usePagination } from '../hooks/usePagination';
 import QueryError from '../components/QueryError';
@@ -29,6 +29,7 @@ const PAGE_SIZE = 6;
  */
 export default function AdminUserDetailDrawer({ user, onClose }: Props) {
   const { t } = useTranslation();
+  useCurrency(); // 订阅展示币种
   const logsPg = usePagination(PAGE_SIZE);
   const txPg = usePagination(PAGE_SIZE);
   const resetPages = logsPg.reset;
@@ -134,7 +135,7 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
           )}
         </Descriptions.Item>
         <Descriptions.Item label={t('admin.users.column.balance')}>
-          {formatCredits(user.balance)}
+          {formatMoney(user.balance)}
         </Descriptions.Item>
         <Descriptions.Item label={t('admin.users.column.group')}>
           {user.group ? user.group.displayName : t('admin.users.groupNone')}
@@ -196,8 +197,8 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
             title: t('keys.table.costUsage'),
             width: 130,
             render: (_, r) =>
-              `${formatCredits(r.costUsed)}${
-                r.costLimit ? ` / ${formatCredits(r.costLimit)}` : ` / ${t('keys.table.unlimited')}`
+              `${formatMoney(r.costUsed)}${
+                r.costLimit ? ` / ${formatMoney(r.costLimit)}` : ` / ${t('keys.table.unlimited')}`
               }`,
           },
           {
@@ -257,7 +258,7 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
             title: t('admin.users.detail.cost'),
             dataIndex: 'cost',
             width: 100,
-            render: (v: string) => formatCredits(v),
+            render: (v: string) => formatMoney(v),
           },
         ]}
       />
@@ -297,7 +298,7 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
               return (
                 <Typography.Text type={n >= 0 ? 'success' : 'danger'}>
                   {n >= 0 ? '+' : ''}
-                  {toCredits(n).toFixed(2)}
+                  {formatMoney(n)}
                 </Typography.Text>
               );
             },
@@ -306,7 +307,7 @@ export default function AdminUserDetailDrawer({ user, onClose }: Props) {
             title: t('billing.txnTable.balanceSnapshot'),
             dataIndex: 'balanceAfter',
             width: 120,
-            render: (v: string) => toCredits(v).toFixed(2),
+            render: (v: string) => formatMoney(v),
           },
           {
             title: t('billing.txnTable.description'),

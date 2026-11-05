@@ -18,5 +18,8 @@
   "reconciliation.cacheRead": "Cache read tokens",
   "reconciliation.total": "Total tokens",
   "reconciliation.byokRequests": "BYOK requests",
-  "reconciliation.byokCost": "BYOK cost (est.)"
+  "reconciliation.byokCost": "BYOK cost (est.)",
+  "reconciliation.costCny": "Cost (CNY)",
+  "reconciliation.billedCny": "Billed (CNY)",
+  "reconciliation.fxRate": "Daily FX rate (CNY/USD)"
 }

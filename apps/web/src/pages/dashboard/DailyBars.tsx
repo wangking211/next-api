@@ -1,7 +1,7 @@
 import { Empty } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { UsageDailyRow } from '../../api/types';
-import { toCredits } from '../../utils/format';
+import { formatMoney } from '../../utils/format';
 
 const mono =
   "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace";
@@ -21,14 +21,16 @@ export function DailyBars({ rows }: { rows: UsageDailyRow[] }) {
             key={r.date}
             title={`${r.date}\nTokens: ${r.totalTokens}\n${t('dashboard.daily.requests')}: ${
               r.requests
-            }\n${t('dashboard.daily.billedCost')}: ${toCredits(r.billedCost).toFixed(2)} ${t(
-              'dashboard.unit.credits',
-            )}${
-              byok > 0.0000005
-                ? `\n${t('dashboard.daily.byokNote')}: ${toCredits(byok).toFixed(2)} ${t('dashboard.unit.credits')}`
-                : ''
+            }\n${t('dashboard.daily.billedCost')}: ${formatMoney(r.billedCost)}${
+              byok > 0.0000005 ? `\n${t('dashboard.daily.byokNote')}: ${formatMoney(byok)}` : ''
             }`}
-            style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 4,
+            }}
           >
             <div
               style={{
@@ -38,7 +40,14 @@ export function DailyBars({ rows }: { rows: UsageDailyRow[] }) {
                 borderRadius: 4,
               }}
             />
-            <span style={{ fontFamily: mono, fontSize: 10, whiteSpace: 'nowrap', color: 'var(--text-3)' }}>
+            <span
+              style={{
+                fontFamily: mono,
+                fontSize: 10,
+                whiteSpace: 'nowrap',
+                color: 'var(--text-3)',
+              }}
+            >
               {r.date.slice(5)}
             </span>
           </div>

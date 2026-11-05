@@ -7,12 +7,13 @@ import { channelsApi, usageApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import QueryError from '../components/QueryError';
 import { downloadBlob } from '../utils/csv';
-import { formatCredits } from '../utils/format';
+import { formatCny, formatMoney, useCurrency } from '../utils/format';
 import type { ReconciliationRow } from '../api/types';
 
 /** 渠道×模型×日 对账：与上游账号账单按日/渠道核对（管理员全量，普通用户仅自己的渠道） */
 export default function ReconciliationPage() {
   const { t } = useTranslation();
+  useCurrency(); // 订阅展示币种：切换后金额列/合计刷新
   const { message } = App.useApp();
   const [range, setRange] = useState<[string, string] | null>(null);
   const [channelId, setChannelId] = useState<string | undefined>(undefined);
@@ -37,9 +38,13 @@ export default function ReconciliationPage() {
       tokens: acc.tokens + r.total_tokens,
       cost: acc.cost + Number(r.cost_usd),
       billed: acc.billed + Number(r.billed_usd),
+      costCny: acc.costCny + (r.cost_cny != null ? Number(r.cost_cny) : 0),
+      billedCny: acc.billedCny + (r.billed_cny != null ? Number(r.billed_cny) : 0),
     }),
-    { requests: 0, errors: 0, tokens: 0, cost: 0, billed: 0 },
+    { requests: 0, errors: 0, tokens: 0, cost: 0, billed: 0, costCny: 0, billedCny: 0 },
   );
+  // 汇率快照缺失（历史日无快照且实时汇率不可用）时人民币列为 null：合计也不臆造
+  const hasCny = rows.some((r) => r.cost_cny != null);
 
   const exportCsv = async () => {
     try {
@@ -103,10 +108,17 @@ export default function ReconciliationPage() {
           {t('reconciliation.tokens')}: <strong>{totals.tokens}</strong>
         </span>
         <span>
-          {t('reconciliation.cost')}: <strong>{formatCredits(totals.cost)}</strong>
+          {t('reconciliation.cost')}: <strong>{formatMoney(totals.cost)}</strong>
         </span>
         <span>
-          {t('reconciliation.billed')}: <strong>{formatCredits(totals.billed)}</strong>
+          {t('reconciliation.billed')}: <strong>{formatMoney(totals.billed)}</strong>
+        </span>
+        <span>
+          {t('reconciliation.costCny')}: <strong>{hasCny ? formatCny(totals.costCny) : '—'}</strong>
+        </span>
+        <span>
+          {t('reconciliation.billedCny')}:{' '}
+          <strong>{hasCny ? formatCny(totals.billedCny) : '—'}</strong>
         </span>
       </Space>
 
@@ -117,7 +129,7 @@ export default function ReconciliationPage() {
         loading={rowsQ.isLoading}
         dataSource={rows}
         size="small"
-        scroll={{ x: 1500 }}
+        scroll={{ x: 1900 }}
         pagination={{ pageSize: 20 }}
         columns={[
           { title: t('reconciliation.day'), dataIndex: 'day', width: 110 },
@@ -139,20 +151,38 @@ export default function ReconciliationPage() {
             title: t('reconciliation.cost'),
             dataIndex: 'cost_usd',
             width: 140,
-            render: (v: string) => formatCredits(v),
+            render: (v: string) => formatMoney(v),
           },
           {
             title: t('reconciliation.billed'),
             dataIndex: 'billed_usd',
             width: 140,
-            render: (v: string) => formatCredits(v),
+            render: (v: string) => formatMoney(v),
+          },
+          {
+            title: t('reconciliation.costCny'),
+            dataIndex: 'cost_cny',
+            width: 130,
+            render: (v: string | null) => formatCny(v),
+          },
+          {
+            title: t('reconciliation.billedCny'),
+            dataIndex: 'billed_cny',
+            width: 130,
+            render: (v: string | null) => formatCny(v),
+          },
+          {
+            title: t('reconciliation.fxRate'),
+            dataIndex: 'fx_rate',
+            width: 160,
+            render: (v: string | null) => (v == null ? '—' : Number(v).toFixed(4)),
           },
           { title: t('reconciliation.byokRequests'), dataIndex: 'byok_requests', width: 110 },
           {
             title: t('reconciliation.byokCost'),
             dataIndex: 'byok_cost_usd',
             width: 140,
-            render: (v: string) => formatCredits(v),
+            render: (v: string) => formatMoney(v),
           },
         ]}
       />

@@ -23,7 +23,7 @@ import { useTranslation } from 'react-i18next';
 import { adminApi, groupsApi, usageApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { downloadBlob } from '../utils/csv';
-import { formatCredits, formatDateTime, fromCredits } from '../utils/format';
+import { formatDateTime, formatMoney, fromCredits, useCurrency } from '../utils/format';
 import { usePageClamp } from '../hooks/usePageClamp';
 import { usePagination } from '../hooks/usePagination';
 import QueryError from '../components/QueryError';
@@ -35,6 +35,7 @@ type Mode = 'recharge' | 'adjust';
 export default function AdminUsersPage() {
   const { message } = App.useApp();
   const { t } = useTranslation();
+  useCurrency(); // 订阅展示币种
   const qc = useQueryClient();
   const [q, setQ] = useState('');
   // 搜索框的显示值（受控）：与已应用的 q 分离，「重置」才能连输入框一起清掉
@@ -447,7 +448,7 @@ export default function AdminUsersPage() {
           {
             title: t('admin.users.column.balance'),
             dataIndex: 'balance',
-            render: (v: string) => formatCredits(v),
+            render: (v: string) => formatMoney(v),
           },
           {
             title: t('admin.users.column.multiplier'),
@@ -566,13 +567,13 @@ export default function AdminUsersPage() {
             <Col span={6}>
               <Statistic
                 title={t('admin.users.statCost')}
-                value={formatCredits(uSummary.billedCost ?? 0)}
+                value={formatMoney(uSummary.billedCost ?? 0)}
               />
             </Col>
             <Col span={6}>
               <Statistic
                 title={t('admin.users.statMargin')}
-                value={formatCredits(uAnalytics?.totals?.margin ?? 0)}
+                value={formatMoney(uAnalytics?.totals?.margin ?? 0)}
                 valueStyle={{
                   color: (uAnalytics?.totals?.margin ?? 0) >= 0 ? 'var(--ok)' : 'var(--err)',
                 }}
@@ -594,13 +595,13 @@ export default function AdminUsersPage() {
               title: t('admin.users.statCost'),
               dataIndex: 'billedCost',
               width: 130,
-              render: (v: number) => formatCredits(v),
+              render: (v: number) => formatMoney(v),
             },
             {
               title: t('admin.users.statMargin'),
               dataIndex: 'margin',
               width: 130,
-              render: (v: number) => formatCredits(v),
+              render: (v: number) => formatMoney(v),
             },
           ]}
         />

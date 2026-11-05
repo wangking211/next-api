@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/AuthContext';
 import Logo from './Logo';
 import { LangSwitch } from './LangSwitch';
+import { CurrencySwitch } from './CurrencySwitch';
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
@@ -137,6 +138,7 @@ export default function AppLayout() {
       </Sider>
       <Layout>
         <Header className="app-header">
+          <CurrencySwitch />
           <LangSwitch />
           <Dropdown
             menu={{

@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { redactSecrets } from '../common/redact.util';
 import { BillingService, ChannelPricing } from '../billing/billing.service';
+import { ExchangeRateService } from '../billing/exchange-rate.service';
 import { MetricsService } from '../observability/metrics.service';
 import { truncate } from './content.util';
 
@@ -90,6 +91,12 @@ export interface ReconciliationRow {
   billed_usd: string;
   byok_requests: number;
   byok_cost_usd: string;
+  /** 当日汇率快照（1 USD = N CNY）；汇率不可用为 null */
+  fx_rate: string | null;
+  /** 成本人民币列（cost_usd × 当日汇率）；汇率不可用为 null */
+  cost_cny: string | null;
+  /** 实扣人民币列（billed_usd × 当日汇率）；汇率不可用为 null */
+  billed_cny: string | null;
 }
 
 function utcDay(d = new Date()): Date {
@@ -119,6 +126,8 @@ export class UsageService {
     config: ConfigService,
     // 观测指标（全局模块提供；手动构造的测试可不传）
     @Optional() private readonly metrics?: MetricsService,
+    // 汇率服务（PaymentModule 提供；手动构造的测试可不传 → 人民币列缺省为 null）
+    @Optional() private readonly exchangeRate?: ExchangeRateService,
   ) {
     this.logContent = config.get<string>('LOG_CONTENT', 'false') !== 'false';
     this.maxChars = Number(config.get<string>('LOG_CONTENT_MAX', '20000')) || 20000;
@@ -524,6 +533,8 @@ export class UsageService {
    * 渠道×模型×日 对账汇总（北京时间自然日）：
    * - 管理员可全量；普通用户仅自己名下的渠道
    * - `cost_usd` 为折算金额（含 BYOK），`billed_usd` 为平台实扣
+   * - 人民币列按「北京时间当日」汇率快照折算（DailyFxRate，缺日回退查询时实时汇率；
+   *   汇率不可用则人民币列为 null），历史导出不随实时汇率漂移
    */
   async reconciliationRows(
     user: { id: string; role: Role },
@@ -562,24 +573,64 @@ export class UsageService {
     `);
 
     // BigInt 无法 JSON 序列化；token 量级远低于 Number.MAX_SAFE_INTEGER，转 number 安全
-    return rows.map((r) => ({
-      day: String(r.day),
-      channel: String(r.channel),
-      model: String(r.model),
-      requests: Number(r.requests),
-      ok: Number(r.ok),
-      errors: Number(r.errors),
-      prompt_tokens: Number(r.prompt_tokens),
-      completion_tokens: Number(r.completion_tokens),
-      cache_read_tokens: Number(r.cache_read_tokens),
-      total_tokens: Number(r.total_tokens),
-      cost_usd: String(r.cost_usd),
-      billed_usd: String(r.billed_usd),
-      byok_requests: Number(r.byok_requests),
-      byok_cost_usd: String(r.byok_cost_usd),
-    }));
+    const rateByDay = await this.fxRateByDay(rows);
+    return rows.map((r) => {
+      const rate = rateByDay.get(String(r.day)) ?? null;
+      const costUsd = Number(r.cost_usd);
+      const billedUsd = Number(r.billed_usd);
+      return {
+        day: String(r.day),
+        channel: String(r.channel),
+        model: String(r.model),
+        requests: Number(r.requests),
+        ok: Number(r.ok),
+        errors: Number(r.errors),
+        prompt_tokens: Number(r.prompt_tokens),
+        completion_tokens: Number(r.completion_tokens),
+        cache_read_tokens: Number(r.cache_read_tokens),
+        total_tokens: Number(r.total_tokens),
+        cost_usd: String(r.cost_usd),
+        billed_usd: String(r.billed_usd),
+        byok_requests: Number(r.byok_requests),
+        byok_cost_usd: String(r.byok_cost_usd),
+        fx_rate: rate != null ? String(rate) : null,
+        cost_cny: rate != null ? String(round6(costUsd * rate)) : null,
+        billed_cny: rate != null ? String(round6(billedUsd * rate)) : null,
+      };
+    });
   }
 
+  /**
+   * 对账行按日取汇率：优先 DailyFxRate 当日快照，缺日回退查询时实时汇率；
+   * 快照读取或汇率获取失败均 fail-open（人民币列为 null，不影响美元列）。
+   */
+  private async fxRateByDay(rows: Array<Record<string, unknown>>): Promise<Map<string, number>> {
+    const days = [...new Set(rows.map((r) => String(r.day)))];
+    const map = new Map<string, number>();
+    if (!days.length) return map;
+    try {
+      const snaps = await this.prisma.dailyFxRate.findMany({ where: { day: { in: days } } });
+      for (const s of snaps) map.set(s.day, Number(s.cnyPerUsd));
+    } catch (e) {
+      this.logger.warn(
+        `对账汇率快照读取失败（回退实时汇率）: ${e instanceof Error ? e.message : e}`,
+      );
+    }
+    const missing = days.filter((d) => !map.has(d));
+    if (missing.length && this.exchangeRate) {
+      try {
+        const live = await this.exchangeRate.getCnyPerUsd();
+        for (const d of missing) map.set(d, live);
+      } catch (e) {
+        this.logger.warn(
+          `对账实时汇率获取失败（人民币列为 null）: ${e instanceof Error ? e.message : e}`,
+        );
+      }
+    }
+    return map;
+  }
+
+  /** 渠道×模型×日 对账导出（CSV 与页面同源：人民币列按当日汇率快照折算，缺日回退实时汇率） */
   async reconciliationCsv(
     user: { id: string; role: Role },
     res: { setHeader(k: string, v: string): void; send(body: string): void },
@@ -602,6 +653,10 @@ export class UsageService {
       'billed_usd',
       'byok_requests',
       'byok_cost_usd',
+      // 人民币三列追加在末尾（既有按列序解析的消费方不受影响）；汇率不可用时为空
+      'fx_rate',
+      'cost_cny',
+      'billed_cny',
     ];
     const lines = [header.join(',')];
     for (const r of rows) {
@@ -621,6 +676,9 @@ export class UsageService {
           r.billed_usd,
           r.byok_requests,
           r.byok_cost_usd,
+          r.fx_rate,
+          r.cost_cny,
+          r.billed_cny,
         ]
           .map((v) => this.csvCell(v))
           .join(','),

@@ -18,9 +18,21 @@ import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { modelsApi } from '../api/endpoints';
+import { getPayRate } from '../api/config';
 import { useAuth } from '../auth/AuthContext';
 import QueryError from '../components/QueryError';
 import type { ModelInfo } from '../api/types';
+
+/**
+ * 官方价展示：按行 priceCurrency 决定符号（CNY=¥ / USD=$）。
+ * 存量行 officialPrices=null → 按 USD 记账列展示（历史数据一律 USD 口径）。
+ */
+function officialCell(r: ModelInfo, key: string, usd: string | null | undefined): string {
+  const official = r.officialPrices?.[key];
+  const symbol = official != null && r.priceCurrency === 'CNY' ? '¥' : '$';
+  const n = official ?? Number(usd ?? 0);
+  return `${symbol}${(Number.isFinite(n) ? n : 0).toFixed(4)}`;
+}
 
 export default function ModelsPage() {
   const { t } = useTranslation();
@@ -31,6 +43,9 @@ export default function ModelsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ModelInfo | null>(null);
   const [form] = Form.useForm();
+  // 录入币种决定价格输入的官方单位（¥/$），随表单选择实时切换标签与汇率字段
+  const priceCurrency = Form.useWatch('priceCurrency', form) as 'CNY' | 'USD' | undefined;
+  const priceSymbol = priceCurrency === 'CNY' ? '¥' : '$';
 
   const {
     data: models = [],
@@ -75,6 +90,7 @@ export default function ModelsPage() {
     form.setFieldsValue({
       enabled: true,
       origin: 'OVERSEAS',
+      priceCurrency: 'USD',
       inputPrice: 0,
       outputPrice: 0,
       cacheReadPrice: 0,
@@ -86,18 +102,22 @@ export default function ModelsPage() {
 
   const openEdit = (r: ModelInfo) => {
     setEditing(r);
+    // 价格输入框按「官方原币价」回填：CNY 行取 officialPrices，避免把 USD 记账值当原币价再折一次
+    const official = r.officialPrices;
     form.setFieldsValue({
       name: r.name,
       displayName: r.displayName,
       provider: r.provider,
       origin: r.origin,
       vendor: r.vendor ?? undefined,
-      inputPrice: Number(r.inputPrice),
-      outputPrice: Number(r.outputPrice),
-      cacheReadPrice: Number(r.cacheReadPrice ?? 0),
-      cacheWritePrice: Number(r.cacheWritePrice ?? 0),
+      priceCurrency: r.priceCurrency ?? 'USD',
+      fxRate: r.fxRate != null ? Number(r.fxRate) : undefined,
+      inputPrice: official?.input ?? Number(r.inputPrice),
+      outputPrice: official?.output ?? Number(r.outputPrice),
+      cacheReadPrice: official?.cacheRead ?? Number(r.cacheReadPrice ?? 0),
+      cacheWritePrice: official?.cacheWrite ?? Number(r.cacheWritePrice ?? 0),
       offPeakMultiplier: r.offPeakMultiplier != null ? Number(r.offPeakMultiplier) : undefined,
-      perCallPrice: r.perCallPrice != null ? Number(r.perCallPrice) : null,
+      perCallPrice: official?.perCall ?? (r.perCallPrice != null ? Number(r.perCallPrice) : null),
       enabled: r.enabled,
     });
     setOpen(true);
@@ -161,22 +181,22 @@ export default function ModelsPage() {
           {
             title: t('models.column.inputPrice'),
             dataIndex: 'inputPrice',
-            render: (v: string) => Number(v).toFixed(4),
+            render: (v: string, r: ModelInfo) => officialCell(r, 'input', v),
           },
           {
             title: t('models.column.outputPrice'),
             dataIndex: 'outputPrice',
-            render: (v: string) => Number(v).toFixed(4),
+            render: (v: string, r: ModelInfo) => officialCell(r, 'output', v),
           },
           {
             title: t('models.column.cacheRead'),
             dataIndex: 'cacheReadPrice',
-            render: (v: string) => Number(v ?? 0).toFixed(4),
+            render: (v: string, r: ModelInfo) => officialCell(r, 'cacheRead', v),
           },
           {
             title: t('models.column.cacheWrite'),
             dataIndex: 'cacheWritePrice',
-            render: (v: string) => Number(v ?? 0).toFixed(4),
+            render: (v: string, r: ModelInfo) => officialCell(r, 'cacheWrite', v),
           },
           {
             title: t('models.column.offPeak'),
@@ -188,8 +208,11 @@ export default function ModelsPage() {
           {
             title: t('models.column.perCallPrice'),
             dataIndex: 'perCallPrice',
-            render: (v: string | null) =>
-              v != null ? Number(v).toFixed(4) : t('models.perCall.tokenPriced'),
+            render: (v: string | null, r: ModelInfo) => {
+              const official = r.officialPrices?.perCall;
+              if (official == null && v == null) return t('models.perCall.tokenPriced');
+              return officialCell(r, 'perCall', v);
+            },
           },
           {
             title: t('models.column.enabled'),
@@ -240,6 +263,13 @@ export default function ModelsPage() {
           layout="vertical"
           onFinish={(v) => saveMut.mutate(v)}
           requiredMark={false}
+          onValuesChange={(changed) => {
+            // 切到人民币录入时若汇率还空着，用平台当前汇率预填（可改）
+            if (changed.priceCurrency === 'CNY' && form.getFieldValue('fxRate') == null) {
+              const rate = getPayRate();
+              if (rate != null) form.setFieldsValue({ fxRate: rate });
+            }
+          }}
         >
           <Form.Item
             name="name"
@@ -277,16 +307,49 @@ export default function ModelsPage() {
             </Form.Item>
           </Space>
           <Space size={16} wrap>
-            <Form.Item name="inputPrice" label={t('models.form.inputPriceLabel')}>
+            <Form.Item name="priceCurrency" label={t('models.form.currencyLabel')}>
+              <Select
+                style={{ width: 160 }}
+                options={[
+                  { value: 'USD', label: 'USD ($)' },
+                  { value: 'CNY', label: 'CNY (¥)' },
+                ]}
+              />
+            </Form.Item>
+            {priceCurrency === 'CNY' && (
+              <Form.Item
+                name="fxRate"
+                label={t('models.form.fxRateLabel')}
+                tooltip={t('models.form.fxRateTip')}
+                rules={[{ required: true }]}
+              >
+                <InputNumber min={2} max={20} step={0.01} style={{ width: 180 }} />
+              </Form.Item>
+            )}
+          </Space>
+          <Space size={16} wrap>
+            <Form.Item
+              name="inputPrice"
+              label={`${t('models.form.inputPriceLabel')} (${priceSymbol}/1M)`}
+            >
               <InputNumber min={0} step={0.01} />
             </Form.Item>
-            <Form.Item name="outputPrice" label={t('models.form.outputPriceLabel')}>
+            <Form.Item
+              name="outputPrice"
+              label={`${t('models.form.outputPriceLabel')} (${priceSymbol}/1M)`}
+            >
               <InputNumber min={0} step={0.01} />
             </Form.Item>
-            <Form.Item name="cacheReadPrice" label={t('models.form.cacheReadLabel')}>
+            <Form.Item
+              name="cacheReadPrice"
+              label={`${t('models.form.cacheReadLabel')} (${priceSymbol}/1M)`}
+            >
               <InputNumber min={0} step={0.01} />
             </Form.Item>
-            <Form.Item name="cacheWritePrice" label={t('models.form.cacheWriteLabel')}>
+            <Form.Item
+              name="cacheWritePrice"
+              label={`${t('models.form.cacheWriteLabel')} (${priceSymbol}/1M)`}
+            >
               <InputNumber min={0} step={0.01} />
             </Form.Item>
             <Form.Item
@@ -296,7 +359,10 @@ export default function ModelsPage() {
             >
               <InputNumber min={0} max={1} step={0.05} placeholder="1" />
             </Form.Item>
-            <Form.Item name="perCallPrice" label={t('models.form.perCallPriceLabel')}>
+            <Form.Item
+              name="perCallPrice"
+              label={`${t('models.form.perCallPriceLabel')} (${priceSymbol}/次)`}
+            >
               <InputNumber min={0} step={0.001} />
             </Form.Item>
           </Space>

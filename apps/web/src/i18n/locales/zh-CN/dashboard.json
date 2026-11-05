@@ -8,7 +8,6 @@
   "dashboard.stat.totalTokens": "Token 总量",
   "dashboard.stat.billedCost": "费用（实扣）",
   "dashboard.stat.grossProfit": "毛利",
-  "dashboard.unit.credits": "积分",
   "dashboard.card.dailyTokens": "每日 Token 用量",
   "dashboard.card.recentCalls": "最近调用",
   "dashboard.rank.byModel": "模型用量（tokens）",

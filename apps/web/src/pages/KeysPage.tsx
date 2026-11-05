@@ -23,7 +23,7 @@ import { keysApi, groupsApi, channelsApi } from '../api/endpoints';
 import { testKeyConnectivity } from '../api/keyConnectivity';
 import type { KeyConnectivityResult } from '../api/keyConnectivity';
 import { useAuth } from '../auth/AuthContext';
-import { formatDateTime, formatCredits } from '../utils/format';
+import { formatDateTime, formatMoney, useCurrency } from '../utils/format';
 import QueryError from '../components/QueryError';
 import type { ApiKeyCreated, ApiKeyInfo, RoutingStrategy } from '../api/types';
 
@@ -60,6 +60,7 @@ const STRATEGY_LABEL: Record<RoutingStrategy, StrategyLabelKey> = {
 
 export default function KeysPage() {
   const { t } = useTranslation();
+  useCurrency(); // 订阅展示币种
   const { message } = App.useApp();
   const { user } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
@@ -275,8 +276,8 @@ export default function KeysPage() {
             ),
             render: (_, r) =>
               r.costLimit
-                ? `${formatCredits(r.costUsed)} / ${formatCredits(r.costLimit)}`
-                : `${formatCredits(r.costUsed)} / ∞`,
+                ? `${formatMoney(r.costUsed)} / ${formatMoney(r.costLimit)}`
+                : `${formatMoney(r.costUsed)} / ∞`,
           },
           {
             title: 'RPM',

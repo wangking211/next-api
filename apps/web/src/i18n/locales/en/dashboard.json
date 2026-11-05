@@ -8,7 +8,6 @@
   "dashboard.stat.totalTokens": "Total Tokens",
   "dashboard.stat.billedCost": "Cost (billed)",
   "dashboard.stat.grossProfit": "Gross Profit",
-  "dashboard.unit.credits": "credits",
   "dashboard.card.dailyTokens": "Daily Token Usage",
   "dashboard.card.recentCalls": "Recent Calls",
   "dashboard.rank.byModel": "Model Usage (tokens)",

@@ -20,7 +20,7 @@ import { usageApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import QueryError from '../components/QueryError';
-import { formatCredits } from '../utils/format';
+import { formatMoney, useCurrency } from '../utils/format';
 import { downloadBlob, downloadCsv, toCsv } from '../utils/csv';
 import type { UsageAnalytics } from '../api/types';
 
@@ -32,11 +32,12 @@ const costCol = (title: string, dataIndex: string, width = 120) => ({
   title,
   dataIndex,
   width,
-  render: (v: number) => formatCredits(v),
+  render: (v: number) => formatMoney(v),
 });
 
 export default function UsageStatsPage() {
   const { t: tr } = useTranslation();
+  useCurrency(); // 订阅展示币种
   const { user } = useAuth();
   const { message } = App.useApp();
   const isAdmin = user?.role === 'ADMIN';
@@ -141,12 +142,12 @@ export default function UsageStatsPage() {
             <Statistic title="Token" value={t?.tokens ?? 0} />
           </Col>
           <Col xs={12} md={4}>
-            <Statistic title={tr('usage.costBilled')} value={formatCredits(t?.billedCost ?? 0)} />
+            <Statistic title={tr('usage.costBilled')} value={formatMoney(t?.billedCost ?? 0)} />
           </Col>
           <Col xs={12} md={4}>
             <Statistic
               title={tr('usage.byokNotCharged')}
-              value={formatCredits((t?.cost ?? 0) - (t?.billedCost ?? 0))}
+              value={formatMoney((t?.cost ?? 0) - (t?.billedCost ?? 0))}
               valueStyle={{ color: 'var(--text-3)' }}
             />
           </Col>
@@ -155,13 +156,13 @@ export default function UsageStatsPage() {
               <Col xs={12} md={4}>
                 <Statistic
                   title={tr('usage.costPaid')}
-                  value={formatCredits(t?.billedUpstreamCost ?? 0)}
+                  value={formatMoney(t?.billedUpstreamCost ?? 0)}
                 />
               </Col>
               <Col xs={12} md={4}>
                 <Statistic
                   title={tr('usage.margin')}
-                  value={formatCredits(t?.margin ?? 0)}
+                  value={formatMoney(t?.margin ?? 0)}
                   valueStyle={{ color: (t?.margin ?? 0) >= 0 ? 'var(--ok)' : 'var(--err)' }}
                 />
               </Col>

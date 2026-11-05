@@ -24,7 +24,7 @@ import { useTranslation } from 'react-i18next';
 import { adminApi, usageApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
-import { formatDateTime, formatCredits } from '../utils/format';
+import { formatDateTime, formatMoney, useCurrency } from '../utils/format';
 import { downloadBlob } from '../utils/csv';
 import { usePageClamp } from '../hooks/usePageClamp';
 import { usePagination } from '../hooks/usePagination';
@@ -59,6 +59,7 @@ function TextBlock({ title, text }: { title: string; text: string | null }) {
 
 export default function LogsPage() {
   const { t } = useTranslation();
+  useCurrency(); // 订阅展示币种
   const { user } = useAuth();
   const { message } = App.useApp();
   const isAdmin = user?.role === 'ADMIN';
@@ -295,9 +296,9 @@ export default function LogsPage() {
             width: 130,
             render: (v: string, r) =>
               r.chargeable ? (
-                formatCredits(v)
+                formatMoney(v)
               ) : (
-                <Tooltip title={t('logs.byokTip', { value: formatCredits(v) })}>
+                <Tooltip title={t('logs.byokTip', { value: formatMoney(v) })}>
                   <Tag>{t('logs.notBilled')}</Tag>
                 </Tooltip>
               ),
@@ -375,9 +376,9 @@ export default function LogsPage() {
               </Descriptions.Item>
               <Descriptions.Item label={t('logs.detail.cost')}>
                 {detail.chargeable ? (
-                  formatCredits(detail.cost)
+                  formatMoney(detail.cost)
                 ) : (
-                  <Tooltip title={t('logs.byokTip', { value: formatCredits(detail.cost) })}>
+                  <Tooltip title={t('logs.byokTip', { value: formatMoney(detail.cost) })}>
                     <Tag>{t('logs.notBilled')}</Tag>
                   </Tooltip>
                 )}

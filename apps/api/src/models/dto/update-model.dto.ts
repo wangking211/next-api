@@ -11,7 +11,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { ModelOrigin } from '@prisma/client';
+import { ModelOrigin, PriceCurrency } from '@prisma/client';
 
 export class UpdateModelDto {
   @IsOptional()
@@ -26,25 +26,41 @@ export class UpdateModelDto {
   @MaxLength(32)
   provider?: string;
 
+  /** 官方标价（按 priceCurrency 计价）；保存时按 fxRate 折算 USD 记账 */
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0)
   inputPrice?: number;
 
+  /** 官方标价（按 priceCurrency） */
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0)
   outputPrice?: number;
 
+  /** 官方标价（按 priceCurrency） */
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0)
   cacheReadPrice?: number;
 
+  /** 官方标价（按 priceCurrency） */
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0)
   cacheWritePrice?: number;
+
+  /** 官方标价币种：变更时必须携带全套官方价（避免原币价跨币种错读） */
+  @IsOptional()
+  @IsEnum(PriceCurrency)
+  priceCurrency?: PriceCurrency;
+
+  /** 录入时汇率快照（1 USD = N CNY）：变更时必须携带全套官方价重算 USD 记账价 */
+  @IsOptional()
+  @IsNumber()
+  @Min(2)
+  @Max(20)
+  fxRate?: number;
 
   @IsOptional()
   @IsBoolean()
@@ -63,7 +79,7 @@ export class UpdateModelDto {
   @IsEnum(ModelOrigin)
   origin?: ModelOrigin;
 
-  /** 按次售价（USD/次）：图片等非 token 计费模型；null 清除 */
+  /** 按次官方价（按 priceCurrency）：图片等非 token 计费模型；null 清除 */
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0)

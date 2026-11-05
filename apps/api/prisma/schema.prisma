@@ -381,6 +381,12 @@ model ModelCatalog {
   offPeakMultiplier Decimal? @db.Decimal(6, 4)
   /// 按次售价（USD/次）：图片等非 token 计费模型；null = 走 token 计价
   perCallPrice    Decimal? @db.Decimal(18, 6)
+  /// 官方标价币种：CNY=按人民币官方价录入（国产模型）/ USD=按美元；决定录入口径，记账本位恒为 USD
+  priceCurrency   PriceCurrency @default(USD)
+  /// 录入时汇率快照（1 USD = N CNY）；priceCurrency=USD 时为 null
+  fxRate          Decimal? @db.Decimal(18, 6)
+  /// 官方原币价快照 {input,output,cacheRead,cacheWrite,perCall}（单位 = priceCurrency，录入/展示用）
+  officialPrices  Json?
   /// 能力标签（vision / tools / reasoning / json_mode 等）；空数组 = 未标注，能力检查放行
   capabilities String[] @default([])
   /// 别名列表：请求这些名字时解析到本模型（name 为规范名）
@@ -401,6 +407,22 @@ enum ModelGroupStatus {
 enum ModelOrigin {
   DOMESTIC
   OVERSEAS
+}
+
+/// 官方标价币种：CNY=人民币（国产模型官方价目）/ USD=美元；仅决定录入与展示口径，记账恒为 USD
+enum PriceCurrency {
+  CNY
+  USD
+}
+
+/// 对账人民币列的按日汇率快照（北京时间自然日）：写入当日已知汇率，历史行按日取值不漂移
+model DailyFxRate {
+  /// 北京时间自然日 YYYY-MM-DD
+  day       String   @id
+  /// 1 美元 = ? 元人民币
+  cnyPerUsd Decimal  @db.Decimal(18, 6)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 /// 模型分组：一组可见模型 + 分组倍率。用户/令牌绑定分组后决定其可见模型与价格档位

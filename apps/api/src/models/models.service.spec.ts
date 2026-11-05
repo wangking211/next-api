@@ -8,7 +8,9 @@ function makeService(rows: any[] = []) {
       findMany: jest.fn().mockResolvedValue(rows),
       findUnique: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockImplementation(async (args: any) => ({ id: 'new', ...args.data })),
-      update: jest.fn().mockImplementation(async (args: any) => ({ id: args.where.id, ...args.data })),
+      update: jest
+        .fn()
+        .mockImplementation(async (args: any) => ({ id: args.where.id, ...args.data })),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       delete: jest.fn().mockResolvedValue({}),
     },
@@ -94,5 +96,147 @@ describe('ModelsService.classifyOrigins 分组批量打标', () => {
     expect(res.updated).toBe(0);
     expect(prisma.modelCatalog.updateMany).not.toHaveBeenCalled();
     expect(cache.get(KEY)).toEqual(['stale']);
+  });
+});
+
+describe('ModelsService 计价币种（官方价 → USD 记账本位）', () => {
+  it('CNY 录入按汇率折算 USD，officialPrices 保留原币价', async () => {
+    const { service, prisma } = makeService();
+
+    await service.create({
+      name: 'kimi-k2.5',
+      provider: 'moonshot',
+      displayName: 'Kimi',
+      priceCurrency: 'CNY',
+      fxRate: 7,
+      inputPrice: 4,
+      outputPrice: 16,
+      cacheReadPrice: 1,
+      perCallPrice: 0.07,
+    } as any);
+
+    const data = prisma.modelCatalog.create.mock.calls[0][0].data;
+    expect(data.priceCurrency).toBe('CNY');
+    expect(data.fxRate).toBe(7);
+    expect(data.inputPrice).toBeCloseTo(4 / 7, 6);
+    expect(data.outputPrice).toBeCloseTo(16 / 7, 6);
+    expect(data.cacheReadPrice).toBeCloseTo(1 / 7, 6);
+    expect(data.perCallPrice).toBeCloseTo(0.07 / 7, 6);
+    expect(data.officialPrices).toEqual({
+      input: 4,
+      output: 16,
+      cacheRead: 1,
+      cacheWrite: 0,
+      perCall: 0.07,
+    });
+  });
+
+  it('USD 录入直通写入，fxRate 为 null', async () => {
+    const { service, prisma } = makeService();
+
+    await service.create({
+      name: 'gpt-4o',
+      provider: 'openai',
+      displayName: 'GPT-4o',
+      inputPrice: 1.25,
+      outputPrice: 10,
+    } as any);
+
+    const data = prisma.modelCatalog.create.mock.calls[0][0].data;
+    expect(data.priceCurrency).toBe('USD');
+    expect(data.fxRate).toBeNull();
+    expect(data.inputPrice).toBe(1.25);
+    expect(data.outputPrice).toBe(10);
+  });
+
+  it('CNY 缺汇率 → 400 MODEL_FX_RATE_REQUIRED', async () => {
+    const { service } = makeService();
+
+    await expect(
+      service.create({
+        name: 'kimi-k2.5',
+        provider: 'moonshot',
+        displayName: 'Kimi',
+        priceCurrency: 'CNY',
+        inputPrice: 4,
+      } as any),
+    ).rejects.toMatchObject({ response: { code: 'MODEL_FX_RATE_REQUIRED' } });
+  });
+
+  it('update 变更币种但未携带全套官方价 → 400 MODEL_PRICE_SET_REQUIRED', async () => {
+    const { service, prisma } = makeService();
+    prisma.modelCatalog.findUnique.mockResolvedValue({
+      id: 'm1',
+      priceCurrency: 'USD',
+      fxRate: null,
+      officialPrices: { input: 1, output: 2 },
+    });
+
+    await expect(
+      service.update('m1', { priceCurrency: 'CNY', fxRate: 7 } as any),
+    ).rejects.toMatchObject({ response: { code: 'MODEL_PRICE_SET_REQUIRED' } });
+    expect(prisma.modelCatalog.update).not.toHaveBeenCalled();
+  });
+
+  it('update 部分价格：沿用原币价基准折算并合并 officialPrices', async () => {
+    const { service, prisma } = makeService();
+    prisma.modelCatalog.findUnique.mockResolvedValue({
+      id: 'm1',
+      priceCurrency: 'CNY',
+      fxRate: 7,
+      officialPrices: { input: 4, output: 16, cacheRead: 1, cacheWrite: 2, perCall: null },
+    });
+
+    await service.update('m1', { outputPrice: 21 } as any);
+
+    const data = prisma.modelCatalog.update.mock.calls[0][0].data;
+    expect(data.outputPrice).toBeCloseTo(3, 6); // 21 ÷ 7
+    expect(data.inputPrice).toBeUndefined(); // 未触碰的列不写
+    expect(data.officialPrices).toEqual({
+      input: 4,
+      output: 21,
+      cacheRead: 1,
+      cacheWrite: 2,
+      perCall: null,
+    });
+  });
+
+  it('update 变更币种带全套官方价：按新汇率重算 USD 记账价', async () => {
+    const { service, prisma } = makeService();
+    prisma.modelCatalog.findUnique.mockResolvedValue({
+      id: 'm1',
+      priceCurrency: 'USD',
+      fxRate: null,
+      officialPrices: {
+        input: 0.571429,
+        output: 2.285714,
+        cacheRead: 0,
+        cacheWrite: 0,
+        perCall: null,
+      },
+    });
+
+    await service.update('m1', {
+      priceCurrency: 'CNY',
+      fxRate: 7,
+      inputPrice: 4,
+      outputPrice: 16,
+      cacheReadPrice: 0,
+      cacheWritePrice: 0,
+      perCallPrice: null,
+    } as any);
+
+    const data = prisma.modelCatalog.update.mock.calls[0][0].data;
+    expect(data.priceCurrency).toBe('CNY');
+    expect(data.fxRate).toBe(7);
+    expect(data.inputPrice).toBeCloseTo(4 / 7, 6);
+    expect(data.outputPrice).toBeCloseTo(16 / 7, 6);
+    expect(data.officialPrices).toEqual({
+      input: 4,
+      output: 16,
+      cacheRead: 0,
+      cacheWrite: 0,
+      perCall: null,
+    });
   });
 });

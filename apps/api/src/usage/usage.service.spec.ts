@@ -411,32 +411,46 @@ describe('UsageService 日志查询属主约束', () => {
 });
 
 describe('UsageService.reconciliationCsv（渠道×日对账导出）', () => {
-  it('输出 CSV：表头 + 含逗号的渠道名转义 + BYOK 分列', async () => {
+  const RAW_ROW = {
+    day: '2026-11-03',
+    channel: 'deepseekForWangking211, Inc',
+    model: 'deepseek-flash',
+    requests: 7,
+    ok: 7,
+    errors: 0,
+    prompt_tokens: 100n,
+    completion_tokens: 50n,
+    cache_read_tokens: 10n,
+    total_tokens: 150n,
+    cost_usd: '0.018000',
+    billed_usd: '0.010000',
+    byok_requests: 7,
+    byok_cost_usd: '0.018000',
+  };
+
+  function makeRecon(
+    opts: { snapshots?: unknown[]; exchangeRate?: { getCnyPerUsd(): Promise<number> } } = {},
+  ) {
     const prisma = {
-      $queryRaw: jest.fn().mockResolvedValue([
-        {
-          day: '2026-11-03',
-          channel: 'deepseekForWangking211, Inc',
-          model: 'deepseek-flash',
-          requests: 7,
-          ok: 7,
-          errors: 0,
-          prompt_tokens: 100n,
-          completion_tokens: 50n,
-          cache_read_tokens: 10n,
-          total_tokens: 150n,
-          cost_usd: '0.018000',
-          billed_usd: '0.000000',
-          byok_requests: 7,
-          byok_cost_usd: '0.018000',
-        },
-      ]),
+      $queryRaw: jest.fn().mockResolvedValue([RAW_ROW]),
+      dailyFxRate: {
+        findMany: jest.fn().mockResolvedValue(opts.snapshots ?? []),
+      },
     };
     const svc = new UsageService(
       prisma as unknown as PrismaService,
       {} as unknown as BillingService,
       { get: (_k: string, d?: string) => d } as unknown as ConfigService,
+      undefined,
+      opts.exchangeRate as any,
     );
+    return { svc, prisma };
+  }
+
+  it('输出 CSV：表头 + 含逗号的渠道名转义 + BYOK 分列 + 末尾人民币三列', async () => {
+    const { svc } = makeRecon({
+      snapshots: [{ day: '2026-11-03', cnyPerUsd: '7.100000' }],
+    });
     const res = { setHeader: jest.fn(), send: jest.fn() };
     await svc.reconciliationCsv({ id: 'u1', role: Role.ADMIN }, res, {
       from: '2026-11-01',
@@ -447,9 +461,55 @@ describe('UsageService.reconciliationCsv（渠道×日对账导出）', () => {
     expect(body.startsWith('\uFEFFday,channel,model,requests')).toBe(true);
     expect(body).toContain('"deepseekForWangking211, Inc"');
     expect(body).toContain('0.018000');
+    // 人民币三列追加在末尾（避免破坏按列序解析的既有消费方）
+    const header = body.slice(1).split('\n')[0];
+    expect(header).toBe(
+      'day,channel,model,requests,ok,errors,prompt_tokens,completion_tokens,cache_read_tokens,total_tokens,cost_usd,billed_usd,byok_requests,byok_cost_usd,fx_rate,cost_cny,billed_cny',
+    );
+    const cells = body.slice(1).split('\n')[1].split(',');
+    expect(cells.slice(-3)).toEqual(['7.1', '0.1278', '0.071']); // 0.018×7.1 / 0.010×7.1
     expect(res.setHeader).toHaveBeenCalledWith(
       'Content-Disposition',
       expect.stringContaining('reconciliation.csv'),
     );
+  });
+
+  it('行人民币列按当日快照折算；快照缺失回退实时汇率', async () => {
+    const { svc } = makeRecon({
+      snapshots: [], // 无快照 → 回退
+      exchangeRate: { getCnyPerUsd: jest.fn().mockResolvedValue(7.2) },
+    });
+
+    const rows = await svc.reconciliationRows({ id: 'u1', role: Role.ADMIN });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].fx_rate).toBe('7.2');
+    expect(rows[0].cost_cny).toBe(String(Math.round(0.018 * 7.2 * 1e6) / 1e6));
+    expect(rows[0].billed_cny).toBe(String(Math.round(0.01 * 7.2 * 1e6) / 1e6));
+  });
+
+  it('快照与实时汇率都不可用 → 人民币列为 null（美元列不受影响）', async () => {
+    const { svc } = makeRecon({
+      snapshots: [],
+      exchangeRate: {
+        getCnyPerUsd: jest.fn().mockRejectedValue(new Error('fx down')),
+      },
+    });
+
+    const rows = await svc.reconciliationRows({ id: 'u1', role: Role.ADMIN });
+
+    expect(rows[0].cost_usd).toBe('0.018000');
+    expect(rows[0].fx_rate).toBeNull();
+    expect(rows[0].cost_cny).toBeNull();
+    expect(rows[0].billed_cny).toBeNull();
+  });
+
+  it('未注入汇率服务（@Optional 缺省）→ 人民币列为 null', async () => {
+    const { svc } = makeRecon({ snapshots: [] });
+
+    const rows = await svc.reconciliationRows({ id: 'u1', role: Role.ADMIN });
+
+    expect(rows[0].cost_cny).toBeNull();
+    expect(rows[0].billed_cny).toBeNull();
   });
 });

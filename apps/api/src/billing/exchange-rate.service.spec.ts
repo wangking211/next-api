@@ -21,13 +21,33 @@ function makeService(opts: { env?: Record<string, string>; seed?: Record<string,
     },
   };
   const service = new ExchangeRateService(config, redis as unknown as RedisService);
-  return { service, redis, store };
+  return { service, redis, store, config };
+}
+
+/** 带 DailyFxRate 快照写入的构造（第三参 @Optional） */
+function makeSnapshotService(
+  opts: { env?: Record<string, string>; seed?: Record<string, string> } = {},
+) {
+  const base = makeService(opts);
+  const prisma = {
+    dailyFxRate: { upsert: jest.fn().mockResolvedValue({}) },
+  };
+  const service = new ExchangeRateService(
+    base.config,
+    base.redis as unknown as RedisService,
+    prisma as any,
+  );
+  return { ...base, service, prisma };
 }
 
 function mockRateJson(rate: unknown) {
   return jest
     .spyOn(global, 'fetch')
-    .mockResolvedValue({ ok: true, status: 200, json: async () => ({ rates: { CNY: rate } }) } as any);
+    .mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ rates: { CNY: rate } }),
+    } as any);
 }
 
 describe('ExchangeRateService', () => {
@@ -97,5 +117,43 @@ describe('ExchangeRateService', () => {
     (redis.client.set as jest.Mock).mockRejectedValue(new Error('redis down'));
     mockRateJson(7.18);
     await expect(service.getCnyPerUsd()).resolves.toBe(7.18);
+  });
+
+  describe('当日汇率快照（DailyFxRate，供对账人民币列按日取值）', () => {
+    it('取到汇率后 upsert 当日快照（北京时间日）', async () => {
+      const { service, prisma } = makeSnapshotService({ env: { PAY_CNY_PER_USD: '6.9' } });
+
+      await expect(service.getCnyPerUsd()).resolves.toBe(6.9);
+
+      expect(prisma.dailyFxRate.upsert).toHaveBeenCalledTimes(1);
+      const args = prisma.dailyFxRate.upsert.mock.calls[0][0];
+      expect(args.where.day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(args.create.day).toBe(args.where.day);
+      expect(Number(args.create.cnyPerUsd)).toBe(6.9);
+      expect(Number(args.update.cnyPerUsd)).toBe(6.9);
+    });
+
+    it('进程内 5 分钟节流：重复取值不反复写库', async () => {
+      const { service, prisma } = makeSnapshotService({ env: { PAY_CNY_PER_USD: '7.0' } });
+
+      await service.getCnyPerUsd();
+      await service.getCnyPerUsd();
+      await service.getCnyPerUsd();
+
+      expect(prisma.dailyFxRate.upsert).toHaveBeenCalledTimes(1);
+    });
+
+    it('快照写库失败 fail-open：不影响汇率返回', async () => {
+      const { service, prisma } = makeSnapshotService({ env: { PAY_CNY_PER_USD: '7.2' } });
+      prisma.dailyFxRate.upsert.mockRejectedValue(new Error('db down'));
+
+      await expect(service.getCnyPerUsd()).resolves.toBe(7.2);
+    });
+
+    it('未注入 Prisma（@Optional 缺省）时跳过快照，取值不受影响', async () => {
+      const { service } = makeService({ env: { PAY_CNY_PER_USD: '6.5' } });
+
+      await expect(service.getCnyPerUsd()).resolves.toBe(6.5);
+    });
   });
 });

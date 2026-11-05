@@ -19,7 +19,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { useTranslation } from 'react-i18next';
 import { billingApi, withdrawalsApi } from '../api/endpoints';
 import { errorMessage } from '../api/client';
-import { formatCredits, formatDateTime, fromCredits } from '../utils/format';
+import { formatDateTime, formatMoney, fromCredits, useCurrency } from '../utils/format';
 import QueryError from '../components/QueryError';
 import type { RevenueChannel, Withdrawal } from '../api/types';
 
@@ -59,6 +59,7 @@ function monthsBetween(fromIso: string, toIso: string): string[] {
 export default function RevenuePage() {
   const { message } = App.useApp();
   const { t } = useTranslation();
+  useCurrency(); // 订阅展示币种
   const qc = useQueryClient();
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [withdrawForm] = Form.useForm();
@@ -139,7 +140,7 @@ export default function RevenuePage() {
           <Card loading={isLoading}>
             <Statistic
               title={range ? t('billing.revenue.rangeTotal') : t('billing.revenue.total')}
-              value={formatCredits(summary?.total ?? 0)}
+              value={formatMoney(summary?.total ?? 0)}
             />
           </Card>
         </Col>
@@ -147,7 +148,7 @@ export default function RevenuePage() {
           <Card loading={isLoading}>
             <Statistic
               title={t('billing.revenue.monthly')}
-              value={formatCredits(summary?.thisMonth ?? 0)}
+              value={formatMoney(summary?.thisMonth ?? 0)}
             />
           </Card>
         </Col>
@@ -161,7 +162,7 @@ export default function RevenuePage() {
           >
             <Statistic
               title={t('billing.balance.title')}
-              value={formatCredits(balance?.balance ?? 0)}
+              value={formatMoney(balance?.balance ?? 0)}
             />
           </Card>
         </Col>
@@ -187,7 +188,7 @@ export default function RevenuePage() {
               title: t('channels.table.revenue'),
               dataIndex: 'revenue',
               width: 160,
-              render: (v: number) => formatCredits(v),
+              render: (v: number) => formatMoney(v),
             },
             {
               title: t('billing.revenue.callsCol'),
@@ -215,7 +216,7 @@ export default function RevenuePage() {
             {
               title: t('channels.table.revenue'),
               dataIndex: 'revenue',
-              render: (v: number) => formatCredits(v),
+              render: (v: number) => formatMoney(v),
             },
           ]}
         />
@@ -239,7 +240,7 @@ export default function RevenuePage() {
               title: t('common.amount'),
               dataIndex: 'amount',
               width: 130,
-              render: (v: string) => formatCredits(v),
+              render: (v: string) => formatMoney(v),
             },
             {
               title: t('common.status'),
