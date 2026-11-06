@@ -21,7 +21,8 @@ import { Optional } from '@nestjs/common';
 import { RoutingMetricsService, RouteMetrics } from '../gateway/routing-metrics.service';
 import { AuthUser } from '../common/interfaces/auth.interface';
 import { ProviderRegistry } from '../gateway/providers/provider.registry';
-import { Provider, UpstreamError } from '../gateway/types';
+import { UpstreamProbeService } from '../gateway/providers/upstream-probe.service';
+import { extractUpstreamError } from '../gateway/providers/probe.util';
 import {
   assertPublicHttpUrl,
   safeFetch,
@@ -29,7 +30,6 @@ import {
   upstreamAllowsPrivate,
 } from '../common/url-safety';
 import { joinUrl } from '../gateway/providers/stream.util';
-import { redactSecrets } from '../common/redact.util';
 import { GroupsService } from '../groups/groups.service';
 import { shareExhausted } from '../gateway/channel-share.util';
 import { CreateChannelDto } from './dto/create-channel.dto';
@@ -45,43 +45,6 @@ export interface ChannelQuery {
   ownerType?: ChannelOwnerType;
   model?: string;
   userId?: string;
-}
-
-function rawUpstreamError(body: any, fallback: string): string {
-  if (body == null) return fallback;
-  if (typeof body === 'string') return body.slice(0, 1000) || fallback;
-  const err = body.error;
-  if (typeof err === 'string') return err;
-  if (err?.message) return String(err.message);
-  if (body.message) return String(body.message);
-  if (body.msg) return String(body.msg);
-  if (body.detail) {
-    return typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
-  }
-  try {
-    return JSON.stringify(body).slice(0, 1000);
-  } catch {
-    return fallback;
-  }
-}
-
-function safeStringify(value: any): string | null {
-  if (value == null) return null;
-  if (typeof value === 'string') return value.slice(0, 2000);
-  try {
-    return JSON.stringify(value).slice(0, 2000);
-  } catch {
-    return null;
-  }
-}
-
-/** 控制台出口统一脱敏：上游报错可能回显完整密钥（实测 TokenFleet MiniMax-M2.5 回 sk-e280…） */
-function extractUpstreamError(body: any, fallback: string): string {
-  return redactSecrets(rawUpstreamError(body, fallback));
-}
-
-function redactDetail(value: string | null): string | null {
-  return value == null ? null : redactSecrets(value);
 }
 
 /** 解析上游模型列表响应：兼容 OpenAI 风格 data[].id 与 Gemini 风格 models[].name */
@@ -120,6 +83,7 @@ export class ChannelsService {
     private readonly crypto: CryptoService,
     private readonly providers: ProviderRegistry,
     private readonly groups: GroupsService,
+    private readonly probe: UpstreamProbeService,
     // L2 信号（滑窗有效回复率/拒答率）；测试手工构造时未传 → 接口降级为无信号
     @Optional() private readonly routeMetrics?: RoutingMetricsService,
   ) {}
@@ -574,144 +538,14 @@ export class ChannelsService {
     return { success: true };
   }
 
-  /** 真实连通性测试：向指定上游发一次最小请求，返回延迟与结果。 */
-  private async runUpstreamTest(input: {
+  /** 真实连通性测试：向指定上游发一次最小请求，返回延迟与结果（实现在 UpstreamProbeService）。 */
+  private runUpstreamTest(input: {
     provider: string;
     baseUrl: string;
     apiKey: string;
     model: string;
   }) {
-    const provider = this.providers.resolve(input.provider);
-    // 视频能力模型不支持 /chat/completions（上游回 endpoint not available），聊天探针必然
-    // 误判为失败 —— 改走只读的任务状态探测（随机假任务 ID，不产生任何生成）
-    if (
-      (await this.modelCapabilities(input.model)).includes('video') &&
-      typeof provider.videoStatus === 'function'
-    ) {
-      return this.runVideoProbe(provider, input);
-    }
-    const started = Date.now();
-    try {
-      const result = await provider.chatNonStream(
-        { baseUrl: input.baseUrl } as Channel,
-        input.apiKey,
-        {
-          model: input.model,
-          // 最小化请求体，最大化兼容性（max_tokens 等由各协议适配器按需补默认值）
-          body: {
-            model: input.model,
-            messages: [{ role: 'user', content: 'ping' }],
-          },
-          timeoutMs: 20000,
-        },
-      );
-      const latencyMs = Date.now() - started;
-      const sample = result.json?.choices?.[0]?.message?.content;
-      return {
-        ok: true,
-        status: result.status,
-        latencyMs,
-        model: input.model,
-        provider: input.provider,
-        sample: typeof sample === 'string' ? sample.slice(0, 200) : '',
-      };
-    } catch (e) {
-      const latencyMs = Date.now() - started;
-      const base = {
-        ok: false,
-        latencyMs,
-        model: input.model,
-        provider: input.provider,
-      };
-      if (e instanceof UpstreamError) {
-        return {
-          ...base,
-          status: e.status,
-          error: extractUpstreamError(e.body, e.message),
-          detail: redactDetail(safeStringify(e.body)),
-        };
-      }
-      return {
-        ...base,
-        status: 0,
-        error: redactSecrets((e as Error)?.message ?? 'unknown error'),
-        detail: null,
-      };
-    }
-  }
-
-  /** 模型能力（目录行）；目录缺失/查询失败一律降级 [] → 保持原聊天探针行为 */
-  private async modelCapabilities(model: string): Promise<string[]> {
-    try {
-      const row = await this.prisma.modelCatalog.findFirst({
-        where: { OR: [{ name: model }, { aliases: { has: model } }] },
-        select: { capabilities: true },
-      });
-      return row?.capabilities ?? [];
-    } catch {
-      return [];
-    }
-  }
-
-  /**
-   * 视频模型连通性探测：GET /videos/{随机假任务ID}（只读，不触发生成）。
-   * - 4xx 且错误体带 task 语义（任务不存在）→ 端点与鉴权可达 = 通过
-   * - 连接失败 / 5xx / 鉴权失败 / 端点缺失（无 task 语义）→ 失败并透出上游错误
-   */
-  private async runVideoProbe(
-    provider: Provider,
-    input: { provider: string; baseUrl: string; apiKey: string; model: string },
-  ) {
-    const started = Date.now();
-    try {
-      const result = await provider.videoStatus!(
-        { baseUrl: input.baseUrl } as Channel,
-        input.apiKey,
-        { taskId: `conn_probe_${Date.now()}`, timeoutMs: 20000 },
-      );
-      return {
-        ok: true,
-        status: result.status,
-        latencyMs: Date.now() - started,
-        model: input.model,
-        provider: input.provider,
-        sample: 'video route reachable',
-      };
-    } catch (e) {
-      const latencyMs = Date.now() - started;
-      const base = { model: input.model, provider: input.provider };
-      if (e instanceof UpstreamError) {
-        const text = `${e.message} ${safeStringify(e.body) ?? ''}`;
-        const taskScope =
-          (e.status === 400 || e.status === 404 || e.status === 410 || e.status === 422) &&
-          /task/i.test(text);
-        if (taskScope) {
-          return {
-            ok: true,
-            status: e.status,
-            latencyMs,
-            ...base,
-            sample: 'video route reachable (unknown task)',
-          };
-        }
-        return {
-          ...base,
-          ok: false,
-          status: e.status,
-          latencyMs,
-          error: extractUpstreamError(e.body, e.message),
-          detail: redactDetail(safeStringify(e.body)),
-        };
-      }
-      return {
-        ...base,
-        ok: false,
-        status: 0,
-        latencyMs,
-        error: redactSecrets((e as Error)?.message ?? 'unknown error'),
-        detail: null,
-      };
-    }
+    return this.probe.run(input);
   }
 
   /** 批量测试（限并发，避免打爆上游）。 */

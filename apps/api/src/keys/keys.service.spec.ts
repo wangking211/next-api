@@ -3,6 +3,8 @@ import { ApiKeyStatus } from '@prisma/client';
 import { KeysService } from './keys.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
+import { GroupsService } from '../groups/groups.service';
+import { UpstreamProbeService } from '../gateway/providers/upstream-probe.service';
 
 function makeService() {
   const tx = {
@@ -24,6 +26,11 @@ function makeService() {
       delete: tx.apiKey.delete,
     },
     usageDaily: tx.usageDaily,
+    modelCatalog: { findFirst: jest.fn().mockResolvedValue(null) },
+    channelModel: {
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+    },
     // 交互式事务：直接把预置的 tx 交给回调
     $transaction: jest.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
   };
@@ -31,12 +38,32 @@ function makeService() {
     generateApiKey: jest
       .fn()
       .mockReturnValue({ plaintext: 'sk-plain-xyz', hash: 'HASHED', prefix: 'sk-abc' }),
+    decrypt: jest.fn().mockReturnValue('upstream-key'),
+  };
+  const groups = {
+    effectiveGroup: jest
+      .fn()
+      .mockResolvedValue({ id: null, name: 'default', ratio: null, models: [] }),
+    channelScopeWhere: jest.fn().mockReturnValue({}),
+    isModelVisible: jest.fn().mockReturnValue(true),
+  };
+  const probe = {
+    run: jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      latencyMs: 42,
+      model: 'm1',
+      provider: 'openai',
+      sample: 'pong',
+    }),
   };
   const service = new KeysService(
     prisma as unknown as PrismaService,
     crypto as unknown as CryptoService,
+    groups as unknown as GroupsService,
+    probe as unknown as UpstreamProbeService,
   );
-  return { service, prisma, tx };
+  return { service, prisma, tx, groups, probe };
 }
 
 const row = {
@@ -268,5 +295,120 @@ describe('KeysService.remove（用量并桶后删除）', () => {
     await expect(service.remove('u1', 'k1')).resolves.toEqual({ success: true });
     expect(prisma.usageDaily.update).not.toHaveBeenCalled();
     expect(prisma.apiKey.delete).toHaveBeenCalledWith({ where: { id: 'k1' } });
+  });
+});
+
+describe('KeysService.test（测试连通性：诊断探针，不扣费不写调用记录）', () => {
+  const channelRow = {
+    id: 'ch1',
+    name: 'my-channel',
+    provider: 'openai',
+    baseUrl: 'https://up/v1',
+    apiKeyEnc: 'enc',
+    ownerType: 'USER',
+  };
+  const cmRow = { modelName: 'm1', upstreamModelName: 'm1-up', channel: channelRow };
+
+  it('按白名单/可见渠道选一条渠道打最小探针，返回渠道与延迟', async () => {
+    const { service, prisma, probe } = makeService();
+    prisma.apiKey.findFirst.mockResolvedValue(row);
+    prisma.channelModel.findMany.mockResolvedValue([cmRow]);
+
+    const out = await service.test('u1', 'k1');
+
+    expect(out).toMatchObject({
+      ok: true,
+      model: 'm1',
+      upstreamModel: 'm1-up',
+      status: 200,
+      latencyMs: 42,
+    });
+    expect(out.channel).toEqual({ id: 'ch1', name: 'my-channel', ownerType: 'USER' });
+    expect(probe.run).toHaveBeenCalledWith({
+      provider: 'openai',
+      baseUrl: 'https://up/v1',
+      apiKey: 'upstream-key',
+      model: 'm1-up',
+    });
+    // 诊断口径：不扣费、不写 RequestLog / 用量
+    expect(prisma.apiKey.update).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('Key 已停用 → 直接返回 KEY_DISABLED，不打上游', async () => {
+    const { service, prisma, probe } = makeService();
+    prisma.apiKey.findFirst.mockResolvedValue({ ...row, status: ApiKeyStatus.DISABLED });
+
+    const out = await service.test('u1', 'k1');
+
+    expect(out).toMatchObject({ ok: false, code: 'KEY_DISABLED' });
+    expect(probe.run).not.toHaveBeenCalled();
+  });
+
+  it('模型不在白名单 → KEY_MODEL_NOT_ALLOWED；:latest 后缀可按白名单命中', async () => {
+    const { service, prisma, probe } = makeService();
+    prisma.apiKey.findFirst.mockResolvedValue({ ...row, models: ['m2'] });
+
+    await expect(service.test('u1', 'k1', 'm1')).resolves.toMatchObject({
+      ok: false,
+      code: 'KEY_MODEL_NOT_ALLOWED',
+    });
+    expect(probe.run).not.toHaveBeenCalled();
+
+    prisma.apiKey.findFirst.mockResolvedValue({ ...row, models: ['m1:latest'] });
+    prisma.channelModel.findMany.mockResolvedValue([cmRow]);
+    await expect(service.test('u1', 'k1', 'm1')).resolves.toMatchObject({ ok: true });
+  });
+
+  it('渠道全部停用 → KEY_TEST_CHANNEL_DISABLED；无渠道支持 → KEY_TEST_NO_CHANNEL', async () => {
+    const { service, prisma, probe } = makeService();
+    prisma.apiKey.findFirst.mockResolvedValue(row);
+    prisma.channelModel.findMany.mockResolvedValue([]);
+
+    prisma.channelModel.count.mockResolvedValueOnce(2);
+    await expect(service.test('u1', 'k1', 'm1')).resolves.toMatchObject({
+      ok: false,
+      code: 'KEY_TEST_CHANNEL_DISABLED',
+    });
+
+    prisma.channelModel.count.mockResolvedValueOnce(0);
+    await expect(service.test('u1', 'k1', 'm1')).resolves.toMatchObject({
+      ok: false,
+      code: 'KEY_TEST_NO_CHANNEL',
+    });
+    expect(probe.run).not.toHaveBeenCalled();
+  });
+
+  it('上游 401 → 透出真实错误，便于自助定位 Key 失效', async () => {
+    const { service, prisma, probe } = makeService();
+    prisma.apiKey.findFirst.mockResolvedValue(row);
+    prisma.channelModel.findMany.mockResolvedValue([cmRow]);
+    probe.run.mockResolvedValue({
+      ok: false,
+      status: 401,
+      latencyMs: 12,
+      model: 'm1-up',
+      provider: 'openai',
+      error: 'Authentication Fails, Your api key: ****7d65 is invalid',
+    });
+
+    const out = await service.test('u1', 'k1', 'm1');
+
+    expect(out).toMatchObject({
+      ok: false,
+      status: 401,
+      error: expect.stringContaining('invalid'),
+    });
+  });
+
+  it('模型目录已停用 → KEY_TEST_MODEL_DISABLED', async () => {
+    const { service, prisma } = makeService();
+    prisma.apiKey.findFirst.mockResolvedValue(row);
+    prisma.modelCatalog.findFirst.mockResolvedValue({ name: 'm1', enabled: false });
+
+    await expect(service.test('u1', 'k1', 'm1')).resolves.toMatchObject({
+      ok: false,
+      code: 'KEY_TEST_MODEL_DISABLED',
+    });
   });
 });

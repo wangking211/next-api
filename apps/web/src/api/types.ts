@@ -80,6 +80,22 @@ export interface ApiKeyCreated extends ApiKeyInfo {
   warning: string;
 }
 
+/** POST /api/keys/:id/test —— Key 测试连通性（诊断探针：不扣费、不写调用记录） */
+export interface KeyTestResult {
+  ok: boolean;
+  code?: string;
+  message?: string;
+  model?: string;
+  upstreamModel?: string;
+  channel?: { id: string; name: string; ownerType: string };
+  /** 命中的候选渠道数（>1 表示还有备选） */
+  candidates?: number;
+  status?: number;
+  latencyMs?: number;
+  sample?: string;
+  error?: string;
+}
+
 export interface ChannelModelPrice {
   model: string;
   /** 上游实际模型名（本地模型名 → 上游模型名映射） */

@@ -2,6 +2,7 @@ import { ChannelsService } from './channels.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from '../common/crypto.service';
 import { ProviderRegistry } from '../gateway/providers/provider.registry';
+import { UpstreamProbeService } from '../gateway/providers/upstream-probe.service';
 import { AuthUser } from '../common/interfaces/auth.interface';
 import { UpstreamError } from '../gateway/types';
 import { GroupsService } from '../groups/groups.service';
@@ -30,11 +31,16 @@ function makeService(providerImpl: any, channelOverrides: Record<string, unknown
   const crypto = { decrypt: jest.fn().mockReturnValue('upstream-key') };
   const providers = { resolve: jest.fn().mockReturnValue(providerImpl) };
   const groups = { effectiveGroup: jest.fn(), channelVisibilityWhere: jest.fn(() => ({})) };
+  const probe = new UpstreamProbeService(
+    prisma as unknown as PrismaService,
+    providers as unknown as ProviderRegistry,
+  );
   const service = new ChannelsService(
     prisma as unknown as PrismaService,
     crypto as unknown as CryptoService,
     providers as unknown as ProviderRegistry,
     groups as unknown as GroupsService,
+    probe,
   );
   return { service, providers, prisma };
 }
@@ -119,6 +125,7 @@ function txService(
     {} as unknown as ProviderRegistry,
     // 非管理员写分组权限：默认本人分组 = g1（用例可覆写 mock 返回值）
     groups as unknown as GroupsService,
+    {} as unknown as UpstreamProbeService,
   );
   return { service, prisma, tx, groups };
 }
@@ -439,6 +446,7 @@ describe('ChannelsService.list（累计共享收益）', () => {
       { decrypt: jest.fn().mockReturnValue('upstream-key') } as unknown as CryptoService,
       { resolve: jest.fn() } as unknown as ProviderRegistry,
       {} as unknown as GroupsService,
+      {} as unknown as UpstreamProbeService,
     );
     return { service, prisma };
   }
@@ -543,6 +551,7 @@ describe('ChannelsService.availableModels（归属/共享范围透出）', () =>
       {} as unknown as CryptoService,
       {} as unknown as ProviderRegistry,
       groups as unknown as GroupsService,
+      {} as unknown as UpstreamProbeService,
     );
     return { service, prisma, groups };
   }

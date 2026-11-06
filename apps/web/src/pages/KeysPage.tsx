@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  Alert,
   App,
   Button,
   Card,
@@ -22,10 +23,11 @@ import { useTranslation } from 'react-i18next';
 import { keysApi, groupsApi, channelsApi } from '../api/endpoints';
 import { testKeyConnectivity } from '../api/keyConnectivity';
 import type { KeyConnectivityResult } from '../api/keyConnectivity';
+import { errorMessage } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { formatDateTime, formatMoney, useCurrency } from '../utils/format';
 import QueryError from '../components/QueryError';
-import type { ApiKeyCreated, ApiKeyInfo, RoutingStrategy } from '../api/types';
+import type { ApiKeyCreated, ApiKeyInfo, KeyTestResult, RoutingStrategy } from '../api/types';
 
 type StrategyOptionKey =
   | 'keys.strategyOption.balanced'
@@ -72,6 +74,10 @@ export default function KeysPage() {
   const [created, setCreated] = useState<ApiKeyCreated | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<KeyConnectivityResult | null>(null);
+  // Key 列表的「测试连通性」：诊断探针（不扣费、不写调用记录），走服务端真实路由
+  const [probeKey, setProbeKey] = useState<ApiKeyInfo | null>(null);
+  const [probeModel, setProbeModel] = useState<string | undefined>();
+  const [probeResult, setProbeResult] = useState<KeyTestResult | null>(null);
   const [form] = Form.useForm();
 
   /** 关闭创建弹窗并清掉连通测试结果，避免下次打开残留上次状态 */
@@ -106,6 +112,33 @@ export default function KeysPage() {
     queryKey: ['groups'],
     queryFn: ({ signal }) => groupsApi.list(signal),
   });
+
+  const probeModelsQ = useQuery({
+    queryKey: ['keys', probeKey?.id, 'test-models'],
+    queryFn: ({ signal }) => keysApi.testModels(probeKey!.id, signal),
+    enabled: !!probeKey,
+  });
+  // 打开弹窗后自动选第一个可测模型（白名单优先；否则取可见渠道支持的模型）
+  useEffect(() => {
+    if (!probeKey) return;
+    const list = probeModelsQ.data ?? [];
+    if (!list.length) return;
+    if (!probeModel || !list.includes(probeModel)) setProbeModel(list[0]);
+  }, [probeKey, probeModelsQ.data, probeModel]);
+
+  const probeMut = useMutation({
+    mutationFn: () => keysApi.test(probeKey!.id, probeModel),
+    onSuccess: (r) => setProbeResult(r),
+  });
+  const openProbe = (r: ApiKeyInfo) => {
+    setProbeKey(r);
+    setProbeModel(r.models?.[0]);
+    setProbeResult(null);
+  };
+  const closeProbe = () => {
+    setProbeKey(null);
+    setProbeResult(null);
+  };
 
   // 渠道白名单选项（普通用户接口只返回自有渠道，天然只能选自己的）
   const { data: channelList = [] } = useQuery({
@@ -367,9 +400,12 @@ export default function KeysPage() {
           {
             title: t('common.action'),
             fixed: 'right',
-            width: 300,
+            width: 380,
             render: (_, r) => (
               <Space>
+                <Button size="small" icon={<ApiOutlined />} onClick={() => openProbe(r)}>
+                  {t('keys.test')}
+                </Button>
                 <Button size="small" onClick={() => openEdit(r)}>
                   {t('keys.edit')}
                 </Button>
@@ -666,6 +702,71 @@ export default function KeysPage() {
             <Typography.Text type="danger">
               {t('keys.createdModal.testFail', { detail: testResult.detail })}
             </Typography.Text>
+          ) : null}
+        </Space>
+      </Modal>
+
+      <Modal
+        title={t('keys.testModal.title', { name: probeKey?.name ?? '' })}
+        open={!!probeKey}
+        onCancel={closeProbe}
+        footer={null}
+        destroyOnClose
+      >
+        <Typography.Paragraph type="secondary">{t('keys.testModal.help')}</Typography.Paragraph>
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Select
+            style={{ width: '100%' }}
+            showSearch
+            loading={probeModelsQ.isLoading}
+            value={probeModel}
+            onChange={setProbeModel}
+            placeholder={t('keys.testModal.model')}
+            options={(probeModelsQ.data ?? []).map((m) => ({ value: m, label: m }))}
+          />
+          <Button
+            type="primary"
+            icon={<ApiOutlined />}
+            loading={probeMut.isPending}
+            disabled={!probeModel}
+            onClick={() => {
+              setProbeResult(null);
+              probeMut.mutate();
+            }}
+          >
+            {t('keys.testModal.run')}
+          </Button>
+          {probeModelsQ.isSuccess && (probeModelsQ.data?.length ?? 0) === 0 ? (
+            <Typography.Text type="warning">{t('keys.testModal.noModel')}</Typography.Text>
+          ) : null}
+          {probeMut.isError ? (
+            <Alert type="error" showIcon message={errorMessage(probeMut.error)} />
+          ) : null}
+          {probeResult?.ok ? (
+            <Alert
+              type="success"
+              showIcon
+              message={t('keys.testModal.ok')}
+              description={t('keys.testModal.okDesc', {
+                channel: probeResult.channel?.name ?? '-',
+                model: probeResult.upstreamModel ?? probeResult.model ?? '-',
+                latency: probeResult.latencyMs ?? 0,
+              })}
+            />
+          ) : null}
+          {probeResult && !probeResult.ok ? (
+            <Alert
+              type="error"
+              showIcon
+              message={t('keys.testModal.fail')}
+              description={
+                probeResult.message ??
+                ([probeResult.status ? `HTTP ${probeResult.status}` : '', probeResult.error ?? '']
+                  .filter(Boolean)
+                  .join(' · ') ||
+                  '-')
+              }
+            />
           ) : null}
         </Space>
       </Modal>

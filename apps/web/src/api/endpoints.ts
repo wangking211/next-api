@@ -14,6 +14,7 @@ import {
   ClassifyOriginsResult,
   CommonModel,
   GenerateCodesResult,
+  KeyTestResult,
   LogFilters,
   ModelGroup,
   ModelInfo,
@@ -157,6 +158,16 @@ export const keysApi = {
   },
   async remove(id: string) {
     await api.delete(`/keys/${id}`);
+  },
+  /** 该 Key 可用于「测试连通性」的模型（白名单优先，否则取可见渠道支持的模型） */
+  async testModels(id: string, signal?: AbortSignal) {
+    const { data } = await api.get<string[]>(`/keys/${id}/test-models`, { signal });
+    return data;
+  },
+  /** 测试连通性：按真实路由选一条渠道打一次最小上游探针（不扣费、不写调用记录） */
+  async test(id: string, model?: string) {
+    const { data } = await api.post<KeyTestResult>(`/keys/${id}/test`, { model });
+    return data;
   },
 };
 
