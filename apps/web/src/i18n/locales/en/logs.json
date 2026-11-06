@@ -17,7 +17,6 @@
   "logs.column.type": "Type",
   "logs.column.cost": "Cost",
   "logs.column.latency": "Latency",
-  "logs.column.tokens": "Tokens",
   "logs.tokens.total": "Total",
   "logs.tokens.prompt": "Input",
   "logs.tokens.completion": "Output",

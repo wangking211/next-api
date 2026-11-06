@@ -17,7 +17,6 @@
   "logs.column.type": "類型",
   "logs.column.cost": "費用",
   "logs.column.latency": "延遲",
-  "logs.column.tokens": "Token 數",
   "logs.tokens.total": "總計",
   "logs.tokens.prompt": "輸入",
   "logs.tokens.completion": "輸出",

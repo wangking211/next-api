@@ -17,7 +17,6 @@
   "logs.column.type": "类型",
   "logs.column.cost": "费用",
   "logs.column.latency": "延迟",
-  "logs.column.tokens": "Token 数",
   "logs.tokens.total": "总计",
   "logs.tokens.prompt": "输入",
   "logs.tokens.completion": "输出",

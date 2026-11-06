@@ -245,7 +245,7 @@ export default function LogsPage() {
         rowKey="id"
         loading={isLoading}
         dataSource={data?.items ?? []}
-        scroll={{ x: 1450 }}
+        scroll={{ x: 1665 }}
         pagination={pg.pagination(data?.total)}
         columns={[
           {
@@ -254,14 +254,15 @@ export default function LogsPage() {
             width: 170,
             render: (v: string) => formatDateTime(v),
           },
-          { title: t('common.model'), dataIndex: 'model' },
+          { title: t('common.model'), dataIndex: 'model', width: 160 },
           {
             title: t('logs.column.provider'),
             dataIndex: 'provider',
+            width: 95,
             render: (v: string | null) => v ?? '-',
           },
-          { title: 'Key', render: (_, r) => r.apiKey?.name ?? '-' },
-          { title: t('logs.column.channel'), render: (_, r) => r.channel?.name ?? '-' },
+          { title: 'Key', width: 110, render: (_, r) => r.apiKey?.name ?? '-' },
+          { title: t('logs.column.channel'), width: 140, render: (_, r) => r.channel?.name ?? '-' },
           {
             title: t('logs.column.type'),
             dataIndex: 'isStream',
@@ -278,50 +279,45 @@ export default function LogsPage() {
             ),
           },
           {
-            // Token 明细：缓存读/写价格与输入输出差异很大，拆开展示（总计仍保留）
-            title: t('logs.column.tokens'),
-            children: [
-              {
-                title: t('logs.tokens.total'),
-                dataIndex: 'totalTokens',
-                width: 80,
-                align: 'right' as const,
-                render: (v: number, r) => (
-                  <Tooltip
-                    title={t('logs.tokensInOut', {
-                      prompt: r.promptTokens,
-                      completion: r.completionTokens,
-                    })}
-                  >
-                    {v}
-                  </Tooltip>
-                ),
-              },
-              {
-                title: t('logs.tokens.prompt'),
-                dataIndex: 'promptTokens',
-                width: 80,
-                align: 'right' as const,
-              },
-              {
-                title: t('logs.tokens.completion'),
-                dataIndex: 'completionTokens',
-                width: 80,
-                align: 'right' as const,
-              },
-              {
-                title: t('logs.tokens.cacheRead'),
-                dataIndex: 'cacheReadTokens',
-                width: 90,
-                align: 'right' as const,
-              },
-              {
-                title: t('logs.tokens.cacheWrite'),
-                dataIndex: 'cacheWriteTokens',
-                width: 90,
-                align: 'right' as const,
-              },
-            ],
+            // Token 明细：缓存读/写与输入输出单价差异大，拆成独立列便于核对费用
+            title: t('logs.tokens.total'),
+            dataIndex: 'totalTokens',
+            width: 80,
+            align: 'right',
+            render: (v: number, r) => (
+              <Tooltip
+                title={t('logs.tokensInOut', {
+                  prompt: r.promptTokens,
+                  completion: r.completionTokens,
+                })}
+              >
+                {v}
+              </Tooltip>
+            ),
+          },
+          {
+            title: t('logs.tokens.prompt'),
+            dataIndex: 'promptTokens',
+            width: 75,
+            align: 'right',
+          },
+          {
+            title: t('logs.tokens.completion'),
+            dataIndex: 'completionTokens',
+            width: 75,
+            align: 'right',
+          },
+          {
+            title: t('logs.tokens.cacheRead'),
+            dataIndex: 'cacheReadTokens',
+            width: 90,
+            align: 'right',
+          },
+          {
+            title: t('logs.tokens.cacheWrite'),
+            dataIndex: 'cacheWriteTokens',
+            width: 90,
+            align: 'right',
           },
           {
             title: t('logs.column.cost'),
@@ -339,11 +335,13 @@ export default function LogsPage() {
           {
             title: t('logs.column.latency'),
             dataIndex: 'latencyMs',
+            width: 85,
             render: (v: number | null) => (v != null ? `${v}ms` : '-'),
           },
           {
             title: t('common.status'),
             dataIndex: 'status',
+            width: 80,
             render: (v: number, r) =>
               v < 400 ? (
                 <Tag color="green">{v}</Tag>
