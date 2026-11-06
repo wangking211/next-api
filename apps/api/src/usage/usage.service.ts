@@ -466,6 +466,8 @@ export class UsageService {
         isStream: true,
         promptTokens: true,
         completionTokens: true,
+        cacheReadTokens: true,
+        cacheWriteTokens: true,
         totalTokens: true,
         cost: true,
         chargeable: true,
@@ -500,6 +502,9 @@ export class UsageService {
       '状态',
       '错误',
       '上游请求ID',
+      // 缓存读/写价格与输入输出不同，追加在末尾（既有按列序解析的消费方不受影响）
+      '缓存读tokens',
+      '缓存写tokens',
     ];
     const lines = [header.join(',')];
     for (const r of rows) {
@@ -521,6 +526,8 @@ export class UsageService {
           r.status,
           r.errorMessage ?? '',
           r.upstreamRequestId ?? '',
+          r.cacheReadTokens,
+          r.cacheWriteTokens,
         ]
           .map(esc)
           .join(','),
@@ -778,6 +785,8 @@ export class UsageService {
           isStream: true,
           promptTokens: true,
           completionTokens: true,
+          cacheReadTokens: true,
+          cacheWriteTokens: true,
           totalTokens: true,
           cost: true,
           chargeable: true,

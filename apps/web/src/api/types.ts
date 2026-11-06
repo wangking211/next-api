@@ -277,6 +277,10 @@ export interface RequestLogRow {
   isStream: boolean;
   promptTokens: number;
   completionTokens: number;
+  /** 缓存读取 tokens（按缓存读价计费，通常显著低于输入价） */
+  cacheReadTokens: number;
+  /** 缓存写入 tokens（按缓存写价计费） */
+  cacheWriteTokens: number;
   totalTokens: number;
   cost: string;
   /** false = BYOK 自带密钥，未从余额扣费 */

@@ -245,7 +245,7 @@ export default function LogsPage() {
         rowKey="id"
         loading={isLoading}
         dataSource={data?.items ?? []}
-        scroll={{ x: 1200 }}
+        scroll={{ x: 1450 }}
         pagination={pg.pagination(data?.total)}
         columns={[
           {
@@ -278,17 +278,50 @@ export default function LogsPage() {
             ),
           },
           {
-            title: 'Tokens',
-            render: (_, r) => (
-              <Tooltip
-                title={t('logs.tokensInOut', {
-                  prompt: r.promptTokens,
-                  completion: r.completionTokens,
-                })}
-              >
-                {r.totalTokens}
-              </Tooltip>
-            ),
+            // Token 明细：缓存读/写价格与输入输出差异很大，拆开展示（总计仍保留）
+            title: t('logs.column.tokens'),
+            children: [
+              {
+                title: t('logs.tokens.total'),
+                dataIndex: 'totalTokens',
+                width: 80,
+                align: 'right' as const,
+                render: (v: number, r) => (
+                  <Tooltip
+                    title={t('logs.tokensInOut', {
+                      prompt: r.promptTokens,
+                      completion: r.completionTokens,
+                    })}
+                  >
+                    {v}
+                  </Tooltip>
+                ),
+              },
+              {
+                title: t('logs.tokens.prompt'),
+                dataIndex: 'promptTokens',
+                width: 80,
+                align: 'right' as const,
+              },
+              {
+                title: t('logs.tokens.completion'),
+                dataIndex: 'completionTokens',
+                width: 80,
+                align: 'right' as const,
+              },
+              {
+                title: t('logs.tokens.cacheRead'),
+                dataIndex: 'cacheReadTokens',
+                width: 90,
+                align: 'right' as const,
+              },
+              {
+                title: t('logs.tokens.cacheWrite'),
+                dataIndex: 'cacheWriteTokens',
+                width: 90,
+                align: 'right' as const,
+              },
+            ],
           },
           {
             title: t('logs.column.cost'),
@@ -368,8 +401,17 @@ export default function LogsPage() {
                   </Tooltip>
                 )}
               </Descriptions.Item>
-              <Descriptions.Item label={t('logs.detail.ioTokens')}>
-                {detail.promptTokens} / {detail.completionTokens}
+              <Descriptions.Item label={t('logs.tokens.prompt')}>
+                {detail.promptTokens}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('logs.tokens.completion')}>
+                {detail.completionTokens}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('logs.tokens.cacheRead')}>
+                {detail.cacheReadTokens}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('logs.tokens.cacheWrite')}>
+                {detail.cacheWriteTokens}
               </Descriptions.Item>
               <Descriptions.Item label={t('logs.detail.totalTokens')}>
                 {detail.totalTokens}

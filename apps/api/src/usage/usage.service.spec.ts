@@ -410,6 +410,52 @@ describe('UsageService 日志查询属主约束', () => {
   });
 });
 
+describe('UsageService 日志 Token 明细（缓存读/写）', () => {
+  it('列表 select 带 cacheReadTokens / cacheWriteTokens（列表拆分展示用）', async () => {
+    const { service, prisma } = makeService();
+
+    await service.logs('user1', {});
+
+    const select = prisma.requestLog.findMany.mock.calls[0][0].select;
+    expect(select.cacheReadTokens).toBe(true);
+    expect(select.cacheWriteTokens).toBe(true);
+    expect(select.totalTokens).toBe(true);
+  });
+
+  it('导出 CSV 末尾追加缓存读/写 tokens 列，既有列序不变', async () => {
+    const { service, prisma } = makeService();
+    prisma.requestLog.findMany.mockResolvedValue([
+      {
+        createdAt: new Date('2026-11-06T09:00:00Z'),
+        model: 'deepseek-v4-flash',
+        provider: 'deepseek',
+        isStream: true,
+        promptTokens: 100,
+        completionTokens: 20,
+        cacheReadTokens: 64,
+        cacheWriteTokens: 8,
+        totalTokens: 120,
+        cost: '0.000120',
+        chargeable: true,
+        commission: '0',
+        latencyMs: 850,
+        status: 200,
+        errorMessage: null,
+        upstreamRequestId: 'req-1',
+        apiKey: { name: 'k' },
+        channel: { name: 'ch' },
+      },
+    ]);
+
+    const csv = await service.exportLogs('user1', {});
+    const [header, row] = csv.split('\n');
+
+    expect(header).toContain('输入tokens,输出tokens,总tokens');
+    expect(header.endsWith(',缓存读tokens,缓存写tokens')).toBe(true);
+    expect(row.endsWith(',64,8')).toBe(true);
+  });
+});
+
 describe('UsageService.reconciliationCsv（渠道×日对账导出）', () => {
   const RAW_ROW = {
     day: '2026-11-03',
