@@ -141,17 +141,11 @@ export class OpenAiCompatibleProvider implements Provider {
     apiKey: string,
     req: VideoTaskRequest,
   ): Promise<VideoContentResult> {
-    let res: Response;
-    try {
-      res = await fetch(`${this.videoUrl(channel, req.taskId)}/content`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${apiKey}` },
-        redirect: 'manual',
-        signal: combineSignals(req.timeoutMs, req.signal),
-      });
-    } catch (e: any) {
-      throw new UpstreamError(`Upstream connection failed: ${describeFetchError(e)}`, 502, true);
-    }
+    const res = await this.fetchVideoContent(
+      `${this.videoUrl(channel, req.taskId)}/content`,
+      apiKey,
+      req,
+    );
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => '');
       let json: any;
@@ -188,6 +182,55 @@ export class OpenAiCompatibleProvider implements Provider {
       throw new UpstreamError('Invalid video task id', 400, false);
     }
     return joinUrl(channel.baseUrl, `videos/${encodeURIComponent(taskId)}`);
+  }
+
+  /** 内容下载允许跟随的重定向跳数（上游常 302 到对象存储签名直链） */
+  private static readonly VIDEO_CONTENT_MAX_REDIRECTS = 3;
+
+  /**
+   * 拉取视频内容并手动跟随重定向。
+   *
+   * 不少上游（如破晓站）把 `/videos/{id}/content` 直接 302 到对象存储的签名地址；
+   * `redirect: 'manual'` 下若不跟随，302 会被当成失败（历史上这类渠道永远下载不了）。
+   * 安全口径：一旦跳转到别的主机就摘掉 Authorization，绝不把上游 key 交给对象存储。
+   */
+  private async fetchVideoContent(
+    url: string,
+    apiKey: string,
+    req: VideoTaskRequest,
+  ): Promise<Response> {
+    const origin = new URL(url).origin;
+    let current = url;
+    let withAuth = true;
+    for (let hop = 0; ; hop++) {
+      let res: Response;
+      try {
+        res = await fetch(current, {
+          method: 'GET',
+          headers: withAuth ? { Authorization: `Bearer ${apiKey}` } : {},
+          redirect: 'manual',
+          signal: combineSignals(req.timeoutMs, req.signal),
+        });
+      } catch (e: any) {
+        throw new UpstreamError(`Upstream connection failed: ${describeFetchError(e)}`, 502, true);
+      }
+      const location = res.headers.get('location');
+      if (res.status >= 300 && res.status < 400 && location) {
+        await res.body?.cancel().catch(() => undefined);
+        if (hop >= OpenAiCompatibleProvider.VIDEO_CONTENT_MAX_REDIRECTS) {
+          throw new UpstreamError('Too many upstream redirects', 502, true);
+        }
+        try {
+          current = new URL(location, current).toString();
+        } catch {
+          throw new UpstreamError(`Upstream returned an invalid redirect: ${location}`, 502, true);
+        }
+        // 离开上游主机后永久脱敏（即使再跳回来也不恢复，避免被重定向链套走 key）
+        withAuth = withAuth && new URL(current).origin === origin;
+        continue;
+      }
+      return res;
+    }
   }
 
   /** 非流式 POST JSON 透传：chat / embeddings / images / videos 共用 */

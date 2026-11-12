@@ -6,9 +6,7 @@ describe('detectErrorPayload（200 + 错误体识别）', () => {
     expect(detectErrorPayload({ choices: [] })).toBeNull();
     expect(detectErrorPayload({ data: [] })).toBeNull();
     expect(detectErrorPayload({ object: 'list', data: [] })).toBeNull();
-    expect(
-      detectErrorPayload({ id: 'task_x', object: 'video', status: 'queued' }),
-    ).toBeNull();
+    expect(detectErrorPayload({ id: 'task_x', object: 'video', status: 'queued' })).toBeNull();
     expect(detectErrorPayload({ output: [] })).toBeNull();
     expect(detectErrorPayload(null)).toBeNull();
     expect(detectErrorPayload('oops')).toBeNull();
@@ -96,8 +94,7 @@ describe('OpenAiCompatibleProvider 视频任务透传', () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      text: async () =>
-        JSON.stringify({ id: 'task_abc', status: 'in_progress', progress: 50 }),
+      text: async () => JSON.stringify({ id: 'task_abc', status: 'in_progress', progress: 50 }),
     });
     global.fetch = fetchMock as unknown as typeof fetch;
 
@@ -163,13 +160,84 @@ describe('OpenAiCompatibleProvider 视频任务透传', () => {
     const provider = new OpenAiCompatibleProvider();
     const result = await provider.videoContent(channel, 'sk-up', { taskId: 'task_abc' });
 
-    expect(fetchMock.mock.calls[0][0]).toBe(
-      'https://up.example.com/v1/videos/task_abc/content',
-    );
+    expect(fetchMock.mock.calls[0][0]).toBe('https://up.example.com/v1/videos/task_abc/content');
     expect(result.contentType).toBe('video/mp4');
     expect(result.contentLength).toBe('3');
     const reader = result.stream.getReader();
     const { value } = await reader.read();
     expect(Array.from(value ?? [])).toEqual([1, 2, 3]);
+  });
+
+  it('内容接口 302 到对象存储时跟随重定向，且跨主机摘掉 Authorization', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([9, 8]));
+        controller.close();
+      },
+    });
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 302,
+        headers: new Headers({ location: 'https://cdn.example.com/a.mp4?sig=1' }),
+        body: null,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'video/mp4', 'content-length': '2' }),
+        body: stream,
+      });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const provider = new OpenAiCompatibleProvider();
+    const result = await provider.videoContent(channel, 'sk-up', { taskId: 'task_abc' });
+
+    expect(fetchMock.mock.calls[1][0]).toBe('https://cdn.example.com/a.mp4?sig=1');
+    expect(fetchMock.mock.calls[0][1].headers).toEqual({ Authorization: 'Bearer sk-up' });
+    // 对象存储不该拿到上游 key
+    expect(fetchMock.mock.calls[1][1].headers).toEqual({});
+    expect(result.contentType).toBe('video/mp4');
+  });
+
+  it('内容接口同源重定向继续携带 Authorization', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    });
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({
+        status: 302,
+        headers: new Headers({ location: '/v1/videos/task_abc/blob' }),
+        body: null,
+      })
+      .mockResolvedValueOnce({ ok: true, status: 200, headers: new Headers(), body: stream });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const provider = new OpenAiCompatibleProvider();
+    await provider.videoContent(channel, 'sk-up', { taskId: 'task_abc' });
+
+    expect(fetchMock.mock.calls[1][0]).toBe('https://up.example.com/v1/videos/task_abc/blob');
+    expect(fetchMock.mock.calls[1][1].headers).toEqual({ Authorization: 'Bearer sk-up' });
+  });
+
+  it('内容接口重定向超过 3 跳 → UpstreamError(502，可重试)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      status: 302,
+      headers: new Headers({ location: 'https://up.example.com/v1/loop' }),
+      body: null,
+    }) as unknown as typeof fetch;
+
+    const provider = new OpenAiCompatibleProvider();
+    await expect(
+      provider.videoContent(channel, 'sk-up', { taskId: 'task_abc' }),
+    ).rejects.toMatchObject({
+      status: 502,
+      retryable: true,
+      message: 'Too many upstream redirects',
+    });
   });
 });
