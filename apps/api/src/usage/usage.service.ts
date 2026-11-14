@@ -22,6 +22,8 @@ export interface UsageEntry {
   completionTokens: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  /** 视频任务的上游计费 token（video-tokens）；仅视频任务有值，不参与计价与日聚合 */
+  videoTokens?: number | null;
   totalTokens: number;
   latencyMs: number;
   status: number;
@@ -167,7 +169,7 @@ export class UsageService {
   }
 
   /** 记录一次调用：写明细、累计 key 用量、按天聚合。 */
-  async record(entry: UsageEntry): Promise<void> {
+  async record(entry: UsageEntry): Promise<string | undefined> {
     // 倍率：网关已解析则直传（与预授权同一口径），否则回退用户/代理倍率
     const multiplier =
       entry.multiplier ?? (entry.userId ? await this.billing.getUserMultiplier(entry.userId) : 1);
@@ -228,6 +230,7 @@ export class UsageService {
             completionTokens: entry.completionTokens,
             cacheReadTokens: entry.cacheReadTokens ?? 0,
             cacheWriteTokens: entry.cacheWriteTokens ?? 0,
+            videoTokens: entry.videoTokens ?? null,
             totalTokens: entry.totalTokens,
             cost,
             upstreamCost,
@@ -350,6 +353,30 @@ export class UsageService {
     // 物化「最后活跃」：提交后尽力而为（失败不影响计费）。
     // 仅当超过 5 分钟才真正写行——多数请求 0 行命中，不增加热路径的行锁与写放大。
     await this.touchLastActive(entry.userId);
+
+    // 返回明细主键：视频等异步任务需要靠它在后续查询里回填上游用量
+    return logId;
+  }
+
+  /**
+   * 回填视频任务的上游计费 token（`video-tokens`）。
+   *
+   * 视频是异步任务：建任务时上游还没计费，tokens 只在**状态查询**响应里出现，
+   * 因此由 `/v1/videos/{id}` 拿到后补写建任务那笔日志。只补一次（videoTokens IS NULL），
+   * 不改费用/用量聚合（视频按次计价，token 仅作观测与对账）。
+   */
+  async setVideoTokens(logId: string, videoTokens: number): Promise<void> {
+    if (!logId || !Number.isFinite(videoTokens) || videoTokens <= 0) return;
+    try {
+      await this.prisma.requestLog.updateMany({
+        where: { id: logId, videoTokens: null },
+        data: { videoTokens: Math.round(videoTokens) },
+      });
+    } catch (e) {
+      this.logger.warn(
+        `视频 token 回填失败 log=${logId} tokens=${videoTokens}: ${(e as Error)?.message}`,
+      );
+    }
   }
 
   /**
@@ -468,6 +495,7 @@ export class UsageService {
         completionTokens: true,
         cacheReadTokens: true,
         cacheWriteTokens: true,
+        videoTokens: true,
         totalTokens: true,
         cost: true,
         chargeable: true,
@@ -505,6 +533,8 @@ export class UsageService {
       // 缓存读/写价格与输入输出不同，追加在末尾（既有按列序解析的消费方不受影响）
       '缓存读tokens',
       '缓存写tokens',
+      // 视频任务的计费 token（video-tokens）：只有视频行有值，对话行为空
+      '视频tokens',
     ];
     const lines = [header.join(',')];
     for (const r of rows) {
@@ -528,6 +558,7 @@ export class UsageService {
           r.upstreamRequestId ?? '',
           r.cacheReadTokens,
           r.cacheWriteTokens,
+          r.videoTokens ?? '',
         ]
           .map(esc)
           .join(','),

@@ -33,6 +33,7 @@
   "logs.detail.channel": "渠道",
   "logs.detail.type": "类型",
   "logs.detail.totalTokens": "总 Tokens",
+  "logs.detail.videoTokens": "视频 Tokens（上游计费）",
   "logs.detail.cost": "费用",
   "logs.detail.latency": "延迟",
   "logs.detail.id": "日志 ID",

@@ -65,6 +65,27 @@ describe('VideoTaskService（视频任务 → 渠道进程内映射）', () => {
     expect(service.lookup('fresh')).toBeDefined();
   });
 
+  describe('attachLog（回填建任务日志 id）', () => {
+    it('属主一致 → 写入 logId', () => {
+      service.remember('t1', ref);
+      service.attachLog('t1', 'u1', 'log1');
+      expect(service.lookup('t1')?.logId).toBe('log1');
+    });
+
+    it('属主不符 → 忽略（不能把别人的日志挂到自己任务上）', () => {
+      service.remember('t1', ref);
+      service.attachLog('t1', 'u2', 'log1');
+      expect(service.lookup('t1')?.logId).toBeUndefined();
+    });
+
+    it('任务不存在 / 空参数 → 不抛错、不建表', () => {
+      service.attachLog('nope', 'u1', 'log1');
+      service.attachLog('', 'u1', 'log1');
+      service.attachLog('t1', 'u1', '');
+      expect(service.size()).toBe(0);
+    });
+  });
+
   describe('classify（状态/内容查询的属主准入）', () => {
     it('无映射 → missing（允许走探测兜底）', () => {
       expect(service.classify('nope', 'u1')).toEqual({ state: 'missing' });

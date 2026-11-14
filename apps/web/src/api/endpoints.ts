@@ -16,6 +16,7 @@ import {
   GenerateCodesResult,
   KeyTestResult,
   LogFilters,
+  MediaAssetRow,
   ModelGroup,
   ModelInfo,
   ModelOrigin,
@@ -631,6 +632,51 @@ export const withdrawalsApi = {
     const { data } = await api.patch<Withdrawal>(`/admin/withdrawals/${id}`, {
       action,
     });
+    return data;
+  },
+};
+
+export const assetsApi = {
+  async list(
+    params: {
+      page?: number;
+      pageSize?: number;
+      kind?: string;
+      status?: string;
+      model?: string;
+      scope?: string;
+    },
+    signal?: AbortSignal,
+  ) {
+    const { data } = await api.get<Paginated<MediaAssetRow>>('/assets', { params, signal });
+    return data;
+  },
+  async downloadUrl(id: string) {
+    const { data } = await api.get<{ url: string; expiresAt: string }>(`/assets/${id}/url`);
+    return data;
+  },
+  /** 经网关代理下载（带 Content-Disposition，跨域也可靠） */
+  async download(id: string) {
+    const res = await api.get(`/assets/${id}/content`, { responseType: 'blob' });
+    const disposition = String(res.headers?.['content-disposition'] ?? '');
+    const match = /filename="?([^";]+)"?/.exec(disposition);
+    return { blob: res.data as Blob, filename: match?.[1] ?? `asset-${id}` };
+  },
+  async retry(id: string) {
+    const { data } = await api.post(`/assets/${id}/retry`);
+    return data;
+  },
+  async remove(id: string) {
+    const { data } = await api.delete(`/assets/${id}`);
+    return data;
+  },
+  /** 一键清空：删除 COS 前缀下全部对象 + 成品记录（仅管理员） */
+  async purge() {
+    const { data } = await api.post<{
+      deletedObjects: number;
+      deletedRecords: number;
+      prefix: string;
+    }>('/assets/purge', null, { params: { confirm: 'DELETE_ALL' } });
     return data;
   },
 };

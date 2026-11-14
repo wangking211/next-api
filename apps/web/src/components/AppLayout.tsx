@@ -18,6 +18,7 @@ import {
   ClusterOutlined,
   PayCircleOutlined,
   CalculatorOutlined,
+  PictureOutlined,
 } from '@ant-design/icons';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -44,6 +45,7 @@ export default function AppLayout() {
       '/available-models',
       '/models',
       '/logs',
+      '/assets',
       '/usage-stats',
       '/reconciliation',
       '/billing',
@@ -67,6 +69,7 @@ export default function AppLayout() {
       '/available-models': t('layout.title.availableModels'),
       '/models': t('layout.title.models'),
       '/logs': t('layout.title.logs'),
+      '/assets': t('layout.title.assets'),
       '/usage-stats': t('layout.title.usageStats'),
       '/reconciliation': t('layout.title.reconciliation'),
       '/billing': t('layout.title.billing'),
@@ -97,6 +100,7 @@ export default function AppLayout() {
     { key: '/available-models', icon: <TagsOutlined />, label: t('layout.menu.availableModels') },
     { key: '/models', icon: <AppstoreOutlined />, label: t('layout.menu.models') },
     { key: '/logs', icon: <FileTextOutlined />, label: t('layout.menu.logs') },
+    { key: '/assets', icon: <PictureOutlined />, label: t('layout.menu.assets') },
     { key: '/usage-stats', icon: <BarChartOutlined />, label: t('layout.menu.usageStats') },
     {
       key: '/reconciliation',

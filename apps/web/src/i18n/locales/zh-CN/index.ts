@@ -8,6 +8,7 @@ import keys from './keys.json';
 import channels from './channels.json';
 import models from './models.json';
 import logs from './logs.json';
+import assets from './assets.json';
 import usage from './usage.json';
 import billing from './billing.json';
 import agent from './agent.json';
@@ -27,6 +28,7 @@ export default {
   ...channels,
   ...models,
   ...logs,
+  ...assets,
   ...usage,
   ...billing,
   ...agent,

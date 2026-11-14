@@ -301,6 +301,8 @@ export interface RequestLogDetail extends RequestLogRow {
   responsePreview: string | null;
   /** 上游请求 id（DeepSeek/Anthropic 等返回），逐笔对账用 */
   upstreamRequestId: string | null;
+  /** 视频任务的上游计费 token（video-tokens）；非视频任务为 null */
+  videoTokens: number | null;
 }
 
 /** 渠道×模型×日 对账行（金额为 USD 字符串；人民币列按当日汇率快照折算，汇率不可用为 null） */
@@ -618,4 +620,33 @@ export interface Withdrawal {
   reviewedAt: string | null;
   createdAt: string;
   user?: { id: string; username: string; email: string };
+}
+
+export type AssetKind = 'VIDEO' | 'IMAGE';
+export type AssetStatus = 'PENDING' | 'CAPTURING' | 'READY' | 'FAILED';
+
+/** 制成品（视频 / 图片）：网关侧留存的上游生成物，url 为 COS 预签名下载地址 */
+export interface MediaAssetRow {
+  id: string;
+  kind: AssetKind;
+  status: AssetStatus;
+  model: string;
+  /** 上游任务 id（视频）；图片通常为 null */
+  sourceTaskId: string | null;
+  /** 上游原始地址：仅供诊断，可能已过期 */
+  sourceUrl: string | null;
+  bytes: number | null;
+  contentType: string | null;
+  width: number | null;
+  height: number | null;
+  durationSeconds: number | null;
+  meta: Record<string, unknown> | null;
+  error: string | null;
+  createdAt: string;
+  readyAt: string | null;
+  user: { id: string; username: string } | null;
+  channel: { id: string; name: string; provider: string } | null;
+  /** 预签名下载地址（私有桶，约 1 小时有效）；未就绪为 null */
+  url: string | null;
+  urlExpiresAt: string | null;
 }

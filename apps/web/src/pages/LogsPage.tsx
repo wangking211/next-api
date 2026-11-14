@@ -414,6 +414,11 @@ export default function LogsPage() {
               <Descriptions.Item label={t('logs.detail.totalTokens')}>
                 {detail.totalTokens}
               </Descriptions.Item>
+              {detail.videoTokens != null && (
+                <Descriptions.Item label={t('logs.detail.videoTokens')}>
+                  {detail.videoTokens}
+                </Descriptions.Item>
+              )}
               <Descriptions.Item label={t('logs.detail.cost')}>
                 {detail.chargeable ? (
                   formatMoney(detail.cost)

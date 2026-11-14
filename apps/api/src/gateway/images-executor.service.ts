@@ -11,6 +11,7 @@ import { RoutingMetricsService } from './routing-metrics.service';
 import { ProviderRegistry } from './providers/provider.registry';
 import { ExecSupportService } from './exec-support.service';
 import { settleInBackground } from './settle.util';
+import { AssetCaptureService } from '../assets/asset-capture.service';
 import { upstreamErrorMessage } from './upstream-error.util';
 import { UpstreamError, openaiError } from './types';
 import type { GatewayRequest } from './types';
@@ -26,6 +27,7 @@ export class ImagesExecutorService {
     private readonly metrics: RoutingMetricsService,
     private readonly groups: GroupsService,
     private readonly support: ExecSupportService,
+    private readonly assets: AssetCaptureService,
   ) {}
 
   /**
@@ -145,31 +147,43 @@ export class ImagesExecutorService {
         // 先把响应写出去：客户端不必等 DB 事务 + Redis 写完
         const response = res.status(result.status).json(result.json);
         // 计费/健康度/路由指标互不依赖 → 响应写出后并行后台结算
+        const recorded = this.usage.record({
+          userId: user.id,
+          apiKeyId: apiKey.id,
+          channelId: channel.id,
+          model,
+          provider: channel.provider,
+          ...usage,
+          latencyMs: Date.now() - startedAt,
+          status: result.status,
+          chargeable: this.support.isChargeable(channel, user.id),
+          share: this.support.shareContext(channel, user.id),
+          isStream: false,
+          requestPreview,
+          responsePreview: `[images ${images}]`,
+          multiplier: billingInfo.value,
+          multiplierSource: billingInfo.source,
+          pricing,
+          ...(perCall
+            ? {
+                costOverride: pricePerCall * images * billingInfo.value,
+                upstreamCostOverride: costPerCall * images,
+              }
+            : {}),
+        });
         settleInBackground([
-          this.usage.record({
-            userId: user.id,
-            apiKeyId: apiKey.id,
-            channelId: channel.id,
-            model,
-            provider: channel.provider,
-            ...usage,
-            latencyMs: Date.now() - startedAt,
-            status: result.status,
-            chargeable: this.support.isChargeable(channel, user.id),
-            share: this.support.shareContext(channel, user.id),
-            isStream: false,
-            requestPreview,
-            responsePreview: `[images ${images}]`,
-            multiplier: billingInfo.value,
-            multiplierSource: billingInfo.source,
-            pricing,
-            ...(perCall
-              ? {
-                  costOverride: pricePerCall * images * billingInfo.value,
-                  upstreamCostOverride: costPerCall * images,
-                }
-              : {}),
-          }),
+          // 成品入库（旁路）：url / b64_json 逐张存对象存储，拿日志 id 关联
+          (async () => {
+            const logId = await recorded;
+            await this.assets.captureImages({
+              userId: user.id,
+              apiKeyId: apiKey.id,
+              channelId: channel.id,
+              model,
+              requestLogId: logId,
+              response: result.json,
+            });
+          })(),
           this.health.recordSuccess(channel.id, channel.failureCount),
           this.metrics.record(channel.id, model, 'ok', {
             latencyMs: Date.now() - attemptStart,

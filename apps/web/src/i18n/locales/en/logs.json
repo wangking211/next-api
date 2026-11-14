@@ -33,6 +33,7 @@
   "logs.detail.channel": "Channel",
   "logs.detail.type": "Type",
   "logs.detail.totalTokens": "Total Tokens",
+  "logs.detail.videoTokens": "Video Tokens (billed upstream)",
   "logs.detail.cost": "Cost",
   "logs.detail.latency": "Latency",
   "logs.detail.id": "Log ID",

@@ -5,6 +5,8 @@ interface VideoTaskRef {
   /** 对外规范模型名（用于状态查询时重新路由到同一渠道） */
   model: string;
   userId: string;
+  /** 建任务时落账的调用日志 id：状态查询拿到 video-tokens 后回填到该行 */
+  logId?: string;
   at: number;
 }
 
@@ -42,6 +44,17 @@ export class VideoTaskService {
       return undefined;
     }
     return hit;
+  }
+
+  /**
+   * 回填建任务那笔调用日志的 id（落账是后台异步的，拿不到就先记 mapping，
+   * 落账完成后再补这一笔）。属主不符一律忽略，避免把别人的日志 id 挂到自己任务上。
+   */
+  attachLog(taskId: string, userId: string, logId: string): void {
+    if (!taskId || !logId) return;
+    const hit = this.map.get(taskId);
+    if (!hit || hit.userId !== userId) return;
+    hit.logId = logId;
   }
 
   /**

@@ -1,4 +1,5 @@
 import {
+  extractVideoTokens,
   videoCompatCreateResponse,
   videoCompatRequestBody,
   videoCompatStatusResponse,
@@ -116,5 +117,32 @@ describe('videoCompatStatusResponse（状态响应）', () => {
       status: 'unknown',
     });
     expect(videoCompatStatusResponse({}, url)).toEqual({ status: 'unknown' });
+  });
+});
+
+describe('extractVideoTokens（视频计费 token 采集）', () => {
+  it('OpenAI 视频协议：取顶层 video-tokens', () => {
+    expect(extractVideoTokens({ id: 't', status: 'completed', 'video-tokens': 40176 })).toBe(40176);
+  });
+
+  it('snake_case video_tokens 也识别', () => {
+    expect(extractVideoTokens({ video_tokens: 8192 })).toBe(8192);
+  });
+
+  it('火山方舟 usage.total_tokens / completion_tokens 回退', () => {
+    expect(extractVideoTokens({ usage: { total_tokens: 1234 } })).toBe(1234);
+    expect(extractVideoTokens({ usage: { completion_tokens: 99 } })).toBe(99);
+  });
+
+  it('字符串数值可解析（上游有的返回 string）', () => {
+    expect(extractVideoTokens({ 'video-tokens': '40176' })).toBe(40176);
+  });
+
+  it('缺失/0/负数/非数值 → undefined（不把未知记成 0）', () => {
+    expect(extractVideoTokens({})).toBeUndefined();
+    expect(extractVideoTokens(null)).toBeUndefined();
+    expect(extractVideoTokens({ 'video-tokens': 0 })).toBeUndefined();
+    expect(extractVideoTokens({ 'video-tokens': -1 })).toBeUndefined();
+    expect(extractVideoTokens({ 'video-tokens': 'n/a' })).toBeUndefined();
   });
 });

@@ -33,6 +33,7 @@
   "logs.detail.channel": "渠道",
   "logs.detail.type": "類型",
   "logs.detail.totalTokens": "總 Tokens",
+  "logs.detail.videoTokens": "影片 Tokens（上游計費）",
   "logs.detail.cost": "費用",
   "logs.detail.latency": "延遲",
   "logs.detail.id": "日誌 ID",

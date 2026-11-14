@@ -53,3 +53,24 @@ export function videoCompatStatusResponse(
     ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
   };
 }
+
+/**
+ * 取上游视频任务消耗的计费 token。
+ *
+ * 两种上游形状：
+ * - OpenAI 视频协议（破晓站等）：**状态查询**响应顶层 `video-tokens`（建任务时还没有）
+ * - 火山方舟 v3 协议：`usage.completion_tokens` / `usage.total_tokens`
+ *
+ * 取不到或非正数一律返回 undefined（= 未知，不写 0，避免把「没拿到」记成「消耗为 0」）。
+ */
+export function extractVideoTokens(
+  json: Record<string, any> | null | undefined,
+): number | undefined {
+  const raw =
+    json?.['video-tokens'] ??
+    json?.video_tokens ??
+    json?.usage?.total_tokens ??
+    json?.usage?.completion_tokens;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : undefined;
+}

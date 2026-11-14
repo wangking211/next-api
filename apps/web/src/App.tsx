@@ -17,6 +17,7 @@ const ChannelsPage = lazy(() => import('./pages/ChannelsPage'));
 const AvailableModelsPage = lazy(() => import('./pages/AvailableModelsPage'));
 const ModelsPage = lazy(() => import('./pages/ModelsPage'));
 const LogsPage = lazy(() => import('./pages/LogsPage'));
+const AssetsPage = lazy(() => import('./pages/AssetsPage'));
 const UsageStatsPage = lazy(() => import('./pages/UsageStatsPage'));
 const ReconciliationPage = lazy(() => import('./pages/ReconciliationPage'));
 const BillingPage = lazy(() => import('./pages/BillingPage'));
@@ -54,6 +55,7 @@ export default function App() {
                 <Route path="/available-models" element={<AvailableModelsPage />} />
                 <Route path="/models" element={<ModelsPage />} />
                 <Route path="/logs" element={<LogsPage />} />
+                <Route path="/assets" element={<AssetsPage />} />
                 <Route path="/usage-stats" element={<UsageStatsPage />} />
                 <Route path="/reconciliation" element={<ReconciliationPage />} />
                 <Route path="/billing" element={<BillingPage />} />

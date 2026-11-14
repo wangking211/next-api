@@ -24,6 +24,7 @@ import { AgentModule } from './agent/agent.module';
 import { WithdrawalModule } from './billing/withdrawal.module';
 import { PaymentModule } from './billing/payment.module';
 import { ObservabilityModule } from './observability/observability.module';
+import { AssetsModule } from './assets/assets.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { ObservabilityModule } from './observability/observability.module';
     WithdrawalModule,
     PaymentModule,
     ObservabilityModule,
+    AssetsModule,
   ],
   providers: [
     // 全局守卫：控制台 /api/** 每 IP 全局限流（/v1 在守卫内直接跳过）

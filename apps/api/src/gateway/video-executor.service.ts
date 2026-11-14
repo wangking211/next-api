@@ -18,6 +18,8 @@ import { ProviderRegistry } from './providers/provider.registry';
 import { ExecSupportService } from './exec-support.service';
 import { settleInBackground } from './settle.util';
 import { VideoTaskService } from './video-task.service';
+import { AssetCaptureService } from '../assets/asset-capture.service';
+import { extractVideoTokens } from './video-compat.util';
 import { upstreamErrorMessage } from './upstream-error.util';
 import { UpstreamError, openaiError } from './types';
 import type { GatewayRequest, ResolvedChannel } from './types';
@@ -38,6 +40,7 @@ export class VideoExecutorService {
     private readonly metrics: RoutingMetricsService,
     private readonly groups: GroupsService,
     private readonly videoTasks: VideoTaskService,
+    private readonly assets: AssetCaptureService,
     private readonly support: ExecSupportService,
     config: ConfigService,
   ) {
@@ -153,6 +156,8 @@ export class VideoExecutorService {
         const usage = result.usage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
         const perCall = pricePerCall > 0;
         const taskId = typeof result.json?.id === 'string' ? result.json.id : '';
+        // 少数上游建任务时就把 video-tokens 给了；多数要等状态查询（见 executeVideoStatus 回填）
+        const videoTokens = extractVideoTokens(result.json);
         if (taskId) {
           // 记住任务落在哪家上游：状态/内容查询必须问同一家
           this.videoTasks.remember(taskId, {
@@ -165,32 +170,57 @@ export class VideoExecutorService {
         const response = res
           .status(result.status)
           .json(mapResponse ? mapResponse(result.json) : result.json);
+        // 成品登记（旁路）：此时上游还没产出，先记 PENDING，等状态查询/后台补扫抓取
+        const registered = taskId
+          ? this.assets.registerVideo({
+              userId: user.id,
+              apiKeyId: apiKey.id,
+              channelId: channel.id,
+              model,
+              taskId,
+              meta: {
+                ...(body?.seconds !== undefined ? { seconds: body.seconds } : {}),
+                ...(body?.resolution !== undefined ? { resolution: body.resolution } : {}),
+                ...(body?.ratio !== undefined ? { ratio: body.ratio } : {}),
+                ...(body?.duration !== undefined ? { duration: body.duration } : {}),
+              },
+            })
+          : Promise.resolve(null);
         // 计费/健康度/路由指标互不依赖 → 响应写出后并行后台结算
+        const recorded = this.usage.record({
+          userId: user.id,
+          apiKeyId: apiKey.id,
+          channelId: channel.id,
+          model,
+          provider: channel.provider,
+          ...usage,
+          ...(videoTokens ? { videoTokens } : {}),
+          latencyMs: Date.now() - startedAt,
+          status: result.status,
+          chargeable: this.support.isChargeable(channel, user.id),
+          share: this.support.shareContext(channel, user.id),
+          isStream: false,
+          requestPreview,
+          responsePreview: taskId ? `[video task ${taskId}]` : '[video task]',
+          multiplier: billingInfo.value,
+          multiplierSource: billingInfo.source,
+          pricing,
+          ...(perCall
+            ? {
+                costOverride: pricePerCall * billingInfo.value,
+                upstreamCostOverride: costPerCall,
+              }
+            : {}),
+        });
         settleInBackground([
-          this.usage.record({
-            userId: user.id,
-            apiKeyId: apiKey.id,
-            channelId: channel.id,
-            model,
-            provider: channel.provider,
-            ...usage,
-            latencyMs: Date.now() - startedAt,
-            status: result.status,
-            chargeable: this.support.isChargeable(channel, user.id),
-            share: this.support.shareContext(channel, user.id),
-            isStream: false,
-            requestPreview,
-            responsePreview: taskId ? `[video task ${taskId}]` : '[video task]',
-            multiplier: billingInfo.value,
-            multiplierSource: billingInfo.source,
-            pricing,
-            ...(perCall
-              ? {
-                  costOverride: pricePerCall * billingInfo.value,
-                  upstreamCostOverride: costPerCall,
-                }
-              : {}),
-          }),
+          // 落账拿到日志 id 后回填任务映射与成品行：后续状态查询靠它把
+          // video-tokens 写回同一行日志，成品详情也能跳到调用记录
+          (async () => {
+            const logId = await recorded;
+            if (logId && taskId) this.videoTasks.attachLog(taskId, user.id, logId);
+            const assetId = await registered;
+            if (logId && assetId) await this.assets.attachLog(assetId, logId);
+          })(),
           this.health.recordSuccess(channel.id, channel.failureCount),
           this.metrics.record(channel.id, model, 'ok', {
             latencyMs: Date.now() - attemptStart,
@@ -270,6 +300,10 @@ export class VideoExecutorService {
       return res.status(400).json(err('Invalid video task id'));
     }
 
+    // 建任务那笔日志 id：拿到 video-tokens 后回填（进程重启后映射丢失 → 不回填，不影响主流程）
+    const known = this.videoTasks.lookup(taskId);
+    const logId = known?.userId === req.gateway.user.id ? known.logId : undefined;
+
     const candidates = await this.videoCandidates(req, taskId);
     let lastError: UpstreamError | null = null;
     for (const { c, model: resolvedModel } of candidates) {
@@ -283,7 +317,15 @@ export class VideoExecutorService {
           channelId: c.channel.id,
           model,
           userId: req.gateway.user.id,
+          ...(logId ? { logId } : {}),
         });
+        // 上游把计费 token 放在状态响应里（video-tokens / usage.*）：写回建任务那笔日志
+        const videoTokens = extractVideoTokens(result.json);
+        if (videoTokens && logId) void this.usage.setVideoTokens(logId, videoTokens);
+        // 上游已完成：旁路抓取原件保存到对象存储（幂等；失败不影响状态查询）
+        if (result.json?.status === 'completed' || result.json?.status === 'succeeded') {
+          void this.assets.captureVideoTask(taskId, req.gateway.user.id);
+        }
         return res.status(result.status).json(mapResponse ? mapResponse(result.json) : result.json);
       } catch (e) {
         if (e instanceof UpstreamError) {
@@ -320,6 +362,8 @@ export class VideoExecutorService {
           Readable.fromWeb(upstream.stream as Parameters<typeof Readable.fromWeb>[0]),
           res,
         );
+        // 用户下载成功后再旁路存一份（顺序执行，避免与本次下载抢上游带宽）
+        void this.assets.captureVideoTask(taskId, req.gateway.user.id);
         return;
       } catch (e) {
         if (res.headersSent) return; // 已开始写流：不能再改写响应

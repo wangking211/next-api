@@ -16,9 +16,10 @@ import { ResponseCacheService } from './response-cache.service';
 import { UsageModule } from '../usage/usage.module';
 import { BillingModule } from '../billing/billing.module';
 import { GroupsModule } from '../groups/groups.module';
+import { AssetsModule } from '../assets/assets.module';
 
 @Module({
-  imports: [UsageModule, BillingModule, ProvidersModule, GroupsModule],
+  imports: [UsageModule, BillingModule, ProvidersModule, GroupsModule, AssetsModule],
   controllers: [GatewayController],
   providers: [
     ApiKeyGuard,

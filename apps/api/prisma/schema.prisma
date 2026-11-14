@@ -53,6 +53,7 @@ model User {
   balanceTxs  BalanceTransaction[]
   withdrawals WithdrawalRequest[]
   payments    PaymentOrder[]
+  assets      MediaAsset[]
 
   @@index([lastActiveAt])
   // 代理/分销维度：按 agentId 聚合名下成员（overview/members 的关系过滤走这里）
@@ -323,6 +324,7 @@ model Channel {
 
   logs RequestLog[]
   modelPrices ChannelModel[]
+  assets MediaAsset[]
 
   @@index([ownerUserId])
   @@index([ownerType, status])
@@ -466,6 +468,10 @@ model RequestLog {
   cacheReadTokens  Int      @default(0)
   cacheWriteTokens Int      @default(0)
   totalTokens      Int      @default(0)
+  /// 视频任务的上游计费 token（上游 `video-tokens` / `usage.total_tokens`）。
+  /// 刻意不并入 totalTokens 与 UsageDaily：视频 token 与对话 token 不同量纲，
+  /// 混入会污染 TPM 限额、日聚合图表与按 token 计价的口径。仅作观测/对账。
+  videoTokens      Int?
   cost             Decimal  @default(0) @db.Decimal(18, 6)
   upstreamCost     Decimal  @default(0) @db.Decimal(18, 6)
   /// 本次调用是否实际扣费：平台渠道 true；用户自有 BYOK 渠道 false（此时 cost 仅为折算金额，不进余额）
@@ -518,4 +524,63 @@ model UsageDaily {
   @@index([apiKeyId, date])
   // 管理端按日期维度聚合（不带 userId 过滤）走这里
   @@index([date])
+}
+
+/// 制成品：网关侧留存的上游生成物（视频 / 图片）。
+///
+/// 为什么落库 + 存对象存储：上游只保留很短时间（破晓站任务约 24h），
+/// 网关的 `/v1/videos/{id}/content` 只是流式透传，服务端不留副本。
+/// 成品保存一份到 COS 后，用户与管理员可长期查看/下载，且不依赖上游存活。
+model MediaAsset {
+  id           String      @id @default(uuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// 触发调用的 Key（可空：Key 被删后成品仍保留）
+  apiKeyId     String?
+  channelId    String?
+  channel      Channel?    @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  /// 建任务那笔调用日志（视频）；图片为本次生成请求
+  requestLogId String?
+  kind         AssetKind
+  status       AssetStatus @default(PENDING)
+  /// 对外规范模型名（不是上游名）
+  model        String
+  /// 上游任务 id（视频）。同一任务只登记一条成品
+  sourceTaskId String?     @unique
+  /// 上游原始地址：仅作诊断，通常很快过期，不能当长期下载地址
+  sourceUrl    String?
+  /// COS 对象 key（含 ASSET_COS_PREFIX，便于按前缀一键清理）
+  storageKey   String?
+  bytes        Int?
+  contentType  String?
+  width        Int?
+  height       Int?
+  durationSeconds Int?
+  /// 体积小的原始元数据（video-tokens / revised_prompt 等）；不存 base64
+  meta         Json?
+  /// 失败原因（脱敏、截断）
+  error        String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  readyAt      DateTime?
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([kind, createdAt])
+  @@index([channelId])
+}
+
+enum AssetKind {
+  VIDEO
+  IMAGE
+}
+
+enum AssetStatus {
+  /// 已登记、等待上游产出
+  PENDING
+  /// 正在从上游抓取并上传 COS
+  CAPTURING
+  /// 已保存，可下载
+  READY
+  FAILED
 }

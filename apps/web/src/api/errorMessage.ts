@@ -81,6 +81,13 @@ const ERROR_CODE_KEYS = {
   GROUP_DEFAULT_UNREMOVABLE: 'err.group.defaultUnremovable',
   MODEL_NOT_FOUND: 'err.model.notFound',
   API_KEY_NOT_FOUND: 'err.key.notFound',
+  // —— 制成品（视频 / 图片）——
+  ASSET_NOT_FOUND: 'err.asset.notFound',
+  ASSET_NOT_READY: 'err.asset.notReady',
+  ASSET_STORAGE_DISABLED: 'err.asset.storageDisabled',
+  ASSET_ADMIN_ONLY: 'err.asset.adminOnly',
+  ASSET_PURGE_CONFIRM_REQUIRED: 'err.asset.purgeConfirmRequired',
+  ASSET_FETCH_FAILED: 'err.asset.fetchFailed',
   // —— 上游地址安全校验（SSRF）——
   URL_UNSAFE_INVALID_URL: 'err.url.invalid',
   URL_UNSAFE_SCHEME: 'err.url.scheme',

@@ -24,6 +24,7 @@ function makeService() {
     requestLog: {
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       // 幂等判定用（billingCommitted）：默认 null = 未落账，按「可重试」处理
       findUnique: jest.fn().mockResolvedValue(null),
     },
@@ -143,7 +144,9 @@ describe('UsageService 计费口径', () => {
     const { service, prisma, billing } = makeService();
     prisma.user.updateMany.mockRejectedValueOnce(new Error('db down'));
 
-    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toBeUndefined();
+    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toEqual(
+      expect.any(String),
+    );
 
     expect(billing.recordConsumption).toHaveBeenCalled();
     expect(prisma.usageDaily.create).toHaveBeenCalled();
@@ -280,7 +283,9 @@ describe('UsageService 计费事务重试', () => {
       .mockImplementationOnce((cb: any) => cb(tx));
     const errSpy = jest.spyOn(service['logger'], 'error');
 
-    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toBeUndefined();
+    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toEqual(
+      expect.any(String),
+    );
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
     // 重试成功后下游照常：日聚合 + 刷新最后活跃
@@ -313,7 +318,9 @@ describe('UsageService 计费事务重试', () => {
     prisma.requestLog.findUnique = jest.fn().mockResolvedValue({ id: 'logId' });
     const errSpy = jest.spyOn(service['logger'], 'error');
 
-    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toBeUndefined();
+    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toEqual(
+      expect.any(String),
+    );
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1); // 已落账 → 绝不重试
     expect(errSpy).not.toHaveBeenCalled();
@@ -333,7 +340,9 @@ describe('UsageService 计费事务重试', () => {
       .mockImplementationOnce((cb: any) => cb(tx));
     prisma.requestLog.findUnique = jest.fn().mockResolvedValue(null); // 首次已回滚判定
 
-    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toBeUndefined();
+    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toEqual(
+      expect.any(String),
+    );
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
     const ids = tx.requestLog.create.mock.calls.map((c: any) => c[0].data.id);
@@ -353,7 +362,9 @@ describe('UsageService 计费事务重试', () => {
     const errSpy = jest.spyOn(service['logger'], 'error');
     const warnSpy = jest.spyOn(service['logger'], 'warn');
 
-    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toBeUndefined();
+    await expect(service.record({ ...baseEntry, chargeable: true })).resolves.toEqual(
+      expect.any(String),
+    );
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
     expect(errSpy).not.toHaveBeenCalled(); // 落账成功，绝不误报计费丢失
@@ -434,6 +445,7 @@ describe('UsageService 日志 Token 明细（缓存读/写）', () => {
         completionTokens: 20,
         cacheReadTokens: 64,
         cacheWriteTokens: 8,
+        videoTokens: null,
         totalTokens: 120,
         cost: '0.000120',
         chargeable: true,
@@ -451,8 +463,92 @@ describe('UsageService 日志 Token 明细（缓存读/写）', () => {
     const [header, row] = csv.split('\n');
 
     expect(header).toContain('输入tokens,输出tokens,总tokens');
-    expect(header.endsWith(',缓存读tokens,缓存写tokens')).toBe(true);
-    expect(row.endsWith(',64,8')).toBe(true);
+    expect(header.endsWith(',缓存读tokens,缓存写tokens,视频tokens')).toBe(true);
+    // 视频列为空时导出空串，不写 0（0 会被误读成「视频消耗为 0」）
+    expect(row.endsWith(',64,8,')).toBe(true);
+  });
+
+  it('视频行导出 videoTokens 数值', async () => {
+    const { service, prisma } = makeService();
+    prisma.requestLog.findMany.mockResolvedValue([
+      {
+        createdAt: new Date('2026-11-13T06:43:16Z'),
+        model: 'seedance-2.0',
+        provider: 'openai',
+        isStream: false,
+        promptTokens: 0,
+        completionTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        videoTokens: 40176,
+        totalTokens: 0,
+        cost: '0',
+        chargeable: false,
+        commission: '0',
+        latencyMs: 1846,
+        status: 200,
+        errorMessage: null,
+        upstreamRequestId: null,
+        apiKey: null,
+        channel: null,
+      },
+    ]);
+
+    const csv = await service.exportLogs('user1', {});
+    expect(csv.split('\n')[1].endsWith(',0,0,40176')).toBe(true);
+  });
+});
+
+describe('UsageService 视频 token 采集', () => {
+  it('record 把 videoTokens 写入明细并返回日志 id', async () => {
+    const { service, tx } = makeService();
+
+    const logId = await service.record({ ...baseEntry, videoTokens: 40176, totalTokens: 0 });
+
+    // 返回的 id 即预生成主键（后续状态查询靠它回填 video-tokens）
+    expect(typeof logId).toBe('string');
+    expect(tx.requestLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ id: logId, videoTokens: 40176 }),
+    });
+  });
+
+  it('无 videoTokens 时写 null（对话调用保持未知语义）', async () => {
+    const { service, tx } = makeService();
+
+    await service.record(baseEntry);
+
+    expect(tx.requestLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ videoTokens: null }),
+    });
+  });
+
+  it('setVideoTokens 只在尚未回填时写一次', async () => {
+    const { service, prisma } = makeService();
+
+    await service.setVideoTokens('log1', 40176);
+
+    expect(prisma.requestLog.updateMany).toHaveBeenCalledWith({
+      where: { id: 'log1', videoTokens: null },
+      data: { videoTokens: 40176 },
+    });
+  });
+
+  it('setVideoTokens 忽略非正数/空 id，不产生写', async () => {
+    const { service, prisma } = makeService();
+
+    await service.setVideoTokens('log1', 0);
+    await service.setVideoTokens('log1', -1);
+    await service.setVideoTokens('log1', Number.NaN);
+    await service.setVideoTokens('', 100);
+
+    expect(prisma.requestLog.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('setVideoTokens 写入失败只记日志，不抛出', async () => {
+    const { service, prisma } = makeService();
+    prisma.requestLog.updateMany.mockRejectedValue(new Error('db down'));
+
+    await expect(service.setVideoTokens('log1', 40176)).resolves.toBeUndefined();
   });
 });
 
